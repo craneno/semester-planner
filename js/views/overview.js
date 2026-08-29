@@ -1,19 +1,29 @@
-// views/overview.js — the semester at a glance. Awareness, not alarm.
+// views/overview.js — the whole day on one page. Awareness, not alarm.
+//
+// Left is today as it will actually happen: classes, calendar events, the work
+// you planned. Right is what you decide about it. There is no separate Today
+// page; this is it.
 
-import { h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtHours, fmtDuration, diffDays } from '../util.js';
 import {
-  state, commit, upcoming, overdue, workloadFor, semesterProgress,
-  weekNumber, categoryLoad, note
+  h, clear, today, startOfWeek, weekDays, fmtDate, fmtTime, fmtHours, fmtDuration,
+  toMin, DOW_LONG, MONTHS, parseYmd, debounce
+} from '../util.js';
+import {
+  state, commit, toggleItem, upcoming, overdue, workloadFor, semesterProgress,
+  weekNumber, categoryLoad, note, areaColor, areaName, classesOn, eventsOn,
+  itemsDueOn, itemsPlannedOn
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { captureStrip } from '../capture.js';
+import { pushItem } from '../gcal.js';
 
 export function renderOverview(root, { navigate, go }) {
   clear(root);
   const pad = h('div', { class: 'pad' });
+  const day = today();
   const ws = state.settings.weekStart;
-  const days = weekDays(startOfWeek(today(), ws));
+  const days = weekDays(startOfWeek(day, ws));
   const load = workloadFor(days);
   const late = overdue();
   const soon = upcoming(14);
@@ -36,22 +46,115 @@ export function renderOverview(root, { navigate, go }) {
 
   pad.append(captureStrip(navigate));
 
-  /* three cards */
-  const cards = h('div', { class: 'grid cols-3', style: { marginBottom: '18px' } });
+  pad.append(h('div', { class: 'overview-split' },
+    todayColumn(day, { navigate, go }),
+    decisionColumn(day, { navigate, go, soon })));
 
-  // focus
-  const n = note(today());
-  const top3 = soon.filter((t) => !t.done).slice(0, 3);
-  cards.append(h('section', { class: 'card' },
-    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Focus'), h('div', { style: { flex: 1 } }),
-      h('button', { class: 'btn ghost sm', onclick: () => go('today') }, 'Today →')),
-    h('div', { class: 'card-b' },
-      n.focus
-        ? h('p', { style: { margin: '0 0 10px', fontWeight: 550 } }, n.focus)
-        : h('p', { style: { margin: '0 0 10px', color: 'var(--ink-3)' } }, 'No focus set for today.'),
-      ...(top3.length ? top3.map((t) => itemLine(t, navigate)) : [h('span', { style: { color: 'var(--ink-3)' } }, 'Nothing due in the next two weeks.')]))));
+  pad.append(deadlines(soon, late, { navigate, go }));
+  root.append(pad);
+}
 
-  // open work, split the way the sidebar splits it
+/* ---------------- left: today, in order ---------------- */
+
+function todayColumn(day, { navigate, go }) {
+  const d = parseYmd(day);
+  const hour12 = state.settings.hour12;
+  const col = h('section', { class: 'card today-col' });
+
+  col.append(h('div', { class: 'card-h' },
+    h('span', { class: 'eyebrow' }, DOW_LONG[d.getDay()]),
+    h('span', { class: 'today-date' }, `${MONTHS[d.getMonth()]} ${d.getDate()}`),
+    h('div', { style: { flex: 1 } }),
+    h('button', { class: 'btn ghost sm', onclick: () => go('week') }, 'Week →')));
+
+  const entries = [];
+  for (const c of classesOn(day)) {
+    entries.push({
+      sort: toMin(c.start), when: fmtTime(c.start, hour12),
+      label: c.title, meta: c.location || 'class', color: c.color
+    });
+  }
+  for (const e of eventsOn(day)) {
+    entries.push({
+      sort: e.allDay ? -1 : toMin(e.start),
+      when: e.allDay ? 'all day' : fmtTime(e.start, hour12),
+      label: e.title, meta: e.location, color: null, ext: true, link: e.link
+    });
+  }
+  for (const t of itemsPlannedOn(day)) {
+    entries.push({
+      sort: t.plan.start ? toMin(t.plan.start) : 24 * 60,
+      when: t.plan.start ? fmtTime(t.plan.start, hour12) : '—',
+      label: t.title, meta: `${areaName(t.areaId)} · ${fmtDuration(t.plan.mins || t.estMins)}`,
+      color: areaColor(t.areaId), id: t.id, done: t.done
+    });
+  }
+  entries.sort((a, b) => a.sort - b.sort);
+
+  const body = h('div', { class: 'card-b' });
+  if (!entries.length) {
+    body.append(h('div', { class: 'empty', style: { padding: '20px 0' } },
+      h('p', { style: { margin: 0, color: 'var(--ink-2)' } }, 'A clear day.')));
+  }
+  const agenda = h('div', { class: 'agenda' });
+  for (const e of entries) {
+    agenda.append(h('div', {
+      class: 'agenda-row' + (e.ext ? ' ext' : ''),
+      style: { '--c': e.color || 'var(--ink-3)', opacity: e.done ? .5 : 1 },
+      onclick: () => { if (e.id) openItem(e.id); else if (e.link) window.open(e.link, '_blank', 'noopener'); }
+    },
+    h('span', { class: 'when' }, e.when),
+    h('span', { class: 'rulebar' }),
+    h('span', {
+      class: 'title',
+      style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: e.done ? 'line-through' : 'none' }
+    }, e.label),
+    h('span', { class: 'eyebrow' }, e.meta || '')));
+  }
+  body.append(agenda);
+  col.append(body);
+  return col;
+}
+
+/* ---------------- right: what to do about it ---------------- */
+
+function decisionColumn(day, { navigate, go, soon }) {
+  const col = h('div', { class: 'overview-side' });
+  const n = note(day);
+
+  /* focus + today's three */
+  const focus = h('div', { class: 'card-b' });
+  focus.append(h('input', {
+    class: 'focus-line', value: n.focus, placeholder: 'The one thing that matters today',
+    'aria-label': "Today's focus",
+    oninput: debounce((e) => commit(() => { n.focus = e.target.value; }), 400)
+  }));
+
+  const planned = itemsPlannedOn(day);
+  const due = itemsDueOn(day).filter((t) => !planned.includes(t));
+  const candidates = [...planned, ...due];
+  const chosen = (n.top3 || []).map((id) => state.items.find((t) => t.id === id)).filter(Boolean);
+  const three = chosen.length ? chosen : candidates.slice(0, 3);
+
+  focus.append(h('div', { class: 'eyebrow', style: { margin: '16px 0 4px' } }, 'Top three'));
+  if (!three.length) {
+    focus.append(h('p', { style: { margin: 0, color: 'var(--ink-3)', fontSize: '13px' } },
+      'Nothing planned for today. Drag work in from the Week view.'));
+  }
+  for (const t of three) focus.append(line(t, navigate));
+
+  if (candidates.length > three.length) {
+    focus.append(h('details', { style: { marginTop: '8px' } },
+      h('summary', { class: 'eyebrow', style: { cursor: 'pointer' } },
+        `Everything today (${candidates.length})`),
+      ...candidates.slice(three.length).map((t) => line(t, navigate))));
+  }
+
+  col.append(h('section', { class: 'card' },
+    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Focus')),
+    focus));
+
+  /* open work, split the way the sidebar splits it */
   const byCat = h('div', { class: 'card-b' });
   const loads = categoryLoad();
   const busiest = Math.max(1, ...loads.map((c) => c.open));
@@ -63,40 +166,29 @@ export function renderOverview(root, { navigate, go }) {
     h('div', { class: 'cat-load-h' },
       h('span', { class: 'cat-load-name' }, c.label),
       h('span', { class: 'eyebrow num' }, c.open ? `${c.open} · ${fmtHours(c.mins)}` : '—')),
-    h('div', { class: 'meter' },
-      h('span', { style: { width: (c.open / busiest) * 100 + '%' } }))));
+    h('div', { class: 'meter' }, h('span', { style: { width: (c.open / busiest) * 100 + '%' } }))));
   }
-  cards.append(h('section', { class: 'card' },
+  col.append(h('section', { class: 'card' },
     h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Open work'), h('div', { style: { flex: 1 } }),
       h('button', { class: 'btn ghost sm', onclick: () => go('semester') }, 'All →')),
     byCat));
 
-  // areas
-  const areaCard = h('div', { class: 'card-b' });
-  const active = state.areas.filter((a) => !a.archived);
-  if (!active.length) {
-    areaCard.append(h('span', { style: { color: 'var(--ink-3)' } }, 'No courses or projects yet.'));
-  }
-  for (const a of active.slice(0, 6)) {
-    const mine = state.items.filter((t) => t.areaId === a.id);
-    const done = mine.filter((t) => t.done).length;
-    const p = mine.length ? Math.round((done / mine.length) * 100) : 0;
-    areaCard.append(h('div', { style: { margin: '0 0 9px' } },
-      h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' } },
-        h('span', { class: 'dot', style: { background: a.color } }),
-        h('span', { style: { fontSize: '13px' } }, a.name),
-        h('span', { style: { flex: 1 } }),
-        h('span', { class: 'eyebrow num' }, `${done}/${mine.length}`)),
-      h('div', { class: 'meter' }, h('span', { style: { width: p + '%', background: a.color } }))));
-  }
-  cards.append(h('section', { class: 'card' },
-    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Areas'), h('div', { style: { flex: 1 } }),
-      h('button', { class: 'btn ghost sm', onclick: () => go('course') }, 'Courses →')),
-    areaCard));
+  /* end of day */
+  col.append(h('section', { class: 'card' },
+    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'End of day')),
+    h('div', { class: 'card-b' },
+      h('textarea', {
+        placeholder: 'What moved, what stalled, what tomorrow needs.',
+        style: { minHeight: '90px' },
+        oninput: debounce((e) => commit(() => { n.text = e.target.value; }), 500)
+      }, n.text || ''))));
 
-  pad.append(cards);
+  return col;
+}
 
-  /* deadlines */
+/* ---------------- below: the fortnight ---------------- */
+
+function deadlines(soon, late, { navigate, go }) {
   const list = h('section', {});
   list.append(h('div', { class: 'group-h' },
     h('h2', {}, 'Next two weeks'),
@@ -114,29 +206,33 @@ export function renderOverview(root, { navigate, go }) {
       h('button', { class: 'btn primary', onclick: () => go('semester') }, 'Go to Semester')));
   }
   for (const t of soon) list.append(row(t, navigate));
-
-  pad.append(list);
-  root.append(pad);
+  return list;
 }
 
-function itemLine(t, navigate) {
-  return h('div', { class: 'row', style: { gridTemplateColumns: '22px minmax(0,1fr) auto', borderBottom: 0, padding: '4px 0' }, onclick: () => openItem(t.id) },
-    h('input', {
-      type: 'checkbox', class: 'check sm', checked: t.done,
-      onclick: (e) => e.stopPropagation(),
-      onchange: (e) => { commit(() => { t.done = e.target.checked; t.doneAt = e.target.checked ? new Date().toISOString() : null; }); navigate(); }
-    }),
-    h('span', { class: 'title', style: { fontSize: '13.5px' } }, t.title),
-    meta(dueChip(t)));
+const check = (t, navigate) => h('input', {
+  type: 'checkbox', class: 'check', checked: t.done, 'aria-label': `Mark ${t.title} complete`,
+  onclick: (e) => e.stopPropagation(),
+  onchange: (e) => {
+    commit(() => toggleItem(t.id, e.target.checked));
+    pushItem(t.id).catch(() => {});
+    navigate();
+  }
+});
+
+function line(t, navigate) {
+  return h('div', {
+    class: 'row' + (t.done ? ' done' : ''),
+    style: { gridTemplateColumns: '22px minmax(0,1fr) auto', borderBottom: 0, padding: '4px 0' },
+    onclick: () => openItem(t.id)
+  },
+  check(t, navigate),
+  h('span', { class: 'title', style: { fontSize: '13.5px' } }, t.title),
+  meta(dueChip(t)));
 }
 
 function row(t, navigate) {
   return h('div', { class: 'row' + (t.done ? ' done' : ''), onclick: () => openItem(t.id) },
-    h('input', {
-      type: 'checkbox', class: 'check', checked: t.done,
-      onclick: (e) => e.stopPropagation(),
-      onchange: (e) => { commit(() => { t.done = e.target.checked; t.doneAt = e.target.checked ? new Date().toISOString() : null; }); navigate(); }
-    }),
+    check(t, navigate),
     h('span', { class: 'title' }, t.title),
     meta(
       areaTag(t.areaId),

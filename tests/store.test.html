@@ -139,6 +139,63 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       s.categoryLoad().length === s.AREA_CATEGORIES.length);
   }
 
+  /* ---- ordering ---- */
+
+  {
+    const s = await storeWith(v4({
+      areas: [
+        { id: 'a1', name: 'Thermo', kind: 'course' },
+        { id: 'a2', name: 'Dynamics', kind: 'course' },
+        { id: 'a3', name: 'Orgo', kind: 'course' },
+        { id: 'p1', name: 'Rocket', kind: 'thesis' }
+      ]
+    }));
+    check('areas get an order on migration',
+      s.areasInCategory('course').every((a) => Number.isFinite(a.order)));
+    check('the first order is the existing arrangement',
+      s.areasInCategory('course').map((a) => a.name).join() === 'Thermo,Dynamics,Orgo');
+
+    s.reorderAreas('course', ['a3', 'a1', 'a2']);
+    check('reordering rewrites the order',
+      s.areasInCategory('course').map((a) => a.name).join() === 'Orgo,Thermo,Dynamics');
+    check('order is a field on the row, so it syncs',
+      s.snapshotRows().find((r) => r.kind === 'area' && r.id === 'a3').data.order === 0,
+      'array position alone would never reach another device');
+    check('reordering stamps updatedAt, so the row is pushed',
+      !!s.areaById('a3').updatedAt);
+
+    check('another category is untouched', s.areasInCategory('project')[0].name === 'Rocket');
+    check('a partial list keeps the rest at the end',
+      (s.reorderAreas('course', ['a2']), s.areasInCategory('course').map((a) => a.name).join())
+        === 'Dynamics,Orgo,Thermo');
+    check('an unknown id is ignored',
+      (s.reorderAreas('course', ['nope', 'a1']), s.areasInCategory('course')[0].name) === 'Thermo');
+  }
+
+  {
+    const s = await storeWith(v4({ areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }] }));
+    const made = s.upsertArea({ name: 'Late arrival', category: 'course' });
+    check('a new area lands last in its category',
+      s.areasInCategory('course').map((a) => a.name).join() === 'Thermo,Late arrival',
+      `order=${made.order}`);
+  }
+
+  {
+    // archived areas still hold a position, so restoring one is not a surprise
+    const s = await storeWith(v4({
+      areas: [
+        { id: 'a1', name: 'Thermo', kind: 'course', order: 0 },
+        { id: 'a2', name: 'Dropped', kind: 'course', order: 1, archived: true },
+        { id: 'a3', name: 'Orgo', kind: 'course', order: 2 }
+      ]
+    }));
+    check('archived areas keep their place',
+      s.areasInCategory('course', { includeArchived: true }).map((a) => a.name).join()
+        === 'Thermo,Dropped,Orgo');
+    check('...but stay hidden from the normal read',
+      s.areasInCategory('course').map((a) => a.name).join() === 'Thermo,Orgo');
+  }
+
   /* ---- deleting an area leaves its work behind ---- */
 
   {

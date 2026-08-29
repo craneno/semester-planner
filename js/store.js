@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -108,6 +108,8 @@ function migrate(raw) {
   s.areas = s.areas.map((a, i) => ({
     id: a.id || uid('a'),
     name: a.name || a.title || 'Untitled',
+    // array position is local; only a field on the row itself syncs
+    order: Number.isFinite(a.order) ? a.order : i,
     color: a.color || AREA_COLORS[i % AREA_COLORS.length],
     category: CATEGORY_IDS.includes(a.category)
       ? a.category
@@ -126,7 +128,7 @@ function migrate(raw) {
     if (s.areas.some((a) => a.category === category)) return;
     s.areas.push({
       id: uid('a'), name, color: AREA_COLORS[s.areas.length % AREA_COLORS.length],
-      category, location: '', archived: false, schedule: [], grading: []
+      category, order: s.areas.length, location: '', archived: false, schedule: [], grading: []
     });
   };
   if (from < 5) seed('Rocket', 'project');
@@ -231,7 +233,9 @@ export const areaName = (id) => (areaById(id) || {}).name || 'Unassigned';
 
 /** Areas filed under one category, active first unless archived is asked for. */
 export function areasInCategory(categoryId, { includeArchived = false } = {}) {
-  return state.areas.filter((a) => a.category === categoryId && (includeArchived || !a.archived));
+  return state.areas
+    .filter((a) => a.category === categoryId && (includeArchived || !a.archived))
+    .sort((x, y) => (x.order ?? 0) - (y.order ?? 0));
 }
 
 export const itemsForArea = (areaId) => state.items.filter((t) => t.areaId === areaId);
@@ -382,11 +386,27 @@ export function upsertArea(patch) {
       id: uid('a'), name: 'New area', category: 'course', location: '',
       color: AREA_COLORS[state.areas.length % AREA_COLORS.length],
       schedule: [], grading: [], archived: false,
+      order: state.areas.length,
       updatedAt: new Date().toISOString(), ...patch
     };
     state.areas.push(a);
   }
   return a;
+}
+
+/**
+ * Write a new order for one category. Takes the ids in the order they should
+ * appear; anything not named keeps its place at the end. Values are only ever
+ * compared within a category, so they need not be unique across all areas.
+ */
+export function reorderAreas(categoryId, orderedIds) {
+  const rest = areasInCategory(categoryId, { includeArchived: true })
+    .filter((a) => !orderedIds.includes(a.id))
+    .map((a) => a.id);
+  [...orderedIds, ...rest].forEach((id, i) => {
+    const a = areaById(id);
+    if (a) { a.order = i; a.updatedAt = new Date().toISOString(); }
+  });
 }
 
 export function deleteArea(id) {

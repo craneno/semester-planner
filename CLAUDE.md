@@ -186,10 +186,31 @@ Schema 4 filed areas under a free-form `kind`; `migrate()` maps it through
 sessions array without also handling the `session` rows still sitting in
 existing Supabase accounts.
 
+Areas carry an explicit **`order`**, and `areasInCategory()` sorts by it. Array
+position is local — only a field on the row itself reaches another device — so
+never reorder `state.areas` in place and expect it to sync. `reorderAreas()`
+rewrites the numbers for one category; values are only ever compared within a
+category, so they need not be unique across all areas.
+
+Drag-to-reorder is `reorderable()` in [js/ui.js](js/ui.js), used by both the
+category pages and the sidebar. It reorders the real nodes as the pointer
+crosses each neighbour's midpoint — the list is its own preview, so there is no
+ghost element to keep in sync. The grip must `preventDefault()` on
+`pointerdown` or the browser starts a text selection and the drag reads as a
+highlight.
+
 **Seeds are pinned to the version that introduced them**, never to
 `SCHEMA_VERSION`: `if (from < 5) seed('Rocket', 'project')`. Writing the guard
 against `SCHEMA_VERSION` means the next bump resurrects a seed the user
 deliberately deleted.
+
+## Overview is the day
+
+There is no Today page. Overview's left column is today as it will happen —
+classes, calendar events, planned work — and the right column is what you
+decide about it: focus and today's three, open work by category, the
+end-of-day note. `#/today` is not a route; unknown hashes fall back to
+Overview, so an old link still lands somewhere sensible.
 
 ## Captured notes
 
@@ -239,6 +260,8 @@ Cloud sync ships whatever shape the object has, so nothing else is needed.
 | how a screen looks | `js/views/<screen>.js` |
 | category pages, one area's page | `js/views/areas.js` |
 | the capture box | `js/capture.js` |
+| today's agenda, focus, end-of-day | `js/views/overview.js` |
+| drag-to-reorder | `reorderable()` in `js/ui.js` |
 | the notes page | `js/views/notes.js` |
 | the set of categories | `AREA_CATEGORIES` in `js/store.js` |
 | shell, router, sidebar, quick add | `js/app.js` |

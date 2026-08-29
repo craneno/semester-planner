@@ -3,15 +3,14 @@
 import { h, $, clear, today, fmtDate, debounce, diffDays } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, semesterProgress, weekNumber,
-  AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById, unfiledCards
+  AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById, unfiledCards, reorderAreas
 } from './store.js';
-import { toast, closePeek } from './ui.js';
+import { toast, closePeek, reorderable } from './ui.js';
 import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
 import { renderSemester } from './views/semester.js';
 import { renderWeek, goToWeekOf } from './views/week.js';
-import { renderToday, goToDay } from './views/today.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderNotes } from './views/notes.js';
 import { renderSettings } from './views/settings.js';
@@ -24,13 +23,12 @@ const VIEWS = {
   overview: { label: 'Overview', glyph: '◲', render: renderOverview, title: () => state.semester.name },
   semester: { label: 'Semester', glyph: '☰', render: renderSemester, title: () => 'Semester' },
   week:     { label: 'Week',     glyph: '▦', render: renderWeek,     title: () => 'Week', bare: true },
-  today:    { label: 'Today',    glyph: '◉', render: renderToday,    title: () => 'Today' },
   notes:    { label: 'Notes',    glyph: '✎', render: renderNotes,    title: () => 'Notes' },
   settings: { label: 'Settings', glyph: '⚙', render: renderSettings, title: () => 'Settings' }
 };
 
-const TOP_VIEWS = ['overview', 'semester', 'week', 'today'];
-const MOBILE_TABS = ['today', 'week', 'semester', 'course', 'overview'];
+const TOP_VIEWS = ['overview', 'semester', 'week'];
+const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'notes'];
 const CATEGORY_GLYPH = { course: '◇', ner: '⚡', project: '▲', personal: '○' };
 
 /** { kind: 'view'|'category'|'area', id } — what the hash currently points at. */
@@ -110,17 +108,31 @@ function paintChrome() {
       glyph: CATEGORY_GLYPH[cat.id], label: cat.label,
       current: isCurrent('category', cat.id), onclick: () => go(cat.id)
     }));
-    for (const a of areasInCategory(cat.id)) {
+    const areas = areasInCategory(cat.id);
+    if (!areas.length) continue;
+
+    const host = h('div', { class: 'rail-areas' });
+    for (const a of areas) {
       const open = state.items.filter((t) => t.areaId === a.id && !t.done).length;
-      rail.append(h('button', {
+      host.append(h('div', {
         class: 'area-chip' + (isCurrent('area', a.id) ? ' is-current' : ''),
+        dataset: { reorderId: a.id }
+      },
+      h('span', { class: 'drag-handle', 'aria-label': `Reorder ${a.name}` }, '⠿'),
+      h('button', {
+        class: 'area-chip-open',
         'aria-current': isCurrent('area', a.id) ? 'page' : null,
         onclick: () => { go(`area/${a.id}`); closeSidebar(); }
       },
       h('span', { class: 'dot', style: { background: a.color } }),
       h('span', { class: 'nav-label' }, a.name),
-      open ? h('span', { class: 'count eyebrow num' }, String(open)) : null));
+      open ? h('span', { class: 'count eyebrow num' }, String(open)) : null)));
     }
+    rail.append(host);
+    reorderable(host, {
+      handle: '.drag-handle',
+      onDrop: (ids) => { commit(() => reorderAreas(cat.id, ids)); navigate(); }
+    });
   }
 
   const waiting = unfiledCards().length;

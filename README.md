@@ -291,7 +291,14 @@ and you decide later. Without leaving the box you can instead file it straight t
 or to a task with a deadline and a time blocked — that last one lands on your calendar. Shift+Enter is a
 newline, Tab reaches the filing buttons.
 
-**Keyboard.** `1`–`4` switch views, `/` or `n` focus quick add, `Esc` closes panels.
+**Overview is the day.** Today's schedule runs down the left — classes, calendar events, the work you
+planned. On the right: your focus and today's three, open work split by category, and a place to write
+what moved. There is no separate Today page.
+
+**Reordering.** Drag the grip on a course to move it up or down, either on its category page or in the
+sidebar. The order is stored on the area itself, so it follows you to your phone.
+
+**Keyboard.** `1`–`3` switch views, `/` or `n` focus quick add, `Esc` closes panels.
 
 ---
 

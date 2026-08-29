@@ -657,3 +657,47 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .series-title { font-size: calc(14px * var(--scale)); font-weight: 550; margin-bottom: 3px; }
 .series-when { color: var(--ink-2); }
 .series-where { color: var(--ink-3); margin-top: 2px; }
+
+
+/* ---------- overview: today on the left, decisions on the right ---------- */
+
+.overview-split {
+  display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px; align-items: start; margin-bottom: 18px;
+}
+.overview-side { display: flex; flex-direction: column; gap: 14px; }
+.today-col .today-date {
+  font-family: var(--font-heading); font-size: calc(17px * var(--scale));
+  font-weight: 550; letter-spacing: -.01em; color: var(--ink);
+}
+.today-col .card-h { align-items: baseline; gap: 9px; }
+@media (max-width: 900px) {
+  .overview-split { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- drag to reorder ---------- */
+
+.drag-handle {
+  border: 0; background: transparent; padding: 0 2px; cursor: grab;
+  color: var(--ink-3); font-size: 13px; line-height: 1; flex: none;
+  touch-action: none;   /* the pointer drag owns this gesture, not the scroller */
+  user-select: none; -webkit-user-select: none;
+}
+.drag-handle:hover { color: var(--ink); }
+.is-dragging { opacity: .6; }
+.is-dragging .drag-handle { cursor: grabbing; }
+body.is-reordering { cursor: grabbing; user-select: none; }
+
+.area-groups .area-group { transition: none; }
+
+/* sidebar chips become a row with a grip plus the link */
+.rail-areas { display: flex; flex-direction: column; }
+.area-chip { gap: 4px; padding: 0 8px 0 14px; }
+.area-chip .area-chip-open {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  padding: 4px 0; border: 0; background: transparent; cursor: pointer;
+  color: inherit; font: inherit; text-align: left;
+}
+.area-chip .drag-handle { opacity: 0; }
+.area-chip:hover .drag-handle, .drag-handle:focus-visible { opacity: 1; }
+@media (hover: none) { .area-chip .drag-handle { opacity: .6; } }

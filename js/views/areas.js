@@ -5,9 +5,9 @@
 import { h, clear, fmtTime, DOW } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, deleteArea, areasInCategory, itemsForArea,
-  nextForArea, categoryById, areaById, AREA_CATEGORIES, AREA_COLORS, progress
+  nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress
 } from '../store.js';
-import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta } from '../ui.js';
+import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta, reorderable } from '../ui.js';
 import { openItem } from '../editor.js';
 import { openSyllabusImport } from '../syllabus.js';
 import { pushItem, recurringSeries, gcal } from '../gcal.js';
@@ -45,8 +45,15 @@ export function renderCategory(root, { navigate, go }, categoryId) {
       }, `Add your first ${cat.singular}`)));
   }
 
-  for (const a of [...areas, ...archived]) pad.append(areaGroup(a, { navigate, go }));
+  const groups = h('div', { class: 'area-groups' });
+  for (const a of [...areas, ...archived]) groups.append(areaGroup(a, { navigate, go }));
+  pad.append(groups);
   root.append(pad);
+
+  reorderable(groups, {
+    handle: '.drag-handle',
+    onDrop: (ids) => { commit(() => reorderAreas(categoryId, ids)); navigate(); }
+  });
 }
 
 function emptyBlurb(categoryId) {
@@ -86,9 +93,13 @@ function areaGroup(a, { navigate, go }) {
     }, `see all ${openCount} →`));
   }
 
-  return h('section', { class: 'area-group' + (a.archived ? ' is-archived' : '') },
-    h('div', { class: 'area-h' },
-      h('span', { class: 'dot', style: { background: a.color } }),
+  return h('section', {
+    class: 'area-group' + (a.archived ? ' is-archived' : ''),
+    dataset: { reorderId: a.id }
+  },
+  h('div', { class: 'area-h' },
+    h('button', { class: 'drag-handle', 'aria-label': `Reorder ${a.name}` }, '⠿'),
+    h('span', { class: 'dot', style: { background: a.color } }),
       h('button', { class: 'area-name', onclick: () => go(`area/${a.id}`) }, a.name),
       h('span', { class: 'eyebrow num' }, `${done}/${mine.length}`),
       h('div', { style: { flex: 1 } }),

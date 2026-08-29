@@ -158,6 +158,65 @@ export function draggable(handle, cb) {
   });
 }
 
+/**
+ * Drag-to-reorder a vertical list.
+ *
+ * Reorders the real nodes as the pointer passes each neighbour's midpoint,
+ * rather than animating a floating copy — the list is the preview, so there is
+ * no ghost element to keep in sync and no measurement to invalidate.
+ *
+ * Each item must carry `data-reorder-id` and contain the handle.
+ *
+ * @param {HTMLElement} container
+ * @param {{handle: string, onDrop: (ids: string[]) => void}} opts
+ */
+export function reorderable(container, { handle, onDrop }) {
+  const items = () => Array.from(container.querySelectorAll('[data-reorder-id]'))
+    .filter((el) => el.parentElement === container);
+
+  for (const el of items()) {
+    const grip = el.querySelector(handle);
+    if (!grip) continue;
+    grip.setAttribute('title', 'Drag to reorder');
+    // without this the browser starts a text selection on mousedown and the
+    // drag reads as a highlight instead
+    grip.addEventListener('pointerdown', (e) => e.preventDefault());
+
+    let startOrder = null;
+    draggable(grip, {
+      threshold: 4,
+      onStart: () => {
+        startOrder = items().map((x) => x.dataset.reorderId);
+        el.classList.add('is-dragging');
+        document.body.classList.add('is-reordering');
+      },
+      onMove: (ev) => {
+        const y = ev.clientY;
+        for (const other of items()) {
+          if (other === el) continue;
+          const r = other.getBoundingClientRect();
+          const mid = r.top + r.height / 2;
+          // moving up past the midpoint of the one above, or down past the one below
+          if (y < mid && other.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+            container.insertBefore(el, other);
+            break;
+          }
+          if (y > mid && other.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) {
+            container.insertBefore(el, other.nextSibling);
+            break;
+          }
+        }
+      },
+      onEnd: () => {
+        el.classList.remove('is-dragging');
+        document.body.classList.remove('is-reordering');
+        const now = items().map((x) => x.dataset.reorderId);
+        if (startOrder && now.join() !== startOrder.join()) onDrop(now);
+      }
+    });
+  }
+}
+
 /* keyboard: Escape closes the topmost layer */
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
