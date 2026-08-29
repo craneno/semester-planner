@@ -267,6 +267,18 @@ function boot() {
 
   // service worker
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    // A new worker skipWaiting()s and claims this page, but the page is still
+    // showing the previous version's files. Reload once when that happens, so
+    // a deploy lands on the first visit instead of the second. Guarded on
+    // there being an old worker at all: on a first install there is nothing
+    // stale to replace, and reloading would be a pointless flash.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      location.reload();
+    });
     navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('sw', e));
   }
 

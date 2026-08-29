@@ -31,15 +31,28 @@ from the network. Keep it that way — a plain `c.add(u)` reads through the HTTP
 cache, and since Pages sends `max-age=600` a freshly bumped `VERSION` can be
 populated with the very files it was bumped to replace.
 
+**A cache is written once, at install, and never again.** The fetch handler
+must not write to it. It used to refresh each file in the background, which
+broke the only guarantee that matters: a cache then held whatever each file
+happened to be when it was last requested, so a page could run one version's
+JS against another version's CSS. That shipped once — `.day-lanes` had no
+rule yet, so it was not a containing block and an absolutely positioned event
+sized itself to the whole viewport. Per-file freshness is not worth a shell
+that does not agree with itself.
+
+`app.js` reloads the page once on `controllerchange`, so a deploy lands on the
+first visit rather than the second. It is guarded on there having been a
+previous controller — on a first install there is nothing stale to replace.
+
 ### When a change appears not to take effect
 
 Almost always a cache, not your code. Two different ones bite, in two places:
 
-**In production, an open tab needs two loads.** `sw.js` is cache-first, so a tab
-is served entirely from the *previous* version's cache. The first reload lets
-the new worker install; the second is served by it. A tab left open for hours —
-or an installed PWA window — never gets there on its own. To settle it in one
-step, from DevTools console on the page:
+**In production, an open tab is served the previous version until it reloads.**
+`sw.js` is cache-first, so the page keeps the cache it started with. Since v14
+the app reloads itself once when a new worker takes over, so one load is
+normally enough; a tab left open for hours still needs that load to happen. To
+force it, from DevTools console on the page:
 
 ```js
 (async () => {

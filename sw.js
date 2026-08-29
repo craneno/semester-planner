@@ -1,7 +1,10 @@
-// sw.js — offline shell. App files are cache-first with a background refresh;
-// anything else (Google APIs, PDF.js) goes straight to the network.
+// sw.js — offline shell.
+//
+// One cache per VERSION, written once at install and never touched again, so
+// everything it serves came from the same deploy. Anything not in the shell
+// (Google APIs, PDF.js) goes straight to the network.
 
-const VERSION = 'planner-v13';
+const VERSION = 'planner-v14';
 const SHELL = [
   './',
   './index.html',
@@ -56,10 +59,16 @@ self.addEventListener('fetch', (e) => {
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);
     const hit = await cache.match(e.request, { ignoreSearch: true });
-    const net = fetch(e.request).then((res) => {
-      if (res && res.ok) cache.put(e.request, res.clone());
-      return res;
-    }).catch(() => null);
-    return hit || (await net) || cache.match('./index.html');
+    if (hit) return hit;
+
+    // Anything not in the shell still goes to the network, but the shell is
+    // never written to after install. It used to refresh each file in the
+    // background, which quietly broke the one guarantee that matters: a cache
+    // held whatever each file happened to be when it was last requested, so a
+    // page could run one version's JS against another version's CSS — blocks
+    // positioned against the viewport because .day-lanes had no rule yet.
+    // A cache now only ever holds what one VERSION installed, all at once.
+    const net = await fetch(e.request).catch(() => null);
+    return net || cache.match('./index.html');
   })());
 });
