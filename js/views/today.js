@@ -6,7 +6,7 @@ import {
 } from '../util.js';
 import {
   state, commit, toggleItem, areaColor, areaName, classesOn, eventsOn,
-  itemsDueOn, itemsPlannedOn, note, workloadFor, sessionsBetween, studyMinutes
+  itemsDueOn, itemsPlannedOn, note, workloadFor
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -23,7 +23,6 @@ export function renderToday(root, { navigate, go }) {
   const n = note(day);
   const hour12 = state.settings.hour12;
   const load = workloadFor([day]);
-  const studied = studyMinutes(sessionsBetween(day, day));
 
   pad.append(h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '16px' } },
     h('div', {},
@@ -97,7 +96,7 @@ export function renderToday(root, { navigate, go }) {
   const right = h('div', {});
   right.append(h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '6px' } },
     h('span', { class: 'eyebrow' }, 'Schedule'),
-    studied ? h('span', { class: 'eyebrow num' }, `${fmtHours(studied)} studied`) : null));
+    ));
 
   const entries = [];
   for (const c of classesOn(day)) {

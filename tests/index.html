@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Planner tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<h1>Planner tests</h1>
+<p class="note">
+  Every suite below runs against the real modules in <code>js/</code>. There is no
+  runner and nothing to install — serve the repo and open this page.
+  Suites refuse to run outside localhost and restore <code>localStorage</code> when
+  they finish, because they overwrite planner state as they go.
+</p>
+<div id="summary" class="total">running…</div>
+<div id="suites"></div>
+
+<script type="module">
+const SUITES = [
+  ['Store', './store.test.html'],
+  ['Cloud sync', './sync.test.html']
+];
+
+const host = document.getElementById('suites');
+const summary = document.getElementById('summary');
+const results = [];
+
+// suites run one at a time: they share localStorage, so overlapping them
+// would let one suite's restore clobber another's setup
+for (const [name, src] of SUITES) {
+  const label = document.createElement('div');
+  label.textContent = name;
+  host.append(label);
+
+  const frame = document.createElement('iframe');
+  frame.src = src;
+  host.append(frame);
+
+  results.push(await new Promise((resolve) => {
+    const done = (r) => resolve(r || { suite: name, failed: 1, passed: 0 });
+    window.addEventListener('message', function onMsg(e) {
+      if (e.source !== frame.contentWindow || !e.data?.testResult) return;
+      window.removeEventListener('message', onMsg);
+      done(e.data.testResult);
+    });
+    // a suite that throws before reporting must not hang the page
+    setTimeout(() => done(frame.contentWindow?.__result), 30000);
+  }));
+}
+
+const failed = results.reduce((n, r) => n + r.failed, 0);
+const passed = results.reduce((n, r) => n + r.passed, 0);
+summary.textContent = failed
+  ? `${failed} FAILURE(S) across ${results.length} suites, ${passed} passed`
+  : `ALL PASS — ${passed} checks across ${results.length} suites`;
+summary.className = 'total ' + (failed ? 'fail' : 'pass');
+</script>
+</body>
+</html>

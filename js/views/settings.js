@@ -273,7 +273,7 @@ export function renderSettings(root, { navigate }) {
 
   p.append(section('Data', [
     h('p', { style: { fontSize: '13px', color: 'var(--ink-2)', margin: '0 0 12px' } },
-      `Everything lives in this browser's storage: ${state.items.length} tasks, ${state.areas.length} areas, ${state.sessions.length} study sessions. Export before you clear site data.`),
+      `Everything lives in this browser's storage: ${state.items.length} tasks and ${state.areas.length} areas. Export before you clear site data.`),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
       h('button', {
         class: 'btn primary', onclick: () => {
@@ -287,7 +287,7 @@ export function renderSettings(root, { navigate }) {
       fileInput,
       h('button', {
         class: 'btn ghost danger', onclick: async () => {
-          if (await confirmDialog('Erase everything on this device?', 'Tasks, areas, sessions, and settings. Export first if you want them back.', 'Erase')) {
+          if (await confirmDialog('Erase everything on this device?', 'Tasks, areas, and settings. Export first if you want them back.', 'Erase')) {
             localStorage.removeItem('semesterPlanner.v1');
             location.reload();
           }

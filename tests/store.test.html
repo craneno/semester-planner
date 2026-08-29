@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Store tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, storeWith } from './harness.js';
+
+const v4 = (over = {}) => ({
+  version: 4,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [], items: [], notes: {},
+  ...over
+});
+
+suite('Store — categories, migration, study removal', async ({ check }) => {
+
+  /* ---- kind → category ---- */
+
+  {
+    const s = await storeWith(v4({
+      areas: [
+        { id: 'a1', name: 'Thermo', kind: 'course' },
+        { id: 'a2', name: 'Thesis', kind: 'thesis' },
+        { id: 'a3', name: 'Lab', kind: 'research' },
+        { id: 'a4', name: 'Co-op', kind: 'work' },
+        { id: 'a5', name: 'Grad apps', kind: 'applications' },
+        { id: 'a6', name: 'Errands', kind: 'personal' },
+        { id: 'a7', name: 'Mystery', kind: 'wat' },
+        { id: 'a8', name: 'No kind at all' }
+      ]
+    }));
+    const cat = (id) => s.areaById(id).category;
+    check('course stays a course', cat('a1') === 'course', `got ${cat('a1')}`);
+    check('thesis becomes a project', cat('a2') === 'project', `got ${cat('a2')}`);
+    check('research becomes a project', cat('a3') === 'project', `got ${cat('a3')}`);
+    check('work becomes a project', cat('a4') === 'project', `got ${cat('a4')}`);
+    check('applications becomes a project', cat('a5') === 'project', `got ${cat('a5')}`);
+    check('personal stays personal', cat('a6') === 'personal', `got ${cat('a6')}`);
+    check('unknown kind falls back to course', cat('a7') === 'course', `got ${cat('a7')}`);
+    check('missing kind falls back to course', cat('a8') === 'course', `got ${cat('a8')}`);
+    check('the old kind field is dropped', s.state.areas.every((a) => a.kind === undefined));
+    check('schema version is 5', s.state.version === 5, `got ${s.state.version}`);
+  }
+
+  {
+    const s = await storeWith(v4({
+      areas: [{ id: 'a1', name: 'Aero', kind: 'course', category: 'ner' }]
+    }));
+    check('an explicit category beats the old kind', s.areaById('a1').category === 'ner');
+  }
+
+  /* ---- the Rocket seed ---- */
+
+  {
+    const s = await storeWith(v4({ areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }] }));
+    check('seeds Rocket when Projects would be empty',
+      s.areasInCategory('project').map((a) => a.name).join() === 'Rocket');
+  }
+  {
+    const s = await storeWith(v4({ areas: [{ id: 'a1', name: 'Senior Thesis', kind: 'thesis' }] }));
+    check('does not seed Rocket when a project already exists',
+      !s.state.areas.some((a) => a.name === 'Rocket'));
+  }
+  {
+    const s = await storeWith(null);
+    check('does not seed Rocket on a fresh install', !s.state.areas.length,
+      'a new device syncing from the cloud would end up with two');
+  }
+  {
+    // already migrated, and Rocket deleted since: it must stay deleted
+    const s = await storeWith({ version: 5, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
+    check('does not re-seed Rocket once already on schema 5',
+      !s.state.areas.some((a) => a.name === 'Rocket'));
+  }
+
+  /* ---- study data is gone ---- */
+
+  {
+    const s = await storeWith(v4({
+      areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }],
+      items: [{ id: 't1', title: 'PS1', areaId: 'a1' }],
+      sessions: [{ id: 's1', areaId: 'a1', mins: 90, date: '2026-08-27' }]
+    }));
+    check('sessions are dropped from state', s.state.sessions === undefined);
+    check('no session rows are synced',
+      !s.snapshotRows().some((r) => r.kind === 'session'));
+    check('an inbound session row is ignored',
+      s.applyRow({ kind: 'session', id: 's9', data: { id: 's9' } }) === false);
+    check('the store exports no study helpers',
+      s.logSession === undefined && s.studyMinutes === undefined && s.sessionsBetween === undefined);
+  }
+
+  /* ---- category selectors ---- */
+
+  {
+    const s = await storeWith(v4({
+      areas: [
+        { id: 'a1', name: 'Thermo', kind: 'course' },
+        { id: 'a2', name: 'Dynamics', kind: 'course' },
+        { id: 'a3', name: 'Old class', kind: 'course', archived: true },
+        { id: 'a4', name: 'Rocket', kind: 'thesis' }
+      ],
+      items: [
+        { id: 't1', title: 'Due first', areaId: 'a1', due: '2026-09-04', estMins: 60 },
+        { id: 't2', title: 'Due later', areaId: 'a1', due: '2026-09-20', estMins: 30 },
+        { id: 't3', title: 'No date', areaId: 'a1', estMins: 30 },
+        { id: 't4', title: 'Done already', areaId: 'a1', due: '2026-09-01', done: true },
+        { id: 't5', title: 'Rocket work', areaId: 'a4', due: '2026-09-09', estMins: 120 }
+      ]
+    }));
+
+    check('areasInCategory hides archived areas',
+      s.areasInCategory('course').map((a) => a.name).join() === 'Thermo,Dynamics');
+    check('areasInCategory can include archived',
+      s.areasInCategory('course', { includeArchived: true }).length === 3);
+    check('itemsForArea returns that area only',
+      s.itemsForArea('a4').map((t) => t.id).join() === 't5');
+
+    const next = s.nextForArea('a1', 3);
+    check('nextForArea skips done work', !next.some((t) => t.done));
+    check('nextForArea sorts soonest first', next[0].id === 't1', `got ${next[0]?.id}`);
+    check('nextForArea puts undated work last', next[next.length - 1].id === 't3');
+    check('nextForArea honours the limit', s.nextForArea('a1', 2).length === 2);
+
+    const load = Object.fromEntries(s.categoryLoad().map((c) => [c.id, c]));
+    check('categoryLoad counts open work per category',
+      load.course.open === 3 && load.project.open === 1,
+      `course=${load.course.open} project=${load.project.open}`);
+    check('categoryLoad sums estimates', load.course.mins === 120, `got ${load.course.mins}`);
+    check('categoryLoad reports empty categories as zero',
+      load.ner.open === 0 && load.ner.areas === 0);
+    check('categoryLoad covers every category',
+      s.categoryLoad().length === s.AREA_CATEGORIES.length);
+  }
+
+  /* ---- deleting an area leaves its work behind ---- */
+
+  {
+    const s = await storeWith(v4({
+      areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }],
+      items: [{ id: 't1', title: 'PS1', areaId: 'a1' }]
+    }));
+    s.deleteArea('a1');
+    check('deleting an area keeps its tasks', s.itemById('t1') !== null);
+    check('...and unfiles them', s.itemById('t1').areaId === null);
+  }
+});
+</script>
+</body>
+</html>

@@ -2,8 +2,8 @@
 
 import { h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtHours, fmtDuration, diffDays } from '../util.js';
 import {
-  state, commit, areaColor, areaName, upcoming, overdue, workloadFor, semesterProgress,
-  weekNumber, sessionsBetween, studyMinutes, progress, note
+  state, commit, upcoming, overdue, workloadFor, semesterProgress,
+  weekNumber, categoryLoad, note
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -17,8 +17,6 @@ export function renderOverview(root, { navigate, go }) {
   const late = overdue();
   const soon = upcoming(14);
   const pct = Math.round(semesterProgress() * 100);
-  const studyWeek = studyMinutes(sessionsBetween(days[0], days[6]));
-  const studySem = studyMinutes(sessionsBetween(state.semester.start, state.semester.end));
 
   /* headline — a sentence, not a scoreboard */
   const headline = load.count === 0
@@ -50,15 +48,25 @@ export function renderOverview(root, { navigate, go }) {
         : h('p', { style: { margin: '0 0 10px', color: 'var(--ink-3)' } }, 'No focus set for today.'),
       ...(top3.length ? top3.map((t) => itemLine(t, navigate)) : [h('span', { style: { color: 'var(--ink-3)' } }, 'Nothing due in the next two weeks.')]))));
 
-  // study
+  // open work, split the way the sidebar splits it
+  const byCat = h('div', { class: 'card-b' });
+  const loads = categoryLoad();
+  const busiest = Math.max(1, ...loads.map((c) => c.open));
+  for (const c of loads) {
+    byCat.append(h('button', {
+      class: 'cat-load', onclick: () => go(c.id),
+      title: `${c.open} open · ${fmtHours(c.mins)}`
+    },
+    h('div', { class: 'cat-load-h' },
+      h('span', { class: 'cat-load-name' }, c.label),
+      h('span', { class: 'eyebrow num' }, c.open ? `${c.open} · ${fmtHours(c.mins)}` : '—')),
+    h('div', { class: 'meter' },
+      h('span', { style: { width: (c.open / busiest) * 100 + '%' } }))));
+  }
   cards.append(h('section', { class: 'card' },
-    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Study time'), h('div', { style: { flex: 1 } }),
-      h('button', { class: 'btn ghost sm', onclick: () => go('study') }, 'Timer →')),
-    h('div', { class: 'card-b' },
-      h('div', { class: 'num', style: { fontSize: '30px', letterSpacing: '-.02em', lineHeight: 1.1 } }, fmtHours(studyWeek)),
-      h('div', { class: 'eyebrow', style: { marginTop: '2px' } }, 'this week'),
-      h('div', { style: { marginTop: '12px', color: 'var(--ink-2)', fontSize: '13px' } },
-        `${fmtHours(studySem)} this semester · ${state.sessions.length} sessions`))));
+    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Open work'), h('div', { style: { flex: 1 } }),
+      h('button', { class: 'btn ghost sm', onclick: () => go('semester') }, 'All →')),
+    byCat));
 
   // areas
   const areaCard = h('div', { class: 'card-b' });
@@ -79,8 +87,8 @@ export function renderOverview(root, { navigate, go }) {
       h('div', { class: 'meter' }, h('span', { style: { width: p + '%', background: a.color } }))));
   }
   cards.append(h('section', { class: 'card' },
-    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Courses & projects'), h('div', { style: { flex: 1 } }),
-      h('button', { class: 'btn ghost sm', onclick: () => go('courses') }, 'Manage →')),
+    h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Areas'), h('div', { style: { flex: 1 } }),
+      h('button', { class: 'btn ghost sm', onclick: () => go('course') }, 'Courses →')),
     areaCard));
 
   pad.append(cards);

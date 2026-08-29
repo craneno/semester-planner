@@ -1,7 +1,7 @@
 // sw.js — offline shell. App files are cache-first with a background refresh;
 // anything else (Google APIs, PDF.js) goes straight to the network.
 
-const VERSION = 'planner-v8';
+const VERSION = 'planner-v9';
 const SHELL = [
   './',
   './index.html',
@@ -20,8 +20,7 @@ const SHELL = [
   './js/views/semester.js',
   './js/views/week.js',
   './js/views/today.js',
-  './js/views/courses.js',
-  './js/views/study.js',
+  './js/views/areas.js',
   './js/views/settings.js',
   './icons/favicon.svg',
   './icons/icon-192.png',

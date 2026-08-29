@@ -92,7 +92,7 @@ resize the block in Google Calendar and the planner picks up the new time. Turn 
 ## Cloud sync (Supabase)
 
 Google Calendar covers anything with a time on it. Supabase covers everything
-else — tasks with no planned slot, subtasks, notes, study history, your theme —
+else — tasks with no planned slot, subtasks, notes, your theme —
 and makes the planner genuinely the same app on your laptop and your phone.
 
 Local-first: `localStorage` stays the working copy, so the app is instant and
@@ -149,8 +149,8 @@ realtime never connects.
 
 **What does not sync, deliberately.** Google OAuth tokens, the Supabase URL and
 key, and both sync cursors stay on the device that owns them. Semester dates,
-courses, tasks, subtasks, notes, study sessions, theme, fonts and text size all
-sync.
+areas and their category, tasks, subtasks, notes, theme, fonts and text size
+all sync.
 
 ### If the two ever drift apart
 
@@ -276,11 +276,11 @@ an iPhone and a trackpad.
 the schedule table. Nothing is added until you approve it in the review list — edit titles, fix dates,
 uncheck bad detections.
 
-**Study.** Pomodoro (25/5, 45/10, 50/10) or free stopwatch. All timing is computed from wall-clock
-timestamps, not an interval counter, so it stays accurate when the phone locks or Safari throttles the
-tab. Only focus periods are logged; breaks aren't.
+**Categories.** Every area — a course, an NER subteam, a project, something personal — is filed under
+one of four categories, which are the sidebar's top level. A category page lists its areas with each
+one's next few deadlines under it; clicking an area opens everything in it.
 
-**Keyboard.** `1`–`7` switch views, `/` or `n` focus quick add, `Esc` closes panels.
+**Keyboard.** `1`–`4` switch views, `/` or `n` focus quick add, `Esc` closes panels.
 
 ---
 

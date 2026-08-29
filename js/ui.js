@@ -121,11 +121,6 @@ export const priorityTag = (p) =>
     : p === 'low' ? h('span', { class: 'tag flag-low' }, 'Low')
       : null;
 
-export const TYPE_GLYPH = {
-  assignment: '✓', reading: '≡', exam: '★', quiz: '◆', paper: '✎', presentation: '▤',
-  meeting: '◷', research: '◎', writing: '✎', admin: '⚙', personal: '○'
-};
-
 /* ---------------- pointer drag (works on iOS + Windows) ---------------- */
 
 /**

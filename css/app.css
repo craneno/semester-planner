@@ -123,15 +123,17 @@ a { color: var(--accent); }
 .nav-item:hover .key { opacity: 1; }
 .nav-glyph { width: 16px; text-align: center; opacity: .75; font-size: 13px; }
 
-.rail-group { margin-top: 14px; padding: 0 8px 6px; }
+/* areas sit indented under the category they belong to */
 .area-chip {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 5px 8px; border: 0; background: transparent; border-radius: var(--r);
-  color: var(--ink-2); font-size: calc(13px * var(--scale)); cursor: pointer; text-align: left;
+  padding: 4px 8px 4px 33px; border: 0; background: transparent; border-radius: var(--r);
+  color: var(--ink-2); font-size: calc(12.5px * var(--scale)); cursor: pointer; text-align: left;
 }
-.area-chip:hover { background: var(--rule-soft); }
+.area-chip:hover { background: var(--rule-soft); color: var(--ink); }
+.area-chip.is-current { background: var(--accent-soft); color: var(--ink); font-weight: 550; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .area-chip .count { margin-left: auto; }
+.nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sync-stack { display: flex; flex-direction: column; gap: 5px; padding-bottom: 4px; }
 .sync-strip {
@@ -530,3 +532,42 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   .sidebar, .tabbar, .topbar, .weekbar, .tray { display: none !important; }
   body { background: #fff; }
 }
+
+
+/* ---------- category pages ---------- */
+
+.page-h { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.crumb {
+  border: 0; background: transparent; padding: 0 0 3px; cursor: pointer;
+  color: var(--ink-3); display: block;
+}
+.crumb:hover { color: var(--ink); }
+
+.area-group { margin-bottom: 22px; }
+.area-group.is-archived { opacity: .55; }
+.area-h {
+  display: flex; align-items: center; gap: 9px;
+  padding-bottom: 7px; border-bottom: 1px solid var(--rule);
+}
+.area-h .area-name {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  font-size: calc(15px * var(--scale)); font-weight: 550; color: var(--ink);
+  font-family: var(--font-heading); letter-spacing: -.01em;
+}
+.area-h .area-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.area-body { padding-left: 17px; }
+.area-when { padding: 7px 0 2px; color: var(--ink-3); }
+.area-none { padding: 10px 0; color: var(--ink-3); font-size: calc(13px * var(--scale)); }
+.area-more { margin-top: 4px; color: var(--ink-3); }
+
+/* ---------- overview: open work by category ---------- */
+
+.cat-load {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: transparent; padding: 0; margin-bottom: 11px;
+}
+.cat-load:last-child { margin-bottom: 0; }
+.cat-load-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.cat-load-name { font-size: calc(13px * var(--scale)); color: var(--ink); }
+.cat-load-h .num { margin-left: auto; }
+.cat-load:hover .cat-load-name { text-decoration: underline; text-underline-offset: 3px; }

@@ -128,15 +128,26 @@ unpushed local deletion does not survive a rebuild.
 
 ### Tests
 
-`tests/sync.test.html` covers the above. There is no runner and no dependency:
-serve the repo and open `/tests/sync.test.html`. It drives the real `cloud.js`
-with a stand-in Supabase client injected through the `_setClient()` seam.
+Serve the repo and open **`/tests/`** — it runs every suite and prints one
+total. There is no runner and nothing to install.
 
-It refuses to run anywhere but localhost and restores `localStorage` when it
-finishes, because it clobbers app state as it runs. If you add to it, keep both
-guards — and remember `save()` is debounced 120ms and `pushSoon` 1500ms, so the
-restore has to wait those out or they overwrite it. `tests/` is excluded from
-the deploy so the page never reaches the live site.
+| file | covers |
+|---|---|
+| `tests/harness.js` | the whole framework: `suite()`, the guards, `freshStore()` |
+| `tests/store.test.html` | migration, categories, selectors, study removal |
+| `tests/sync.test.html` | delete durability against a stand-in Supabase |
+
+Suites drive the real modules, so they clobber app state as they run. Two
+guards make that safe and **both must stay**: they refuse to run outside
+localhost, and `localStorage` is restored afterwards. The restore waits out
+`save()` (debounced 120ms) and `pushSoon` (1500ms) first — restoring before
+those fire just lets them overwrite it. `tests/` is excluded from the deploy so
+the pages never reach the live site.
+
+`store.js` reads `localStorage` once, at import, so `migrate()` can only be
+exercised on a fresh module instance. `freshStore()` imports it with a new
+query string to get one; `storeWith(raw)` seeds storage and does that in a
+step.
 
 ## Never sync device credentials
 
@@ -146,6 +157,29 @@ explicit allowlist — `SYNCED_SETTINGS` in [js/store.js](js/store.js) — so
 `state.settings.gcal` and `state.settings.cloud` stay local by construction.
 When adding a setting, decide which side of that line it falls on; only add it
 to `SYNCED_SETTINGS` if it is user preference, not device credential.
+
+## Areas and categories
+
+Every area belongs to exactly one **category** — `course`, `ner`, `project`,
+`personal` — defined by `AREA_CATEGORIES` in [js/store.js](js/store.js). That
+list is the single source for the sidebar's top level, the overview breakdown,
+and the category select in the area editor. Add an entry and it appears in all
+three with no other change; add a glyph in `CATEGORY_GLYPH` in `js/app.js` too.
+
+Categories and areas are **data, not screens**, so they are not in `VIEWS`.
+`route()` in `js/app.js` resolves three shapes:
+
+| hash | renders |
+|---|---|
+| `#/today` | a view from `VIEWS` |
+| `#/course` | that category's page — its areas, each with its next deadlines |
+| `#/area/<id>` | one area's full list |
+
+Schema 4 filed areas under a free-form `kind`; `migrate()` maps it through
+`KIND_TO_CATEGORY` and drops `kind`. Study logging (`state.sessions`,
+`logSession`, the Study view) was removed in schema 5 — don't reintroduce a
+sessions array without also handling the `session` rows still sitting in
+existing Supabase accounts.
 
 ## Adding a field to a task
 
@@ -160,7 +194,9 @@ Cloud sync ships whatever shape the object has, so nothing else is needed.
 | I want to change… | Edit |
 |---|---|
 | how a screen looks | `js/views/<screen>.js` |
-| shell, router, quick add | `js/app.js` |
+| category pages, one area's page | `js/views/areas.js` |
+| the set of categories | `AREA_CATEGORIES` in `js/store.js` |
+| shell, router, sidebar, quick add | `js/app.js` |
 | toasts, modals, peek panel, drag | `js/ui.js` |
 | colours, spacing, the week grid | `css/app.css` |
 | what a task stores | `js/store.js`, then `js/editor.js` |

@@ -3,56 +3,15 @@
 <head>
 <meta charset="utf-8">
 <title>Cloud sync tests</title>
-<style>
-  body { font: 14px ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 24px; line-height: 1.7; }
-  h1 { font-size: 15px; margin: 0 0 4px; }
-  p.note { color: #666; margin: 0 0 18px; }
-  .pass { color: #1a7f37; } .fail { color: #b3261e; font-weight: bold; }
-  .total { margin-top: 14px; font-size: 15px; }
-</style>
+<link rel="stylesheet" href="./tests.css">
 </head>
 <body>
-
-<h1>Cloud sync — delete durability</h1>
-<p class="note">
-  Runs against the real <code>js/cloud.js</code> with a stand-in Supabase client
-  injected through <code>_setClient()</code>. Serve the repo and open this page:
-  <code>python3 -m http.server 8000</code> → <code>/tests/sync.test.html</code>
-</p>
-<div id="out"></div>
-
 <script type="module">
-/* This test drives the real store and clobbers app state, so it refuses to run
-   anywhere but localhost, and puts localStorage back exactly as it found it. */
-const LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-const out = document.getElementById('out');
-const log = (msg, cls = '') => out.insertAdjacentHTML('beforeend', `<div class="${cls}">${msg}</div>`);
+import { suite } from './harness.js';
 
-if (!LOCAL) {
-  log('Refusing to run outside localhost — this test overwrites planner state.', 'fail');
-} else {
-  const backup = { ...localStorage };
-  try {
-    await run();
-  } finally {
-    // save() is debounced 120ms and cloud.js's pushSoon 1500ms: restoring before
-    // those drain just lets them overwrite the restore. Wait them out first.
-    await new Promise((r) => setTimeout(r, 2000));
-    localStorage.clear();
-    for (const [k, v] of Object.entries(backup)) localStorage.setItem(k, v);
-    log('localStorage restored.', 'pass');
-  }
-}
-
-async function run() {
+suite('Cloud sync — delete durability', async ({ check }) => {
   const { state, commit, upsertItem, deleteItem, itemById } = await import('../js/store.js');
   const C = await import('../js/cloud.js');
-
-  let failures = 0;
-  const check = (name, cond, detail = '') => {
-    if (cond) log(`PASS  ${name}`, 'pass');
-    else { failures++; log(`FAIL  ${name} ${detail}`, 'fail'); }
-  };
 
   /* A stand-in for Supabase: one in-memory table that stamps synced_at on write,
      mirroring the planner_touch() trigger in supabase/schema.sql. The query
@@ -100,7 +59,7 @@ async function run() {
   const serverRow = (fake, id) => fake.table.find((r) => r.kind === 'item' && r.id === id);
 
   function reset() {
-    state.items.length = 0; state.areas.length = 0; state.sessions.length = 0;
+    state.items.length = 0; state.areas.length = 0;
     for (const k of Object.keys(state.notes)) delete state.notes[k];
     Object.assign(state.settings.cloud, {
       url: 'https://fake.supabase.co', anonKey: 'anon', enabled: true, cursor: '', lastSync: null
@@ -194,24 +153,19 @@ async function run() {
     check('remote tombstone deletes locally', !itemById('gone'), '(still here)');
   }
 
-  const tests = [
+  for (const [name, fn] of [
     ['delete beats a live pull', tDeleteBeatsLivePull],
     ['delete during push', tDeleteDuringPush],
     ['remote row adopted', tRemoteRowAdopted],
     ['remote tombstone applied', tRemoteTombstoneApplied]
-  ];
-  for (const [name, fn] of tests) {
-    try { await fn(); } catch (e) { failures++; log(`ERROR ${name}: ${e.message}`, 'fail'); console.error(e); }
+  ]) {
+    await fn();
   }
 
-  // stand down before the restore: no timer, no channel, and a disabled config
-  // so any already-queued pushSoon finds nothing to do
+  // stand down before the harness restores localStorage
   state.settings.cloud.enabled = false;
   C.stop();
-
-  log(`<b>${failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)'}</b>`,
-      'total ' + (failures ? 'fail' : 'pass'));
-}
+});
 </script>
 </body>
 </html>

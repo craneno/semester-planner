@@ -160,11 +160,6 @@ export function debounce(fn, ms = 300) {
 
 export function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
-export function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 /** Readable text color for a background hex. */
 export function readableOn(hex) {
   const c = hex.replace('#', '');

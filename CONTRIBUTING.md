@@ -15,6 +15,8 @@ bump `VERSION` in the same file so browsers fetch the new files.
 | I want to change… | Edit |
 |---|---|
 | how a screen looks | `js/views/<screen>.js` |
+| category pages, one area's page | `js/views/areas.js` |
+| the categories themselves | `AREA_CATEGORIES` in `js/store.js` |
 | colours, spacing, the week grid | `css/app.css` |
 | what a task stores | `js/store.js` (add to `upsertItem`, then the editor) |
 | the task detail panel | `js/editor.js` |
@@ -38,4 +40,6 @@ node --check js/store.js   # or just let the deploy workflow catch it
 ```
 
 The `Deploy` workflow parses every module before publishing, so a syntax error
-fails the build instead of shipping a blank page.
+fails the build instead of shipping a blank page. It proves the files parse,
+not that they work — so also open `/tests/` and check the suites still pass,
+and click through the app at `localhost:8000`.

@@ -1,10 +1,28 @@
 // store.js — single source of truth. Local-first, localStorage-backed.
 
-import { uid, ymd, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './util.js';
+import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './util.js';
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
+
+/* Every area belongs to exactly one category. These are the sidebar's top
+   level and the only grouping there is — add one here and it appears in the
+   nav, on the overview breakdown, and as a filter, with no other change. */
+export const AREA_CATEGORIES = [
+  { id: 'course', label: 'Courses', singular: 'course' },
+  { id: 'ner', label: 'NER', singular: 'NER area', note: 'Northeastern Electric Racing' },
+  { id: 'project', label: 'Projects', singular: 'project' },
+  { id: 'personal', label: 'Personal', singular: 'personal area' }
+];
+export const CATEGORY_IDS = AREA_CATEGORIES.map((c) => c.id);
+export const categoryById = (id) => AREA_CATEGORIES.find((c) => c.id === id) || null;
+
+/** Schema 4 and earlier filed areas under a free-form `kind`. */
+const KIND_TO_CATEGORY = {
+  course: 'course', personal: 'personal',
+  research: 'project', thesis: 'project', work: 'project', applications: 'project'
+};
 
 export const ITEM_TYPES = [
   'assignment', 'reading', 'exam', 'quiz', 'paper', 'presentation',
@@ -28,7 +46,6 @@ const DEFAULTS = () => {
     },
     areas: [],
     items: [],
-    sessions: [],
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
     events: [],         // external Google events, read-only mirror
     outbox: [],         // queued Google writes while offline/signed out
@@ -74,22 +91,34 @@ function migrate(raw) {
   s.semester = { ...base.semester, ...(raw.semester || {}) };
   s.areas = Array.isArray(raw.areas) ? raw.areas : (Array.isArray(raw.courses) ? raw.courses : []);
   s.items = Array.isArray(raw.items) ? raw.items : (Array.isArray(raw.tasks) ? raw.tasks : []);
-  s.sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
   s.events = Array.isArray(raw.events) ? raw.events : [];
   s.outbox = Array.isArray(raw.outbox) ? raw.outbox : [];
   s.notes = raw.notes && typeof raw.notes === 'object' ? raw.notes : {};
+  delete s.sessions;   // study logging was removed in schema 5
 
   // normalise areas
   s.areas = s.areas.map((a, i) => ({
     id: a.id || uid('a'),
     name: a.name || a.title || 'Untitled',
     color: a.color || AREA_COLORS[i % AREA_COLORS.length],
-    kind: a.kind || a.type || 'course',
+    category: CATEGORY_IDS.includes(a.category)
+      ? a.category
+      : (KIND_TO_CATEGORY[a.kind || a.type] || 'course'),
     location: a.location || '',
     archived: !!a.archived,
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
     grading: Array.isArray(a.grading) ? a.grading : []
   }));
+
+  // One-time on the upgrade into schema 5: the sidebar shows Projects whether
+  // or not it holds anything, so give it its one real project rather than an
+  // empty heading. Guarded by version so a deleted Rocket stays deleted.
+  if ((raw.version || 0) < SCHEMA_VERSION && !s.areas.some((a) => a.category === 'project')) {
+    s.areas.push({
+      id: uid('a'), name: 'Rocket', color: AREA_COLORS[s.areas.length % AREA_COLORS.length],
+      category: 'project', location: '', archived: false, schedule: [], grading: []
+    });
+  }
 
   // normalise items (older schemas used plannedDate / dueDate / estimate)
   s.items = s.items.map((t) => {
@@ -186,17 +215,48 @@ export const itemById = (id) => state.items.find((t) => t.id === id) || null;
 export const areaColor = (id) => (areaById(id) || {}).color || 'var(--muted)';
 export const areaName = (id) => (areaById(id) || {}).name || 'Unassigned';
 
-export const openItems = () => state.items.filter((t) => !t.done);
+/* ---- categories ---- */
+
+/** Areas filed under one category, active first unless archived is asked for. */
+export function areasInCategory(categoryId, { includeArchived = false } = {}) {
+  return state.areas.filter((a) => a.category === categoryId && (includeArchived || !a.archived));
+}
+
+export const itemsForArea = (areaId) => state.items.filter((t) => t.areaId === areaId);
+
+/** Everything belonging to any area in this category. */
+function itemsInCategory(categoryId) {
+  const ids = new Set(areasInCategory(categoryId, { includeArchived: true }).map((a) => a.id));
+  return state.items.filter((t) => ids.has(t.areaId));
+}
+
+/** Open-work counts per category, for the overview breakdown. */
+export function categoryLoad() {
+  return AREA_CATEGORIES.map((c) => {
+    const open = itemsInCategory(c.id).filter((t) => !t.done);
+    return {
+      ...c,
+      areas: areasInCategory(c.id).length,
+      open: open.length,
+      mins: open.reduce((n, t) => n + (t.estMins || 0), 0)
+    };
+  });
+}
+
+/** The next few open items for an area, soonest first — undated last. */
+export function nextForArea(areaId, limit = 3) {
+  return itemsForArea(areaId)
+    .filter((t) => !t.done)
+    .sort((a, b) => {
+      const da = a.due || a.plan?.date || '9999-99-99';
+      const db = b.due || b.plan?.date || '9999-99-99';
+      return da < db ? -1 : da > db ? 1 : a.title.localeCompare(b.title);
+    })
+    .slice(0, limit);
+}
 
 export function itemsDueOn(date) { return state.items.filter((t) => t.due === date); }
 export function itemsPlannedOn(date) { return state.items.filter((t) => t.plan && t.plan.date === date); }
-
-export function itemsInRange(a, b) {
-  return state.items.filter((t) => {
-    const d = t.due || (t.plan && t.plan.date);
-    return d && d >= a && d <= b;
-  });
-}
 
 export function overdue(ref = today()) {
   return state.items.filter((t) => !t.done && t.due && t.due < ref);
@@ -264,11 +324,6 @@ export function eventsOn(date) {
     .sort((a, b) => (a.allDay ? -1 : 0) - (b.allDay ? -1 : 0) || toMin(a.start) - toMin(b.start));
 }
 
-export function sessionsBetween(a, b) {
-  return state.sessions.filter((s) => s.date >= a && s.date <= b);
-}
-export const studyMinutes = (list) => list.reduce((n, s) => n + (s.mins || 0), 0);
-
 /* ---------------- mutations ---------------- */
 
 export function upsertItem(patch) {
@@ -306,7 +361,7 @@ export function upsertArea(patch) {
   if (a) Object.assign(a, patch, { updatedAt: new Date().toISOString() });
   else {
     a = {
-      id: uid('a'), name: 'New area', kind: 'course', location: '',
+      id: uid('a'), name: 'New area', category: 'course', location: '',
       color: AREA_COLORS[state.areas.length % AREA_COLORS.length],
       schedule: [], grading: [], archived: false,
       updatedAt: new Date().toISOString(), ...patch
@@ -320,22 +375,11 @@ export function deleteArea(id) {
   const i = state.areas.findIndex((a) => a.id === id);
   if (i >= 0) state.areas.splice(i, 1);
   for (const t of state.items) if (t.areaId === id) t.areaId = null;
-  for (const s of state.sessions) if (s.areaId === id) s.areaId = null;
 }
 
 export function note(date) {
   if (!state.notes[date]) state.notes[date] = { focus: '', text: '', top3: [] };
   return state.notes[date];
-}
-
-export function logSession({ areaId, startedAt, endedAt, mins, mode }) {
-  const s = {
-    id: uid('s'), areaId: areaId || null,
-    startedAt, endedAt, mins: Math.max(1, Math.round(mins)),
-    mode: mode || 'focus', date: ymd(new Date(startedAt))
-  };
-  state.sessions.unshift(s);
-  return s;
 }
 
 /* ---------------- quick add parser ----------------
@@ -500,7 +544,6 @@ export function snapshotRows() {
   const rows = [];
   for (const a of state.areas) rows.push({ kind: 'area', id: a.id, data: a });
   for (const t of state.items) rows.push({ kind: 'item', id: t.id, data: t });
-  for (const x of state.sessions) rows.push({ kind: 'session', id: x.id, data: x });
   for (const [date, n] of Object.entries(state.notes)) {
     if (!emptyNote(n)) rows.push({ kind: 'note', id: date, data: n });
   }
@@ -521,7 +564,6 @@ export function applyRow({ kind, id, data, deleted }) {
   switch (kind) {
     case 'area': return put(state.areas, data);
     case 'item': return put(state.items, data);
-    case 'session': return put(state.sessions, data);
     case 'note':
       if (deleted) { if (state.notes[id]) { delete state.notes[id]; return true; } return false; }
       state.notes[id] = data;
@@ -540,7 +582,6 @@ export function applyRow({ kind, id, data, deleted }) {
 /** Local modification time for a row, used to settle conflicts. */
 export function rowStamp(kind, id) {
   if (kind === 'item') return itemById(id)?.updatedAt || null;
-  if (kind === 'session') return state.sessions.find((s) => s.id === id)?.startedAt || null;
   return null;
 }
 
@@ -560,8 +601,6 @@ export function importJson(text, { merge = false } = {}) {
     state.items.push(...next.items.filter((t) => !seen.has(t.id)));
     const seenA = new Set(state.areas.map((a) => a.id));
     state.areas.push(...next.areas.filter((a) => !seenA.has(a.id)));
-    const seenS = new Set(state.sessions.map((s) => s.id));
-    state.sessions.push(...next.sessions.filter((s) => !seenS.has(s.id)));
     Object.assign(state.notes, next.notes);
   }
   save();
