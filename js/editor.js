@@ -1,6 +1,6 @@
 // editor.js — the task page. Notion-style properties + notes + subtasks.
 
-import { h, uid, fmtDate, fmtDuration, debounce } from './util.js';
+import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin } from './util.js';
 import { state, commit, itemById, deleteItem, toggleItem, ITEM_TYPES, progress } from './store.js';
 import { peek, closePeek, confirmDialog, toast } from './ui.js';
 import { pushItem } from './gcal.js';
@@ -82,64 +82,85 @@ function render(item) {
     h('select', { onchange: (e) => set({ type: e.target.value }) },
       ...ITEM_TYPES.map((t) => h('option', { value: t, selected: t === item.type }, t[0].toUpperCase() + t.slice(1))))));
 
-  props.append(prop('Due',
-    h('div', { class: 'pair' },
-      h('input', { type: 'date', value: item.due || '', onchange: (e) => set({ due: e.target.value || null }, { resync: true }) }),
-      h('input', { type: 'time', value: item.dueTime || '', style: { maxWidth: '110px' }, onchange: (e) => set({ dueTime: e.target.value || null }) }))));
-
+  /* Scheduled or Deadline, never both. A scheduled item owns a start and an
+     end and is what reaches Google Calendar; a deadline item is owed by a
+     time and carries an estimate instead. Which one it is is read off the
+     data — a booked block with a start time — so there is no extra field to
+     keep honest. */
   const plan = item.plan || {};
-  props.append(prop('Work on',
-    h('div', { class: 'pair' },
+  const scheduled = !!plan.start;
+
+  const toMode = (next) => {
+    if (next === 'scheduled') {
+      // carry the deadline's own date and time across, or switching back and
+      // forth quietly loses the time you set
+      const date = plan.date || item.due || today();
+      const start = plan.start || item.dueTime || '09:00';
+      set({ plan: { date, start, mins: plan.mins || item.estMins || 60 }, due: null, dueTime: null },
+        { resync: true });
+    } else {
+      set({ due: item.due || plan.date || today(), dueTime: item.dueTime || plan.start || null, plan: null },
+        { resync: true });
+    }
+    rerender();
+  };
+
+  props.append(prop('When',
+    h('div', { class: 'mode-toggle' },
+      h('button', {
+        class: 'mode' + (scheduled ? ' on' : ''), type: 'button',
+        'aria-pressed': String(scheduled), onclick: () => scheduled || toMode('scheduled')
+      }, 'Scheduled'),
+      h('button', {
+        class: 'mode' + (scheduled ? '' : ' on'), type: 'button',
+        'aria-pressed': String(!scheduled), onclick: () => scheduled && toMode('deadline')
+      }, 'Deadline'))));
+
+  if (scheduled) {
+    const endOf = (p) => fromMin(Math.min(24 * 60 - 1, toMin(p.start || '09:00') + (p.mins || 60)));
+    props.append(prop('Date',
       h('input', {
         type: 'date', value: plan.date || '',
-        onchange: (e) => {
-          const date = e.target.value;
-          set({ plan: date ? { date, start: plan.start || null, mins: plan.mins || item.estMins } : null }, { resync: true });
-          rerender();
-        }
-      }),
-      h('input', {
-        type: 'time', value: plan.start || '', style: { maxWidth: '110px' }, disabled: !plan.date,
-        onchange: (e) => {
-          set({ plan: { ...plan, date: plan.date, start: e.target.value || null, mins: plan.mins || item.estMins } }, { resync: true });
-          rerender();
-        }
-      }))));
+        onchange: (e) => { set({ plan: { ...plan, date: e.target.value || today() } }, { resync: true }); rerender(); }
+      })));
+    props.append(prop('From',
+      h('div', { class: 'pair', style: { alignItems: 'center' } },
+        h('input', {
+          type: 'time', value: plan.start || '', style: { maxWidth: '110px' },
+          onchange: (e) => {
+            set({ plan: { ...plan, start: e.target.value || '09:00' } }, { resync: true });
+            rerender();
+          }
+        }),
+        h('span', { class: 'eyebrow' }, 'to'),
+        h('input', {
+          type: 'time', value: endOf(plan), style: { maxWidth: '110px' },
+          onchange: (e) => {
+            // stored as a duration, so an end before the start is nonsense
+            const mins = toMin(e.target.value) - toMin(plan.start || '09:00');
+            if (mins <= 0) { toast('The end has to come after the start.'); rerender(); return; }
+            set({ plan: { ...plan, mins }, estMins: mins }, { resync: true });
+            rerender();
+          }
+        }))));
+  } else {
+    props.append(prop('Due',
+      h('div', { class: 'pair' },
+        h('input', { type: 'date', value: item.due || '', onchange: (e) => set({ due: e.target.value || null }, { resync: true }) }),
+        h('input', { type: 'time', value: item.dueTime || '', style: { maxWidth: '110px' }, onchange: (e) => set({ dueTime: e.target.value || null }) }))));
 
-  props.append(prop('Estimate',
-    h('div', { class: 'pair', style: { alignItems: 'center' } },
-      h('input', {
-        type: 'number', min: '5', step: '5', value: item.estMins, style: { maxWidth: '92px' },
-        onchange: (e) => {
-          const mins = Math.max(5, +e.target.value || 60);
-          const patch = { estMins: mins };
-          if (item.plan) patch.plan = { ...item.plan, mins };
-          set(patch, { resync: true });
-          rerender();
-        }
-      }),
-      h('span', { class: 'eyebrow' }, 'minutes'))));
+    props.append(prop('Estimate',
+      h('div', { class: 'pair', style: { alignItems: 'center' } },
+        h('input', {
+          type: 'number', min: '5', step: '5', value: item.estMins, style: { maxWidth: '92px' },
+          onchange: (e) => set({ estMins: Math.max(5, +e.target.value || 60) }, { resync: true })
+        }),
+        h('span', { class: 'eyebrow' }, 'minutes'))));
+  }
 
   props.append(prop('Priority',
     h('select', { onchange: (e) => set({ priority: e.target.value }) },
       ...['low', 'normal', 'high'].map((p) => h('option', { value: p, selected: p === item.priority }, p[0].toUpperCase() + p.slice(1))))));
-
-  const g = item.grade || {};
-  props.append(prop('Grade',
-    h('div', { class: 'pair', style: { alignItems: 'center' } },
-      h('input', {
-        type: 'number', step: 'any', placeholder: '—', value: g.score ?? '', style: { maxWidth: '80px' },
-        onchange: (e) => set({ grade: { ...g, score: e.target.value === '' ? null : +e.target.value } })
-      }),
-      h('span', { style: { color: 'var(--ink-3)' } }, '/'),
-      h('input', {
-        type: 'number', step: 'any', placeholder: '100', value: g.outOf ?? '', style: { maxWidth: '80px' },
-        onchange: (e) => set({ grade: { ...g, outOf: e.target.value === '' ? null : +e.target.value } })
-      }),
-      h('input', {
-        type: 'text', placeholder: 'category', value: g.category || '',
-        onchange: (e) => set({ grade: { ...g, category: e.target.value } })
-      }))));
 
   body.append(props);
 

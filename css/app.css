@@ -701,3 +701,18 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .area-chip .drag-handle { opacity: 0; }
 .area-chip:hover .drag-handle, .drag-handle:focus-visible { opacity: 1; }
 @media (hover: none) { .area-chip .drag-handle { opacity: .6; } }
+
+
+/* ---------- scheduled / deadline toggle ---------- */
+
+.mode-toggle {
+  display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden;
+}
+.mode-toggle .mode {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 5px 12px; color: var(--ink-2);
+  font: inherit; font-size: calc(12.5px * var(--scale));
+}
+.mode-toggle .mode + .mode { border-left: 1px solid var(--rule); }
+.mode-toggle .mode:hover { background: var(--rule-soft); color: var(--ink); }
+.mode-toggle .mode.on { background: var(--accent-soft); color: var(--ink); font-weight: 550; }

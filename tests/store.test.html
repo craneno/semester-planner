@@ -132,11 +132,22 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       load.course.open === 3 && load.project.open === 1,
       `course=${load.course.open} project=${load.project.open}`);
     check('categoryLoad sums estimates', load.course.mins === 120, `got ${load.course.mins}`);
-    // personal is the one category with no seed behind it, so it stays truly empty
-    check('categoryLoad reports empty categories as zero',
-      load.personal.open === 0 && load.personal.areas === 0);
     check('categoryLoad covers every category',
       s.categoryLoad().length === s.AREA_CATEGORIES.length);
+  }
+
+  {
+    // every category but course has a seed behind it, so a genuinely empty one
+    // only exists on data already at the current schema
+    const s = await storeWith({
+      version: 8, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
+      areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [], cards: [], notes: {}
+    });
+    const load = Object.fromEntries(s.categoryLoad().map((c) => [c.id, c]));
+    check('categoryLoad reports an empty category as zero',
+      load.ner.open === 0 && load.ner.areas === 0);
+    check('nothing is seeded on data already at the current schema',
+      s.state.areas.length === 1, s.state.areas.map((a) => a.name).join());
   }
 
   /* ---- ordering ---- */

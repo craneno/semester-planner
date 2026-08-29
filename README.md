@@ -295,6 +295,11 @@ newline, Tab reaches the filing buttons.
 planned. On the right: your focus and today's three, open work split by category, and a place to write
 what moved. There is no separate Today page.
 
+**Scheduled or due.** A task is one or the other. *Scheduled* has a date, a start and an end, and goes on
+your Google Calendar. *Deadline* has a due date and an estimate of how long it will take. Quick add reads a
+time range directly — `fly to boston aug 29 12-7` books noon to seven — while `problem set 3 due fri 5pm 2h`
+makes a deadline. Four kinds of thing: event, task, meeting, homework.
+
 **Reordering.** Drag the grip on a course to move it up or down, either on its category page or in the
 sidebar. The order is stored on the area itself, so it follows you to your phone.
 

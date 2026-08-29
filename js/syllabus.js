@@ -12,13 +12,14 @@ const ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oc
 
 // order matters: the first match wins, so specific beats generic
 const TYPE_HINTS = [
-  [/\bquiz\b/i, 'quiz'],
-  [/\b(midterm|final\s+exam|finals?\s+week|\bexam\b|\btest\b)/i, 'exam'],
-  [/\b(hw|homework|problem\s?set|pset|ps\s*\d|assignment)\b/i, 'assignment'],
-  [/\b(present|presentation|talk|defen[cs]e|demo)\b/i, 'presentation'],
-  [/\b(lab|project|design\s+review|deliverable)\b/i, 'assignment'],
-  [/\b(paper|essay|report|memo|proposal|draft|abstract|thesis)\b/i, 'paper'],
-  [/\b(read|reading|chapter|ch\.|pp\.)\b/i, 'reading']
+  // an exam or a presentation happens at a fixed time, so it is an event
+  [/\b(midterm|final\s+exam|finals?\s+week|\bexam\b|\btest\b|quiz)/i, 'event'],
+  [/\b(present|presentation|talk|defen[cs]e|demo)\b/i, 'event'],
+  [/\b(meeting|conference|office\s*hours)\b/i, 'meeting'],
+  [/\b(hw|homework|problem\s?set|pset|ps\s*\d|assignment)\b/i, 'homework'],
+  [/\b(lab|project|design\s+review|deliverable)\b/i, 'homework'],
+  [/\b(paper|essay|report|memo|proposal|draft|abstract|thesis)\b/i, 'homework'],
+  [/\b(read|reading|chapter|ch\.|pp\.)\b/i, 'homework']
 ];
 
 function loadPdfJs() {
@@ -100,7 +101,7 @@ export function detect(text, { yearHint } = {}) {
     if (title.length < 3) continue;
     if (title.length > 90) title = title.slice(0, 90).trim() + '…';
 
-    const type = (TYPE_HINTS.find(([re]) => re.test(line)) || [null, 'assignment'])[1];
+    const type = (TYPE_HINTS.find(([re]) => re.test(line)) || [null, 'homework'])[1];
     const key = `${date}|${title.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -183,7 +184,7 @@ export function openSyllabusImport(navigate, presetAreaId = null) {
           if (!keep.length) { toast('Nothing selected to import.'); return; }
           commit(() => {
             for (const f of keep) {
-              upsertItem({ title: f.title.trim(), due: f.due, type: f.type, areaId: areaSelect.value || null, estMins: f.type === 'exam' ? 120 : 90 });
+              upsertItem({ title: f.title.trim(), due: f.due, type: f.type, areaId: areaSelect.value || null, estMins: f.type === 'event' ? 120 : 90 });
             }
           });
           closeModal();

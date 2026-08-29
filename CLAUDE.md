@@ -134,7 +134,8 @@ total. There is no runner and nothing to install.
 | file | covers |
 |---|---|
 | `tests/harness.js` | the whole framework: `suite()`, the guards, `freshStore()` |
-| `tests/store.test.html` | migration, categories, selectors, study removal |
+| `tests/store.test.html` | migration, categories, ordering, selectors |
+| `tests/parse.test.html` | quick add: dates, time ranges, types, area matching |
 | `tests/capture.test.html` | notecards, filing, card sync, the version-pinned seeds |
 | `tests/gcal.test.html` | deriving a schedule from recurring calendar events |
 | `tests/sync.test.html` | delete durability against a stand-in Supabase |
@@ -244,6 +245,34 @@ become a phantom weekly meeting.
 The picker expands *inside* the area editor rather than opening its own modal:
 `ui.js` keeps one modal at a time, so a modal on top would close the editor
 underneath it.
+
+## Scheduled or a deadline, never both
+
+An item is one of two things and the editor makes you pick:
+
+- **Scheduled** — `plan: { date, start, mins }`. Has a start and an end, and is
+  the only shape that reaches Google Calendar.
+- **Deadline** — `due` + `dueTime` + `estMins`. Owed by a time; **a due date is
+  never pushed to the calendar.**
+
+Which one it is is read off the data (`!!item.plan.start`), not stored
+separately, so there is no third field to keep honest. Switching modes carries
+the date and time across — dropping them silently loses the time the user set.
+
+`ITEM_TYPES` is four: `event`, `task`, `meeting`, `homework`. Schema 7 and
+earlier had eleven; `LEGACY_TYPE` maps them. Anything unrecognised becomes
+`task`. Items no longer carry a `grade`.
+
+Quick add understands a **time range** — "12-7", "2:30-4pm", "9 to 11am" — and
+a range means scheduled, not due. `parseRange()` must run before `parseWhen()`:
+otherwise one half is claimed as a due time and the other is stranded in the
+title, which is how "fly to boston aug 29 12-7" once became "fly to boston 12
+to", due 7pm. Bare hours read the way people say them (7–11 morning, 12 noon,
+1–6 afternoon), and a range preceded by ch/page/problem/section is left alone
+so "read ch 3-4" is not an afternoon meeting.
+
+An item created with no area lands in the **Personal** area
+(`defaultAreaId()`), seeded on the upgrade into schema 8.
 
 ## Adding a field to a task
 

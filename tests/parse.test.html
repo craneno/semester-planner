@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quick add tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, storeWith } from './harness.js';
+
+const base = {
+  version: 8,
+  semester: { name: 'Fall 2026', start: '2026-08-01', end: '2026-12-12' },
+  areas: [
+    { id: 'a1', name: 'Thermodynamics', category: 'course', order: 0 },
+    { id: 'p1', name: 'Personal', category: 'personal', order: 1 }
+  ],
+  items: [], cards: [], notes: {}
+};
+
+suite('Quick add — dates, ranges and types', async ({ check }) => {
+  const s = await storeWith(base);
+  const p = (str) => s.parseQuickAdd(str);
+
+  /** end time, worked back out of start + duration */
+  const endOf = (plan) => {
+    const [H, M] = plan.start.split(':').map(Number);
+    const t = H * 60 + M + plan.mins;
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  };
+  const span = (str) => {
+    const r = p(str);
+    return r.plan && r.plan.start ? `${r.plan.start}-${endOf(r.plan)}` : null;
+  };
+
+  /* ---- the case that started this ---- */
+
+  {
+    const r = p('fly to boston aug 29 12-7');
+    check('a time range is not left in the title', r.title === 'fly to boston', `got "${r.title}"`);
+    check('a time range books the block', !!r.plan && r.plan.start === '12:00', `got ${r.plan?.start}`);
+    check('...for the whole span', r.plan.mins === 420, `got ${r.plan.mins}`);
+    check('...on the date given', r.plan.date === '2026-08-29', `got ${r.plan.date}`);
+    check('a scheduled thing has no due date', r.due === null && r.dueTime === null,
+      'a due date alone never reaches Google Calendar');
+    check('a range with no other hint reads as an event', r.type === 'event', `got ${r.type}`);
+  }
+
+  /* ---- reading bare hours the way a person means them ---- */
+
+  check('morning hours stay morning', span('lab 9-11') === '09:00-11:00', span('lab 9-11'));
+  check('small hours read as afternoon', span('study 2-4') === '14:00-16:00', span('study 2-4'));
+  check('noon reads as noon', span('shift 12-3') === '12:00-15:00', span('shift 12-3'));
+  check('a range across noon still moves forward', span('shift 11-1') === '11:00-13:00', span('shift 11-1'));
+  check('an explicit meridiem is obeyed', span('dinner 6pm-8pm') === '18:00-20:00', span('dinner 6pm-8pm'));
+  check('minutes survive', span('call 2:30-4pm') === '14:30-16:00', span('call 2:30-4pm'));
+  check('"to" works as well as a dash', span('seminar 9 to 11am') === '09:00-11:00', span('seminar 9 to 11am'));
+  check('a trailing meridiem covers both ends', span('office 10 to 11am') === '10:00-11:00', span('office 10 to 11am'));
+
+  /* ---- ranges of things that are not hours ---- */
+
+  for (const str of ['read ch 3-4', 'pages 10-20', 'problem 2-5', 'section 1-3', 'week 2-3 notes']) {
+    check(`"${str}" is not a time range`, p(str).plan === null,
+      'a chapter range must not become an afternoon meeting');
+  }
+  check('a chapter range stays in the title', p('read ch 3-4').title === 'read ch 3-4');
+
+  /* ---- deadlines still behave ---- */
+
+  {
+    const r = p('problem set 3 due fri 5pm 2h !high');
+    check('a deadline keeps its due date', !!r.due);
+    check('a deadline keeps its time', r.dueTime === '17:00', `got ${r.dueTime}`);
+    check('a deadline books no block', r.plan === null);
+    check('a duration becomes the estimate', r.estMins === 120, `got ${r.estMins}`);
+    check('priority is read', r.priority === 'high');
+    check('the noise is stripped from the title', r.title === 'problem set 3', `got "${r.title}"`);
+  }
+
+  /* ---- the four types ---- */
+
+  check('coursework is homework', p('problem set 4').type === 'homework');
+  check('reading is homework', p('read chapter 9').type === 'homework');
+  check('an exam is an event', p('midterm exam').type === 'event');
+  check('a meeting is a meeting', p('sync with advisor').type === 'meeting');
+  check('an errand is a task', p('email registrar').type === 'task');
+  check('anything unrecognised is a task', p('something vague').type === 'task', p('something vague').type);
+  check('every parsed type is a real type',
+    ['problem set 4', 'midterm', 'sync', 'email someone', 'whatever']
+      .every((str) => s.ITEM_TYPES.includes(p(str).type)));
+  check('an explicit type word wins', p('event with the dean').type === 'event');
+
+  /* ---- areas ---- */
+
+  check('an area is matched by name', p('Thermodynamics reading').areaId === 'a1');
+  check('an area is matched by #tag', p('essay #Thermodynamics').areaId === 'a1');
+  check('no match leaves it for the store to default', p('random thing').areaId === null);
+
+  /* ---- what the store then does with it ---- */
+
+  {
+    const made = s.upsertItem(p('random errand'));
+    check('an item with no area lands in Personal',
+      made.areaId === 'p1', `got ${s.areaName(made.areaId)}`);
+  }
+  {
+    const made = s.upsertItem(p('Thermodynamics reading'));
+    check('a matched area is not overridden by the default', made.areaId === 'a1');
+  }
+});
+</script>
+</body>
+</html>

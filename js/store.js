@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -24,10 +24,17 @@ const KIND_TO_CATEGORY = {
   research: 'project', thesis: 'project', work: 'project', applications: 'project'
 };
 
-export const ITEM_TYPES = [
-  'assignment', 'reading', 'exam', 'quiz', 'paper', 'presentation',
-  'meeting', 'research', 'writing', 'admin', 'personal'
-];
+/* Four kinds of thing, not eleven. An event or a meeting happens at a time;
+   homework and a task are owed by a time. */
+export const ITEM_TYPES = ['event', 'task', 'meeting', 'homework'];
+
+/** Schema 7 and earlier had eleven types. */
+const LEGACY_TYPE = {
+  assignment: 'homework', reading: 'homework', paper: 'homework', writing: 'homework',
+  exam: 'event', quiz: 'event', presentation: 'event',
+  meeting: 'meeting',
+  admin: 'task', personal: 'task', research: 'task'
+};
 
 export const AREA_COLORS = [
   '#3C6E8F', '#7A5C9E', '#2F7D62', '#B4713C', '#9E4A5C',
@@ -133,6 +140,7 @@ function migrate(raw) {
   };
   if (from < 5) seed('Rocket', 'project');
   if (from < 6) seed('NER Meetings', 'ner');
+  if (from < 8) seed('Personal', 'personal');
 
   // normalise items (older schemas used plannedDate / dueDate / estimate)
   s.items = s.items.map((t) => {
@@ -145,7 +153,7 @@ function migrate(raw) {
       id: t.id || uid('t'),
       title: t.title || 'Untitled',
       areaId: t.areaId || t.courseId || null,
-      type: t.type || 'assignment',
+      type: ITEM_TYPES.includes(t.type) ? t.type : (LEGACY_TYPE[t.type] || 'task'),
       due: t.due || t.dueDate || null,
       dueTime: t.dueTime || null,
       plan,
@@ -155,7 +163,6 @@ function migrate(raw) {
       doneAt: t.doneAt || null,
       subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
       notes: t.notes || '',
-      grade: t.grade || null,             // { score, outOf, category }
       gcalId: t.gcalId || null,
       createdAt: t.createdAt || new Date().toISOString(),
       updatedAt: t.updatedAt || new Date().toISOString()
@@ -348,6 +355,10 @@ export function eventsOn(date) {
 
 /* ---------------- mutations ---------------- */
 
+/** Where an item goes when nothing else is said: the Personal area, if there
+ *  is one. Falls back to unassigned rather than inventing an area. */
+export const defaultAreaId = () => areasInCategory('personal')[0]?.id || null;
+
 export function upsertItem(patch) {
   const now = new Date().toISOString();
   let item = patch.id ? itemById(patch.id) : null;
@@ -355,11 +366,12 @@ export function upsertItem(patch) {
     Object.assign(item, patch, { updatedAt: now });
   } else {
     item = {
-      id: uid('t'), title: 'Untitled', areaId: null, type: 'assignment',
+      id: uid('t'), title: 'Untitled', areaId: null, type: 'task',
       due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60,
-      done: false, doneAt: null, subtasks: [], notes: '', grade: null,
+      done: false, doneAt: null, subtasks: [], notes: '',
       gcalId: null, createdAt: now, updatedAt: now, ...patch
     };
+    if (!item.areaId) item.areaId = defaultAreaId();
     state.items.push(item);
   }
   return item;
@@ -529,9 +541,46 @@ function parseWhen(text) { // returns {date, time, consumed:[strings]} or null
   return date || time ? { date, time, consumed } : null;
 }
 
+/**
+ * A start–end time range: "12-7", "2:30-4pm", "9 to 11am".
+ *
+ * Bare hours are read the way a person means them during a day: 7–11 is
+ * morning, 12 is noon, 1–6 is afternoon. So "12-7" is noon to seven, and
+ * "2-4" is the afternoon. An end that lands before its start is pushed
+ * twelve hours, which is what "11-1" means.
+ */
+function parseRange(text) {
+  const m = text.match(
+    /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  if (!m) return null;
+
+  // "read ch 3-4" and "pages 10-20" are ranges of things, not of hours
+  const before = text.slice(0, m.index);
+  if (/\b(ch|chap|chapters?|p|pp|pg|pages?|problems?|q|questions?|sections?|no|nums?|units?|weeks?|#)\s*\.?\s*$/i.test(before)) {
+    return null;
+  }
+
+  const daytime = (h) => (h >= 7 && h <= 11 ? h : h === 12 ? 12 : h + 12);
+  const hour = (raw, ampm) => {
+    const h = +raw;
+    if (!ampm) return daytime(h);
+    const base = h % 12;
+    return /pm/i.test(ampm) ? base + 12 : base;
+  };
+
+  let sh = hour(m[1], m[3]);
+  let eh = hour(m[4], m[6] || m[3]);   // "9 to 11am" — a trailing meridiem covers both
+  const sm = +(m[2] || 0), em = +(m[5] || 0);
+  let start = sh * 60 + sm, end = eh * 60 + em;
+  if (end <= start) end += 12 * 60;                       // "11-1"
+  if (end <= start || end > 24 * 60) return null;
+
+  return { start: fromMin(start), end: fromMin(end), mins: end - start, consumed: m[0] };
+}
+
 export function parseQuickAdd(input) {
   let text = ' ' + input.trim() + ' ';
-  const out = { title: '', areaId: null, type: 'assignment', due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60 };
+  const out = { title: '', areaId: null, type: 'task', due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60 };
 
   // priority
   const pm = text.match(/\s!(high|low|normal|h|l)\b/i);
@@ -562,16 +611,12 @@ export function parseQuickAdd(input) {
     }
   }
 
-  // type: first specific hint wins, else the bare type word, else assignment
+  // type: first specific hint wins, else the bare type word, else task
   const TYPE_HINTS = [
-    [/\bquiz\b/i, 'quiz'],
-    [/\b(midterm|final\s+exam|exam|test)\b/i, 'exam'],
-    [/\b(hw|homework|problem\s?set|pset|ps\s*\d)\b/i, 'assignment'],
-    [/\b(present|presentation|talk|demo)\b/i, 'presentation'],
-    [/\b(paper|essay|report|memo|proposal|draft|abstract)\b/i, 'paper'],
-    [/\b(read|reading|chapter|ch\.)\b/i, 'reading'],
-    [/\b(meet|meeting|call|1:1|sync)\b/i, 'meeting'],
-    [/\b(email|form|register|submit|admin)\b/i, 'admin']
+    [/\b(meet|meeting|call|1:1|sync|standup|office\s*hours)\b/i, 'meeting'],
+    [/\b(hw|homework|problem\s?set|pset|ps\s*\d|assignment|quiz|paper|essay|report|memo|proposal|draft|abstract|read|reading|chapter|ch\.)\b/i, 'homework'],
+    [/\b(midterm|final\s+exam|exam|test|present|presentation|talk|demo|lecture|class|flight|fly|appointment)\b/i, 'event'],
+    [/\b(email|form|register|submit|admin|errand)\b/i, 'task']
   ];
   const hinted = TYPE_HINTS.find(([re]) => re.test(text));
   if (hinted) out.type = hinted[1];
@@ -579,6 +624,20 @@ export function parseQuickAdd(input) {
     for (const ty of ITEM_TYPES) {
       if (new RegExp(`\\b${ty}\\b`, 'i').test(text)) { out.type = ty; break; }
     }
+  }
+
+  // A start-end range makes this a scheduled thing rather than a deadline.
+  // Take it out of the text before anything else looks for a time: otherwise
+  // parseWhen() claims one half as a due time and the other half is left
+  // stranded in the title — "fly to boston aug 29 12-7" became "fly to boston
+  // 12 to", due 7pm.
+  const range = parseRange(text);
+  if (range) {
+    const at = text.toLowerCase().indexOf(range.consumed.toLowerCase());
+    if (at >= 0) {
+      text = text.slice(0, at) + ' '.repeat(range.consumed.length) + text.slice(at + range.consumed.length);
+    }
+    out.estMins = range.mins;
   }
 
   // planned date: "plan <when>" / "work <when>"
@@ -609,6 +668,13 @@ export function parseQuickAdd(input) {
   if (!out.due && !out.plan) {
     const w = grab(0);
     if (w) { out.due = w.date; out.dueTime = w.time; }
+  }
+
+  if (range) {
+    out.plan = { date: out.due || out.plan?.date || today(), start: range.start, mins: range.mins };
+    out.due = null;
+    out.dueTime = null;
+    if (!hinted) out.type = 'event';
   }
 
   out.title = text.replace(/\s+/g, ' ').trim().replace(/^[-–—:]\s*/, '') || 'Untitled';

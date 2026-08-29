@@ -135,7 +135,13 @@ suite('Capture — notecards and filing', async ({ check }) => {
   }
   {
     const s = await storeWith({ version: 6, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
-    check('nothing is seeded once already on 6', s.state.areas.length === 1);
+    check('upgrading 6 to 8 seeds only what 8 added',
+      s.state.areas.map((a) => a.name).join() === 'Thermo,Personal',
+      s.state.areas.map((a) => a.name).join());
+  }
+  {
+    const s = await storeWith({ version: 8, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
+    check('nothing is seeded once already current', s.state.areas.length === 1);
   }
 });
 </script>

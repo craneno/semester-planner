@@ -103,22 +103,11 @@ function areaGroup(a, { navigate, go }) {
       h('button', { class: 'area-name', onclick: () => go(`area/${a.id}`) }, a.name),
       h('span', { class: 'eyebrow num' }, `${done}/${mine.length}`),
       h('div', { style: { flex: 1 } }),
-      grade(mine),
       h('button', { class: 'btn sm ghost', onclick: () => editArea(a, a.category, navigate) }, 'Edit'),
       a.category === 'course'
         ? h('button', { class: 'btn sm ghost', onclick: () => openSyllabusImport(navigate, a.id) }, 'Syllabus')
         : null),
     body);
-}
-
-function grade(items) {
-  const graded = items.filter((t) => t.grade && t.grade.score != null && t.grade.outOf);
-  if (!graded.length) return null;
-  const earned = graded.reduce((n, t) => n + t.grade.score, 0);
-  const outOf = graded.reduce((n, t) => n + t.grade.outOf, 0);
-  if (!outOf) return null;
-  return h('span', { class: 'eyebrow num', title: `${graded.length} graded` },
-    ((earned / outOf) * 100).toFixed(1) + '%');
 }
 
 function taskRow(t, rerender) {
