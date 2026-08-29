@@ -1,0 +1,50 @@
+# Publishes the planner to GitHub Pages on every push to main.
+# There is no build step — the repo is the site.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check every module parses
+        run: |
+          for f in $(find js -name '*.js'); do
+            cp "$f" "/tmp/$(basename "$f" .js).mjs"
+            node --check "/tmp/$(basename "$f" .js).mjs"
+          done
+          node --check sw.js
+          node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest'))"
+
+      - uses: actions/configure-pages@v5
+
+      - name: Package the site
+        run: |
+          mkdir -p _site
+          rsync -a --exclude '.git' --exclude '.github' --exclude 'node_modules' \
+                --exclude 'supabase' --exclude '_site' ./ _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

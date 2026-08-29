@@ -1,0 +1,10 @@
+# nothing here is built, so there is very little to ignore
+node_modules/
+.DS_Store
+*.log
+.vercel/
+.env
+.env.local
+
+# planner backups you export from Settings
+planner-*.json

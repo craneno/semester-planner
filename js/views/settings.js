@@ -1,0 +1,331 @@
+// views/settings.js — semester, Google Calendar, appearance, data.
+
+import { h, clear, debounce } from '../util.js';
+import { state, commit, exportJson, importJson } from '../store.js';
+import { toast, confirmDialog } from '../ui.js';
+import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
+import * as G from '../gcal.js';
+import * as C from '../cloud.js';
+
+export function renderSettings(root, { navigate }) {
+  clear(root);
+  const p = h('div', { class: 'pad', style: { maxWidth: '760px' } });
+  const s = state.settings;
+
+  p.append(h('h1', { style: { marginBottom: '16px' } }, 'Settings'));
+
+  /* ---------- semester ---------- */
+  p.append(section('Semester', [
+    field('Name', h('input', {
+      type: 'text', value: state.semester.name,
+      oninput: debounce((e) => commit(() => { state.semester.name = e.target.value; }), 400)
+    })),
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+      field('First day', h('input', {
+        type: 'date', value: state.semester.start,
+        onchange: (e) => { commit(() => { state.semester.start = e.target.value; }); navigate(); }
+      })),
+      field('Last day', h('input', {
+        type: 'date', value: state.semester.end,
+        onchange: (e) => { commit(() => { state.semester.end = e.target.value; }); navigate(); }
+      })))
+  ]));
+
+  /* ---------- google calendar ---------- */
+  const g = s.gcal;
+  const statusLine = h('div', { class: 'eyebrow', style: { marginBottom: '10px' } });
+  const calPicker = h('select', { onchange: (e) => { commit(() => { g.calendarId = e.target.value; g.syncToken = ''; }); G.sync({ full: true }); } });
+
+  function paintStatus() {
+    const map = {
+      off: 'Not configured', 'signed-out': 'Signed out', connecting: 'Connecting…',
+      ready: g.lastSync ? `Synced ${new Date(g.lastSync).toLocaleTimeString()}` : 'Connected',
+      syncing: 'Syncing…', error: 'Error: ' + G.gcal.message, offline: 'Offline — changes queued'
+    };
+    statusLine.textContent = map[G.gcal.status] || G.gcal.status;
+    statusLine.style.color = G.gcal.status === 'error' ? 'var(--danger)' : 'var(--ink-3)';
+
+    clear(calPicker);
+    const cals = G.gcal.calendars.length ? G.gcal.calendars : [{ id: 'primary', name: 'Primary calendar', writable: true }];
+    for (const c of cals) {
+      calPicker.append(h('option', { value: c.id, selected: c.id === g.calendarId },
+        c.name + (c.writable ? '' : ' (read-only)')));
+    }
+  }
+  G.onGcal(paintStatus);
+
+  p.append(section('Google Calendar', [
+    statusLine,
+    field('OAuth client ID', h('input', {
+      type: 'text', placeholder: '1234567890-abc.apps.googleusercontent.com', value: g.clientId,
+      oninput: debounce((e) => commit(() => { g.clientId = e.target.value.trim(); }), 400)
+    })),
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 12px' } },
+      'From Google Cloud Console → Credentials → OAuth client ID (Web application). Add this exact origin — ',
+      h('code', { class: 'mono' }, location.origin),
+      ' — to both Authorised JavaScript origins and Authorised redirect URIs. See README.md.'),
+    field('Calendar', calPicker),
+    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' } },
+      h('button', {
+        class: 'btn primary',
+        onclick: async () => {
+          try {
+            commit(() => { g.enabled = true; });
+            await G.signIn(true);
+            await G.listCalendars();
+            await G.sync({ full: true });
+            await G.start();
+            toast('Google Calendar connected.');
+            navigate();
+          } catch (err) { toast(err.message); }
+        }
+      }, G.isSignedIn() ? 'Reconnect' : 'Connect Google Calendar'),
+      h('button', { class: 'btn', onclick: () => { G.sync({ full: true }); toast('Resyncing…'); } }, 'Force full resync'),
+      h('button', {
+        class: 'btn ghost', onclick: () => {
+          G.forgetToken();
+          commit(() => { g.enabled = false; g.syncToken = ''; state.events = []; });
+          G.stop();
+          navigate();
+        }
+      }, 'Disconnect')),
+    toggle('Two-way sync', 'Pull events in, and push planned work blocks out as calendar events.', g.pushPlans,
+      (v) => commit(() => { g.pushPlans = v; }))
+  ]));
+  paintStatus();
+
+
+  /* ---------- cloud sync ---------- */
+  const cl = s.cloud;
+  const cloudStatus = h('div', { class: 'eyebrow', style: { marginBottom: '10px' } });
+  const emailIn = h('input', { type: 'text', placeholder: 'you@northeastern.edu', autocomplete: 'username', value: C.cloud.email || '' });
+  const pwIn = h('input', { type: 'password', placeholder: 'Password (8+ characters)', autocomplete: 'current-password' });
+  const authRow = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' } });
+
+  function paintCloud() {
+    const map = {
+      off: 'Not configured',
+      'signed-out': 'Signed out — this device works offline on its own',
+      connecting: 'Connecting…',
+      ready: (C.cloud.email ? C.cloud.email + ' · ' : '')
+        + (cl.lastSync ? 'synced ' + new Date(cl.lastSync).toLocaleTimeString() : 'connected')
+        + (C.cloud.live ? ' · live' : ''),
+      syncing: 'Syncing…',
+      error: 'Error: ' + C.cloud.message,
+      offline: 'Offline — changes sync when you reconnect'
+    };
+    cloudStatus.textContent = map[C.cloud.status] || C.cloud.status;
+    cloudStatus.style.color = C.cloud.status === 'error' ? 'var(--danger)' : 'var(--ink-3)';
+
+    clear(authRow);
+    if (C.isSignedIn()) {
+      authRow.append(
+        h('button', { class: 'btn', onclick: () => { C.sync(); toast('Syncing…'); } }, 'Sync now'),
+        h('button', {
+          class: 'btn', onclick: async () => {
+            if (await confirmDialog('Rebuild sync from scratch?',
+              'Pulls everything down again and re-uploads this device. Useful if the two ever drift apart. No data is deleted.', 'Rebuild')) {
+              C.resetLocalSyncState();
+              await C.sync({ full: true });
+              toast('Sync rebuilt.');
+              navigate();
+            }
+          }
+        }, 'Rebuild sync'),
+        h('button', {
+          class: 'btn ghost', onclick: async () => { await C.signOut(); navigate(); }
+        }, 'Sign out'));
+    } else {
+      authRow.append(
+        h('button', {
+          class: 'btn primary', onclick: async () => {
+            try {
+              commit(() => { cl.enabled = true; });
+              await C.signIn(emailIn.value.trim(), pwIn.value);
+              await C.start();
+              toast('Signed in — syncing.');
+              navigate();
+            } catch (err) { toast(err.message || 'Could not sign in.'); }
+          }
+        }, 'Sign in'),
+        h('button', {
+          class: 'btn', onclick: async () => {
+            try {
+              commit(() => { cl.enabled = true; });
+              const r = await C.signUp(emailIn.value.trim(), pwIn.value);
+              if (r.needsConfirmation) toast('Check your email to confirm, then sign in.');
+              else { await C.start(); toast('Account created — syncing.'); }
+              navigate();
+            } catch (err) { toast(err.message || 'Could not create the account.'); }
+          }
+        }, 'Create account'),
+        h('button', {
+          class: 'btn ghost', onclick: async () => {
+            try { await C.sendReset(emailIn.value.trim()); toast('Reset email sent.'); }
+            catch (err) { toast(err.message || 'Could not send the reset email.'); }
+          }
+        }, 'Forgot password'));
+    }
+  }
+  C.onCloud(paintCloud);
+
+  p.append(section('Cloud sync', [
+    cloudStatus,
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+      field('Supabase project URL', h('input', {
+        type: 'text', placeholder: 'https://abcdefgh.supabase.co', value: cl.url,
+        oninput: debounce((e) => commit(() => { cl.url = e.target.value.trim(); }), 400)
+      })),
+      field('Anon public key', h('input', {
+        type: 'text', placeholder: 'eyJhbGciOi…', value: cl.anonKey,
+        oninput: debounce((e) => commit(() => { cl.anonKey = e.target.value.trim(); }), 400)
+      }))),
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 0' } },
+      'From your Supabase project → Settings → API. The anon key is meant to be public; row level security is what keeps your rows yours. Run ',
+      h('code', { class: 'mono' }, 'supabase/schema.sql'),
+      ' in the SQL editor once before signing in.'),
+    field('Email', emailIn),
+    field('Password', pwIn),
+    authRow,
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '10px 0 0' } },
+      'Everything keeps working offline and syncs when you get back. Signing out leaves this device\'s data untouched.')
+  ]));
+  paintCloud();
+
+  /* ---------- appearance ---------- */
+  const swatches = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+    ...Object.entries(THEMES).map(([key, t]) => h('button', {
+      class: 'preset', 'aria-pressed': String(s.theme === key),
+      onclick: () => { commit(() => { s.theme = key; s.colors = {}; }); applyAppearance(); navigate(); }
+    },
+    h('span', { class: 'dot', style: { background: t.swatch, marginRight: '6px', display: 'inline-block' } }), t.label)));
+
+  const colorRow = (label, key, fallbackVar) => h('div', { class: 'prop' },
+    h('label', {}, label),
+    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+      h('input', {
+        type: 'color',
+        value: s.colors[key] || getComputedStyle(document.documentElement).getPropertyValue(fallbackVar).trim() || '#ffffff',
+        style: { width: '44px', height: '26px', padding: '2px' },
+        oninput: (e) => { commit(() => { s.colors[key] = e.target.value; }); applyAppearance(); }
+      }),
+      s.colors[key] ? h('button', {
+        class: 'btn ghost sm',
+        onclick: () => { commit(() => { delete s.colors[key]; }); applyAppearance(); navigate(); }
+      }, 'Reset') : null));
+
+  p.append(section('Appearance', [
+    h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, 'Theme'),
+    swatches,
+    h('div', { class: 'props', style: { marginTop: '16px' } },
+      colorRow('Page', 'paper', '--paper'),
+      colorRow('Cards', 'surface', '--surface'),
+      colorRow('Accent', 'accent', '--accent'),
+      colorRow('Text', 'ink', '--ink')),
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+      field('Heading font', fontSelect('heading')),
+      field('Body font', fontSelect('body'))),
+    field('Custom font name (installed on this device)', h('input', {
+      type: 'text', placeholder: 'e.g. Avenir Next, Iowan Old Style', value: s.fonts.custom || '',
+      oninput: debounce((e) => { commit(() => { s.fonts.custom = e.target.value; }); applyAppearance(); }, 400)
+    })),
+    field(`Text size — ${Math.round(s.scale * 100)}%`, h('input', {
+      type: 'range', min: '0.85', max: '1.3', step: '0.05', value: s.scale, style: { padding: 0 },
+      oninput: (e) => { commit(() => { s.scale = +e.target.value; }); applyAppearance(); },
+      onchange: () => navigate()
+    })),
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+      field('Week starts on', h('select', { onchange: (e) => { commit(() => { s.weekStart = +e.target.value; }); navigate(); } },
+        h('option', { value: '1', selected: s.weekStart === 1 }, 'Monday'),
+        h('option', { value: '0', selected: s.weekStart === 0 }, 'Sunday'))),
+      field('Clock', h('select', { onchange: (e) => { commit(() => { s.hour12 = e.target.value === '12'; }); navigate(); } },
+        h('option', { value: '12', selected: s.hour12 }, '12-hour'),
+        h('option', { value: '24', selected: !s.hour12 }, '24-hour')))),
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+      field('Day grid starts', hourSelect('dayStart')),
+      field('Day grid ends', hourSelect('dayEnd'))),
+    h('button', {
+      class: 'btn ghost', style: { marginTop: '10px' },
+      onclick: () => {
+        commit(() => { s.theme = 'graphite'; s.colors = {}; s.fonts = { heading: '', body: '', custom: '' }; s.scale = 1; });
+        applyAppearance(); navigate(); toast('Appearance reset.');
+      }
+    }, 'Reset appearance')
+  ]));
+
+  /* ---------- data ---------- */
+  const fileInput = h('input', {
+    type: 'file', accept: 'application/json', style: { display: 'none' },
+    onchange: async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const text = await f.text();
+      try {
+        const merge = await confirmDialog('Merge or replace?',
+          'Merge keeps what is already here and adds anything new. Replace overwrites this device.', 'Merge');
+        importJson(text, { merge });
+        toast(merge ? 'Backup merged.' : 'Backup restored.');
+        navigate();
+      } catch (err) { toast('That file could not be read: ' + err.message); }
+      e.target.value = '';
+    }
+  });
+
+  p.append(section('Data', [
+    h('p', { style: { fontSize: '13px', color: 'var(--ink-2)', margin: '0 0 12px' } },
+      `Everything lives in this browser's storage: ${state.items.length} tasks, ${state.areas.length} areas, ${state.sessions.length} study sessions. Export before you clear site data.`),
+    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+      h('button', {
+        class: 'btn primary', onclick: () => {
+          const blob = new Blob([exportJson()], { type: 'application/json' });
+          const a = h('a', { href: URL.createObjectURL(blob), download: `planner-${new Date().toISOString().slice(0, 10)}.json` });
+          document.body.append(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+      }, 'Export backup'),
+      h('button', { class: 'btn', onclick: () => fileInput.click() }, 'Restore from file'),
+      fileInput,
+      h('button', {
+        class: 'btn ghost danger', onclick: async () => {
+          if (await confirmDialog('Erase everything on this device?', 'Tasks, areas, sessions, and settings. Export first if you want them back.', 'Erase')) {
+            localStorage.removeItem('semesterPlanner.v1');
+            location.reload();
+          }
+        }
+      }, 'Erase all data'))
+  ]));
+
+  root.append(p);
+}
+
+/* ---------- bits ---------- */
+
+function section(title, children) {
+  return h('section', { class: 'card', style: { marginBottom: '18px' } },
+    h('div', { class: 'card-h' }, h('h2', {}, title)),
+    h('div', { class: 'card-b', style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, ...children));
+}
+
+function field(label, control) {
+  return h('div', { class: 'field' }, h('label', {}, label), control);
+}
+
+function toggle(label, help, value, onchange) {
+  return h('label', { style: { display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer', marginTop: '4px' } },
+    h('input', { type: 'checkbox', class: 'check', checked: value, onchange: (e) => onchange(e.target.checked) }),
+    h('span', {}, h('div', { style: { fontSize: '13.5px' } }, label),
+      h('div', { style: { fontSize: '12.5px', color: 'var(--ink-3)' } }, help)));
+}
+
+function fontSelect(role) {
+  const s = state.settings;
+  return h('select', {
+    onchange: (e) => { commit(() => { s.fonts[role] = e.target.value; }); applyAppearance(); }
+  }, ...FONT_STACKS.map((f) => h('option', { value: f.value, selected: s.fonts[role] === f.value }, f.label)));
+}
+
+function hourSelect(key) {
+  const s = state.settings;
+  return h('select', { onchange: (e) => { commit(() => { s[key] = +e.target.value; }); } },
+    ...Array.from({ length: 25 }, (_, i) => h('option', { value: i, selected: s[key] === i }, String(i).padStart(2, '0') + ':00')));
+}
