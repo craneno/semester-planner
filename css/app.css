@@ -661,6 +661,41 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 
 /* ---------- overview: today on the left, decisions on the right ---------- */
 
+/* Today's clock. The day opens at 8am with the small hours a scroll above,
+   so an empty afternoon still reads as empty space rather than as nothing. */
+:root { --day-hour-h: 34px; }
+
+.day-scroll {
+  height: calc(var(--day-hour-h) * 16);   /* 8am to midnight without scrolling */
+  max-height: 60vh; overflow-y: auto; overflow-x: hidden;
+  border-top: 1px solid var(--rule-soft);
+}
+.day-grid { display: grid; grid-template-columns: 52px minmax(0, 1fr); position: relative; }
+.day-hours { position: relative; }
+.day-hours .hour-label { height: var(--day-hour-h); }
+.day-lanes {
+  position: relative; border-left: 1px solid var(--rule-soft);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--rule) 0, var(--rule) 1px,
+    transparent 1px, transparent var(--day-hour-h)
+  );
+  background-size: 100% var(--day-hour-h);
+}
+.day-allday {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  padding: 8px 14px; border-top: 1px solid var(--rule-soft);
+}
+.day-chip {
+  border: 1px solid var(--rule); border-left: 2.5px solid var(--c, var(--ink-3));
+  background: var(--surface); color: var(--ink); border-radius: 4px;
+  padding: 2px 8px; font-size: calc(12px * var(--scale)); cursor: pointer;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.day-chip:hover { box-shadow: var(--shadow-1); }
+.today-col .card-h { border-bottom: 0; }
+
+
 .overview-split {
   display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 14px; align-items: start; margin-bottom: 18px;

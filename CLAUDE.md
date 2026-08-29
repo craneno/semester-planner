@@ -213,6 +213,21 @@ decide about it: focus and today's three, open work by category, the
 end-of-day note. `#/today` is not a route; unknown hashes fall back to
 Overview, so an old link still lands somewhere sensible.
 
+### The day grid
+
+Overview's left column is a real clock, not a list: all 24 hours, opened at
+8am with the small hours a scroll above, so an empty afternoon reads as empty
+space. Hour height is `--day-hour-h` and the JS reads that variable rather
+than hard-coding it, so the mobile override stays in step.
+
+`restoreDayScroll()` runs **synchronously after the tree is appended**, not in
+a `requestAnimationFrame`. Two reasons: `scrollTop` is ignored on an element
+with no layout yet, and rAF never fires at all in a background tab — which is
+exactly when a restored session renders. Scroll position is remembered in a
+module variable so ticking a checkbox (which re-renders the page) does not
+throw away where you were; recording is gated on `trackScroll` because a
+freshly mounted scroller fires `scroll` at 0 and would erase it.
+
 ## Captured notes
 
 `state.cards` are notecards: `{ id, text, areaId, createdAt, updatedAt }`, with

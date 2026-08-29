@@ -291,8 +291,8 @@ and you decide later. Without leaving the box you can instead file it straight t
 or to a task with a deadline and a time blocked — that last one lands on your calendar. Shift+Enter is a
 newline, Tab reaches the filing buttons.
 
-**Overview is the day.** Today's schedule runs down the left — classes, calendar events, the work you
-planned. On the right: your focus and today's three, open work split by category, and a place to write
+**Overview is the day.** Today runs down the left as a clock — classes, calendar events and the work you
+planned, laid out on the hour with the gaps left visible, opened at 8am and scrollable to the rest. On the right: your focus and today's three, open work split by category, and a place to write
 what moved. There is no separate Today page.
 
 **Scheduled or due.** A task is one or the other. *Scheduled* has a date, a start and an end, and goes on

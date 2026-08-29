@@ -6,7 +6,7 @@
 
 import {
   h, clear, today, startOfWeek, weekDays, fmtDate, fmtTime, fmtHours, fmtDuration,
-  toMin, DOW_LONG, MONTHS, parseYmd, debounce
+  toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce
 } from '../util.js';
 import {
   state, commit, toggleItem, upcoming, overdue, workloadFor, semesterProgress,
@@ -52,67 +52,133 @@ export function renderOverview(root, { navigate, go }) {
 
   pad.append(deadlines(soon, late, { navigate, go }));
   root.append(pad);
+  restoreDayScroll(pad);
 }
 
-/* ---------------- left: today, in order ---------------- */
+/**
+ * Put the day grid back where it was, or open it at 8am.
+ *
+ * Deliberately synchronous and called after the tree is in the document:
+ * scrollTop does nothing on an element with no layout yet, and a
+ * requestAnimationFrame never arrives at all while the tab is in the
+ * background — which is exactly when a restored session renders.
+ */
+function restoreDayScroll(pad) {
+  const scroller = pad.querySelector('.day-scroll');
+  if (!scroller) return;
+  scroller.scrollTop = dayScroll ?? DAY_OPENS_AT * hourHeight();
+  trackScroll = true;
+}
+
+/* ---------------- left: today, on a clock ---------------- */
+
+/** The hour the day opens on. Earlier hours sit above it, a scroll away. */
+const DAY_OPENS_AT = 8;
+const HOURS = 24;
+
+/** Survives a re-render, so ticking a box does not throw away where you were. */
+let dayScroll = null;
+let trackScroll = false;
+
+const hourHeight = () => {
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--day-hour-h'));
+  return Number.isFinite(v) && v > 0 ? v : 34;
+};
 
 function todayColumn(day, { navigate, go }) {
   const d = parseYmd(day);
   const hour12 = state.settings.hour12;
-  const col = h('section', { class: 'card today-col' });
+  const hourH = hourHeight();
+  const top = (mins) => (mins / 60) * hourH;
 
+  const col = h('section', { class: 'card today-col' });
   col.append(h('div', { class: 'card-h' },
     h('span', { class: 'eyebrow' }, DOW_LONG[d.getDay()]),
     h('span', { class: 'today-date' }, `${MONTHS[d.getMonth()]} ${d.getDate()}`),
     h('div', { style: { flex: 1 } }),
     h('button', { class: 'btn ghost sm', onclick: () => go('week') }, 'Week →')));
 
-  const entries = [];
-  for (const c of classesOn(day)) {
-    entries.push({
-      sort: toMin(c.start), when: fmtTime(c.start, hour12),
-      label: c.title, meta: c.location || 'class', color: c.color
-    });
+  /* things with no time of their own sit above the grid rather than being
+     dropped on the floor */
+  const untimed = [
+    ...eventsOn(day).filter((e) => e.allDay)
+      .map((e) => ({ label: e.title, color: null, link: e.link })),
+    ...itemsPlannedOn(day).filter((t) => !t.plan.start)
+      .map((t) => ({ label: t.title, color: areaColor(t.areaId), id: t.id }))
+  ];
+  if (untimed.length) {
+    const strip = h('div', { class: 'day-allday' });
+    for (const u of untimed) {
+      strip.append(h('button', {
+        class: 'day-chip', style: { '--c': u.color || 'var(--ink-3)' },
+        onclick: () => { if (u.id) openItem(u.id); else if (u.link) window.open(u.link, '_blank', 'noopener'); }
+      }, u.label));
+    }
+    col.append(strip);
   }
-  for (const e of eventsOn(day)) {
-    entries.push({
-      sort: e.allDay ? -1 : toMin(e.start),
-      when: e.allDay ? 'all day' : fmtTime(e.start, hour12),
-      label: e.title, meta: e.location, color: null, ext: true, link: e.link
-    });
-  }
-  for (const t of itemsPlannedOn(day)) {
-    entries.push({
-      sort: t.plan.start ? toMin(t.plan.start) : 24 * 60,
-      when: t.plan.start ? fmtTime(t.plan.start, hour12) : '—',
-      label: t.title, meta: `${areaName(t.areaId)} · ${fmtDuration(t.plan.mins || t.estMins)}`,
-      color: areaColor(t.areaId), id: t.id, done: t.done
-    });
-  }
-  entries.sort((a, b) => a.sort - b.sort);
 
-  const body = h('div', { class: 'card-b' });
-  if (!entries.length) {
-    body.append(h('div', { class: 'empty', style: { padding: '20px 0' } },
-      h('p', { style: { margin: 0, color: 'var(--ink-2)' } }, 'A clear day.')));
+  /* the grid: every hour of the day, empty ones included */
+  const hours = h('div', { class: 'day-hours' });
+  for (let H = 0; H < HOURS; H++) {
+    hours.append(h('div', { class: 'hour-label' }, h('span', {}, fmtTime(fromMin(H * 60), hour12))));
   }
-  const agenda = h('div', { class: 'agenda' });
-  for (const e of entries) {
-    agenda.append(h('div', {
-      class: 'agenda-row' + (e.ext ? ' ext' : ''),
-      style: { '--c': e.color || 'var(--ink-3)', opacity: e.done ? .5 : 1 },
-      onclick: () => { if (e.id) openItem(e.id); else if (e.link) window.open(e.link, '_blank', 'noopener'); }
+
+  const lanes = h('div', { class: 'day-lanes' });
+  const block = ({ start, mins, cls, color, title, sub, onclick, done }) => {
+    const height = Math.max(16, (mins / 60) * hourH - 2);
+    return h('div', {
+      class: 'blk ' + cls + (done ? ' done' : '') + (height < 34 ? ' compact' : ''),
+      style: {
+        top: top(start) + 'px', height: height + 'px',
+        '--c': color || 'var(--ink-3)',
+        '--bg': cls === 'class' && color ? hexAlpha(color, 0.18) : null
+      },
+      title: sub ? `${title} · ${sub}` : title,
+      onclick
     },
-    h('span', { class: 'when' }, e.when),
-    h('span', { class: 'rulebar' }),
-    h('span', {
-      class: 'title',
-      style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: e.done ? 'line-through' : 'none' }
-    }, e.label),
-    h('span', { class: 'eyebrow' }, e.meta || '')));
+    h('div', { class: 't' }, fmtTime(fromMin(start), hour12)),
+    h('div', { class: 'n' }, title));
+  };
+
+  for (const c of classesOn(day)) {
+    const s = toMin(c.start), e = toMin(c.end) || s + 60;
+    lanes.append(block({ start: s, mins: e - s, cls: 'class', color: c.color, title: c.title, sub: c.location }));
   }
-  body.append(agenda);
-  col.append(body);
+  for (const e of eventsOn(day).filter((x) => !x.allDay && x.start)) {
+    const s = toMin(e.start), en = toMin(e.end) || s + 60;
+    lanes.append(block({
+      start: s, mins: en - s, cls: 'ext', color: null,
+      title: e.title, sub: e.location || 'Google Calendar',
+      onclick: () => e.link && window.open(e.link, '_blank', 'noopener')
+    }));
+  }
+  for (const t of itemsPlannedOn(day).filter((x) => x.plan.start)) {
+    const mins = t.plan.mins || t.estMins || 60;
+    lanes.append(block({
+      start: toMin(t.plan.start), mins, cls: 'plan', color: areaColor(t.areaId),
+      title: t.title, sub: `${areaName(t.areaId)} · ${fmtDuration(mins)}`,
+      done: t.done, onclick: () => openItem(t.id)
+    }));
+  }
+
+  if (day === today()) {
+    const now = new Date();
+    lanes.append(h('div', {
+      class: 'nowline', style: { top: top(now.getHours() * 60 + now.getMinutes()) + 'px' }
+    }));
+  }
+
+  const grid = h('div', { class: 'day-grid', style: { height: HOURS * hourH + 'px' } }, hours, lanes);
+
+  // A freshly mounted scroller fires scroll at 0, and so does our own restore.
+  // Either would overwrite the position we are trying to keep, so recording is
+  // off until restoreDayScroll() has run.
+  trackScroll = false;
+  const scroller = h('div', {
+    class: 'day-scroll', onscroll: (e) => { if (trackScroll) dayScroll = e.target.scrollTop; }
+  }, grid);
+  col.append(scroller);
+
   return col;
 }
 
