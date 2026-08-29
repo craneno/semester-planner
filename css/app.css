@@ -751,3 +751,69 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .mode-toggle .mode + .mode { border-left: 1px solid var(--rule); }
 .mode-toggle .mode:hover { background: var(--rule-soft); color: var(--ink); }
 .mode-toggle .mode.on { background: var(--accent-soft); color: var(--ink); font-weight: 550; }
+
+
+/* ---------- sidebar: carets and collapsing ---------- */
+
+.rail-caret {
+  border: 0; background: transparent; cursor: pointer; flex: none;
+  width: 14px; padding: 0; margin-left: -4px;
+  color: var(--ink-3); font-size: 12px; line-height: 1;
+  transform: rotate(90deg); transition: transform .15s ease;
+}
+.rail-caret.is-closed { transform: rotate(0deg); }
+.rail-caret:hover { color: var(--ink); }
+
+/* One column, not a zero-width one: display:none takes the sidebar out of the
+   grid entirely, so main would slide into the first column and get 0px. */
+body.rail-hidden #app { grid-template-columns: minmax(0, 1fr); }
+body.rail-hidden .sidebar { display: none; }
+
+/* ---------- habits ---------- */
+
+.habits { display: flex; flex-direction: column; }
+.habit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(7, 38px) 48px;
+  align-items: center; gap: 2px;
+  border-bottom: 1px solid var(--rule-soft); padding: 3px 0;
+}
+.habit-head { border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+.habit-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 10px; }
+.habit-title {
+  border: 0; background: transparent; padding: 4px 2px; min-width: 0; flex: 1;
+  color: var(--ink); font: inherit; font-size: calc(13.5px * var(--scale));
+}
+.habit-title:focus { outline: none; background: var(--surface); border-radius: 4px; }
+.habit-del { opacity: 0; flex: none; }
+.habit-row:hover .habit-del, .habit-del:focus-visible { opacity: 1; }
+@media (hover: none) { .habit-del { opacity: .7; } }
+
+.habit-day { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.habit-day.is-today .habit-dnum { color: var(--accent-ink); background: var(--accent); border-radius: 4px; padding: 0 4px; }
+.habit-dnum { font-size: 11px; color: var(--ink-2); }
+.habit-head .habit-day.is-future { opacity: .45; }
+
+.tick {
+  width: 26px; height: 26px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--surface);
+  color: var(--accent-ink); font-size: 13px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s ease, border-color .12s ease;
+}
+.tick:hover { border-color: var(--accent); }
+.tick.on { background: var(--accent); border-color: var(--accent); }
+.tick:disabled { opacity: .3; cursor: default; }
+.tick:disabled:hover { border-color: var(--rule); }
+
+.habit-streak { text-align: right; color: var(--ink-2); font-size: 12px; padding-right: 2px; }
+.habit-add { display: flex; gap: 8px; margin-top: 16px; max-width: 420px; }
+.habit-new {
+  flex: 1; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink); font: inherit;
+}
+
+@media (max-width: 820px) {
+  .habit-row { grid-template-columns: minmax(0, 1fr) repeat(7, 30px) 34px; }
+  .tick { width: 22px; height: 22px; }
+}

@@ -150,6 +150,7 @@ total. There is no runner and nothing to install.
 | `tests/store.test.html` | migration, categories, ordering, selectors |
 | `tests/parse.test.html` | quick add: dates, time ranges, types, area matching |
 | `tests/capture.test.html` | notecards, filing, card sync, the version-pinned seeds |
+| `tests/habits.test.html` | ticking, streaks, editing, and riding in the meta row |
 | `tests/gcal.test.html` | deriving a schedule from recurring calendar events |
 | `tests/sync.test.html` | delete durability against a stand-in Supabase |
 
@@ -301,6 +302,34 @@ so "read ch 3-4" is not an afternoon meeting.
 
 An item created with no area lands in the **Personal** area
 (`defaultAreaId()`), seeded on the upgrade into schema 8.
+
+## Habits
+
+`state.habits` are the definitions and `state.habitLog` is `date -> [habitId]`.
+They belong to no area on purpose — they are about the person, not the work —
+so they never appear in a task list and live on their own page.
+
+Both **ride inside the `meta` sync row** rather than being their own row kind.
+The `planner_rows` CHECK constraint only knows the kinds it was created with,
+and this way habits reach another device with no SQL to run. The cost is that
+one tick re-sends the whole (small) blob; at a handful of habits over a
+semester that is nothing.
+
+`habitStreak()` counts back from today, and an untouched *today* does not
+break a run — the day is not over yet — but a missed yesterday does.
+
+## Sidebar
+
+Each category has a caret that collapses its areas; the open/closed map lives
+in `settings.railClosed`, which is deliberately **not** in `SYNCED_SETTINGS`,
+so it stays a per-device preference. The caret must `stopPropagation()` — the
+row it sits in navigates.
+
+The whole sidebar collapses via `body.rail-hidden`. Its toggle lives in the
+topbar, not the sidebar, so it is still reachable once the sidebar is gone.
+When hidden, `#app` becomes a **single-column** grid: `display: none` takes
+the sidebar out of the grid entirely, so a `0 1fr` template would leave main
+in the zero-width first column and the page renders blank.
 
 ## Adding a field to a task
 

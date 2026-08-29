@@ -19,6 +19,7 @@ bump `VERSION` in the same file so browsers fetch the new files.
 | the capture box | `js/capture.js` |
 | today's agenda, focus, end-of-day | `js/views/overview.js` |
 | the notes page | `js/views/notes.js` |
+| the habit tracker | `js/views/habits.js` |
 | the categories themselves | `AREA_CATEGORIES` in `js/store.js` |
 | colours, spacing, the week grid | `css/app.css` |
 | what a task stores | `js/store.js` (add to `upsertItem`, then the editor) |

@@ -300,6 +300,12 @@ your Google Calendar. *Deadline* has a due date and an estimate of how long it w
 time range directly — `fly to boston aug 29 12-7` books noon to seven — while `problem set 3 due fri 5pm 2h`
 makes a deadline. Four kinds of thing: event, task, meeting, homework.
 
+**Habits.** Its own page, no areas involved: habits down the side, the week across the top, one tick per
+day, and a streak that forgives today because the day is not over. Drag to reorder, rename in place.
+
+**Sidebar.** A caret on each category folds its areas away, and the chevron in the top bar hides the
+sidebar altogether — click it again to bring it back.
+
 **Reordering.** Drag the grip on a course to move it up or down, either on its category page or in the
 sidebar. The order is stored on the area itself, so it follows you to your phone.
 

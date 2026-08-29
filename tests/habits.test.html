@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Habit tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, storeWith } from './harness.js';
+
+const base = (over = {}) => ({
+  version: 9,
+  semester: { name: 'Fall 2026', start: '2026-08-01', end: '2026-12-12' },
+  areas: [], items: [], cards: [], notes: {},
+  habits: [], habitLog: {},
+  ...over
+});
+
+suite('Habits — ticking, streaks and sync', async ({ check }) => {
+
+  /* ---- the seed ---- */
+
+  {
+    const s = await storeWith({ version: 8, areas: [], items: [] });
+    const names = s.activeHabits().map((x) => x.name);
+    check('upgrading to 9 seeds the starting habits', names.length === 5, names.join(' | '));
+    check('the three phone habits are separate rows',
+      names.filter((n) => n.startsWith('No phone')).length === 3, names.join(' | '));
+    check('...and are in the order given',
+      names.join(' | ') === 'No phone — morning | No phone — eating | No phone — night | 10k steps or workout | Out of bed by 9:00',
+      names.join(' | '));
+  }
+  {
+    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Mine', order: 0 }] }));
+    check('an existing set of habits is left alone',
+      s.activeHabits().map((x) => x.name).join() === 'Mine');
+  }
+  {
+    // deleted every habit on purpose: schema 9 has already run, so leave it empty
+    const s = await storeWith(base({ habits: [] }));
+    check('no re-seed once already on 9', s.activeHabits().length === 0);
+  }
+
+  /* ---- ticking ---- */
+
+  {
+    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
+    check('a day starts unticked', s.habitDone('2026-08-26', 'h1') === false);
+    check('toggling reports the new state', s.toggleHabit('2026-08-26', 'h1') === true);
+    check('...and it sticks', s.habitDone('2026-08-26', 'h1') === true);
+    check('toggling again clears it', s.toggleHabit('2026-08-26', 'h1') === false);
+    check('an empty day leaves no entry behind',
+      s.state.habitLog['2026-08-26'] === undefined,
+      'unticked days should not accumulate as empty arrays');
+
+    s.toggleHabit('2026-08-26', 'h1', true);
+    s.toggleHabit('2026-08-26', 'h1', true);
+    check('forcing on twice does not duplicate',
+      s.state.habitLog['2026-08-26'].length === 1);
+    check('one day does not tick another', s.habitDone('2026-08-27', 'h1') === false);
+  }
+
+  /* ---- streaks ---- */
+
+  {
+    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
+    const ref = '2026-08-29';
+    const on = (d) => s.toggleHabit(d, 'h1', true);
+
+    check('no ticks means no streak', s.habitStreak('h1', ref) === 0);
+
+    on('2026-08-29');
+    check('today alone is a streak of one', s.habitStreak('h1', ref) === 1);
+
+    on('2026-08-28'); on('2026-08-27');
+    check('consecutive days accumulate', s.habitStreak('h1', ref) === 3, String(s.habitStreak('h1', ref)));
+
+    on('2026-08-25');   // a gap on the 26th
+    check('a gap stops the count', s.habitStreak('h1', ref) === 3, String(s.habitStreak('h1', ref)));
+  }
+  {
+    // the day is not over: an untouched today must not wipe out yesterday's run
+    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
+    s.toggleHabit('2026-08-28', 'h1', true);
+    s.toggleHabit('2026-08-27', 'h1', true);
+    check('today being untouched does not break the streak',
+      s.habitStreak('h1', '2026-08-29') === 2, String(s.habitStreak('h1', '2026-08-29')));
+  }
+
+  /* ---- editing ---- */
+
+  {
+    const s = await storeWith(base());
+    const made = s.addHabit('  Read 20 pages  ');
+    check('a new habit is trimmed', made.name === 'Read 20 pages');
+    check('...and goes last', s.addHabit('Later').order > made.order);
+    s.updateHabit(made.id, { name: 'Read 30 pages' });
+    check('a habit can be renamed', s.activeHabits()[0].name === 'Read 30 pages');
+
+    s.toggleHabit('2026-08-28', made.id, true);
+    s.toggleHabit('2026-08-28', 'other', true);
+    s.deleteHabit(made.id);
+    check('deleting removes the habit', !s.activeHabits().some((x) => x.id === made.id));
+    check('...and every tick it had',
+      !(s.state.habitLog['2026-08-28'] || []).includes(made.id));
+    check('...without touching another habit’s day',
+      (s.state.habitLog['2026-08-28'] || []).includes('other'));
+  }
+  {
+    const s = await storeWith(base({
+      habits: [
+        { id: 'h1', name: 'A', order: 0 }, { id: 'h2', name: 'B', order: 1 }, { id: 'h3', name: 'C', order: 2 }
+      ]
+    }));
+    s.reorderHabits(['h3', 'h1', 'h2']);
+    check('habits can be reordered', s.activeHabits().map((x) => x.name).join() === 'C,A,B');
+    check('archived habits drop out of the list',
+      (s.updateHabit('h1', { archived: true }), s.activeHabits().map((x) => x.name).join()) === 'C,B');
+  }
+
+  /* ---- sync, without a new row kind ---- */
+
+  {
+    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
+    s.toggleHabit('2026-08-28', 'h1', true);
+    const kinds = [...new Set(s.snapshotRows().map((r) => r.kind))];
+    check('habits add no new row kind', !kinds.includes('habit') && !kinds.includes('habitday'),
+      'a new kind would need the Supabase CHECK constraint widened');
+
+    const meta = s.snapshotRows().find((r) => r.kind === 'meta');
+    check('habits ride in the meta row', meta.data.habits.length === 1);
+    check('...and so does the log', meta.data.habitLog['2026-08-28'].join() === 'h1');
+    check('meta still carries what it always did',
+      !!meta.data.semester && !!meta.data.settings);
+
+    const applied = s.applyRow({
+      kind: 'meta', id: 'meta',
+      data: {
+        semester: s.state.semester, settings: {},
+        habits: [{ id: 'r1', name: 'From the phone', order: 0 }],
+        habitLog: { '2026-08-20': ['r1'] }
+      }
+    });
+    check('an inbound meta row brings habits with it',
+      applied === true && s.activeHabits().map((x) => x.name).join() === 'From the phone');
+    check('...and their history', s.habitDone('2026-08-20', 'r1') === true);
+  }
+});
+</script>
+</body>
+</html>

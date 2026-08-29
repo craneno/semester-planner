@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -54,6 +54,8 @@ const DEFAULTS = () => {
     areas: [],
     items: [],
     cards: [],          // captured notes, unfiled until given an areaId
+    habits: [],         // daily habits, ticked per day
+    habitLog: {},       // 'YYYY-MM-DD' -> [habitId] ticked that day
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
     events: [],         // external Google events, read-only mirror
     outbox: [],         // queued Google writes while offline/signed out
@@ -109,6 +111,14 @@ function migrate(raw) {
     createdAt: c.createdAt || new Date().toISOString(),
     updatedAt: c.updatedAt || c.createdAt || new Date().toISOString()
   })).filter((c) => c.text.trim());
+  s.habits = (Array.isArray(raw.habits) ? raw.habits : []).map((x, i) => ({
+    id: x.id || uid('h'),
+    name: x.name || 'Untitled habit',
+    order: Number.isFinite(x.order) ? x.order : i,
+    archived: !!x.archived,
+    createdAt: x.createdAt || new Date().toISOString()
+  }));
+  s.habitLog = raw.habitLog && typeof raw.habitLog === 'object' ? raw.habitLog : {};
   delete s.sessions;   // study logging was removed in schema 5
 
   // normalise areas
@@ -141,6 +151,14 @@ function migrate(raw) {
   if (from < 5) seed('Rocket', 'project');
   if (from < 6) seed('NER Meetings', 'ner');
   if (from < 8) seed('Personal', 'personal');
+
+  // the habit page is useless empty, so give it the ones it was built for
+  if (from < 9 && !s.habits.length) {
+    s.habits = [
+      'No phone — morning', 'No phone — eating', 'No phone — night',
+      '10k steps or workout', 'Out of bed by 9:00'
+    ].map((name, i) => ({ id: uid('h'), name, order: i, archived: false, createdAt: new Date().toISOString() }));
+  }
 
   // normalise items (older schemas used plannedDate / dueDate / estimate)
   s.items = s.items.map((t) => {
@@ -427,6 +445,63 @@ export function deleteArea(id) {
   for (const t of state.items) if (t.areaId === id) t.areaId = null;
 }
 
+/* ---- habits ---- */
+
+export const activeHabits = () =>
+  state.habits.filter((x) => !x.archived).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+export const habitDone = (date, id) => (state.habitLog[date] || []).includes(id);
+
+export function toggleHabit(date, id, force) {
+  const on = force ?? !habitDone(date, id);
+  const list = state.habitLog[date] || [];
+  if (on) { if (!list.includes(id)) state.habitLog[date] = [...list, id]; }
+  else {
+    const next = list.filter((x) => x !== id);
+    if (next.length) state.habitLog[date] = next; else delete state.habitLog[date];
+  }
+  return on;
+}
+
+/** Consecutive days ticked, counting back. Today not yet ticked doesn't break
+ *  a streak — the day isn't over — but a missed yesterday does. */
+export function habitStreak(id, ref = today()) {
+  let day = habitDone(ref, id) ? ref : addDays(ref, -1);
+  let n = 0;
+  while (habitDone(day, id)) { n++; day = addDays(day, -1); }
+  return n;
+}
+
+export function addHabit(name) {
+  const habit = {
+    id: uid('h'), name: name.trim() || 'Untitled habit',
+    order: state.habits.length, archived: false, createdAt: new Date().toISOString()
+  };
+  state.habits.push(habit);
+  return habit;
+}
+
+export function updateHabit(id, patch) {
+  const x = state.habits.find((h) => h.id === id);
+  if (x) Object.assign(x, patch);
+  return x;
+}
+
+/** Removes the habit and every tick it ever had — there is nothing else to keep. */
+export function deleteHabit(id) {
+  const i = state.habits.findIndex((x) => x.id === id);
+  if (i >= 0) state.habits.splice(i, 1);
+  for (const [date, list] of Object.entries(state.habitLog)) {
+    const next = list.filter((x) => x !== id);
+    if (next.length) state.habitLog[date] = next; else delete state.habitLog[date];
+  }
+}
+
+export function reorderHabits(orderedIds) {
+  const rest = state.habits.filter((x) => !orderedIds.includes(x.id)).map((x) => x.id);
+  [...orderedIds, ...rest].forEach((id, i) => { const x = state.habits.find((h) => h.id === id); if (x) x.order = i; });
+}
+
 /* ---- cards ---- */
 
 /** Capture a note. Unfiled unless an area is named. */
@@ -701,7 +776,13 @@ export function snapshotRows() {
   }
   const settings = {};
   for (const k of SYNCED_SETTINGS) settings[k] = state.settings[k];
-  rows.push({ kind: 'meta', id: 'meta', data: { semester: state.semester, settings } });
+  // habits travel in meta rather than as their own kind: the planner_rows
+  // CHECK constraint only knows the kinds it was created with, and this needs
+  // no migration to reach another device
+  rows.push({
+    kind: 'meta', id: 'meta',
+    data: { semester: state.semester, settings, habits: state.habits, habitLog: state.habitLog }
+  });
   return rows;
 }
 
@@ -727,6 +808,8 @@ export function applyRow({ kind, id, data, deleted }) {
       if (data.settings) for (const k of SYNCED_SETTINGS) {
         if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
       }
+      if (Array.isArray(data.habits)) state.habits = data.habits;
+      if (data.habitLog && typeof data.habitLog === 'object') state.habitLog = data.habitLog;
       return true;
     default: return false;
   }
@@ -757,6 +840,11 @@ export function importJson(text, { merge = false } = {}) {
     state.areas.push(...next.areas.filter((a) => !seenA.has(a.id)));
     const seenC = new Set(state.cards.map((c) => c.id));
     state.cards.push(...next.cards.filter((c) => !seenC.has(c.id)));
+    const seenH = new Set(state.habits.map((x) => x.id));
+    state.habits.push(...next.habits.filter((x) => !seenH.has(x.id)));
+    for (const [d, list] of Object.entries(next.habitLog)) {
+      state.habitLog[d] = [...new Set([...(state.habitLog[d] || []), ...list])];
+    }
     Object.assign(state.notes, next.notes);
   }
   save();

@@ -13,6 +13,7 @@ import { renderSemester } from './views/semester.js';
 import { renderWeek, goToWeekOf } from './views/week.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderNotes } from './views/notes.js';
+import { renderHabits } from './views/habits.js';
 import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
 import * as C from './cloud.js';
@@ -23,11 +24,12 @@ const VIEWS = {
   overview: { label: 'Overview', glyph: '◲', render: renderOverview, title: () => state.semester.name },
   semester: { label: 'Semester', glyph: '☰', render: renderSemester, title: () => 'Semester' },
   week:     { label: 'Week',     glyph: '▦', render: renderWeek,     title: () => 'Week', bare: true },
+  habits:   { label: 'Habits',   glyph: '◴', render: renderHabits,   title: () => 'Habits' },
   notes:    { label: 'Notes',    glyph: '✎', render: renderNotes,    title: () => 'Notes' },
   settings: { label: 'Settings', glyph: '⚙', render: renderSettings, title: () => 'Settings' }
 };
 
-const TOP_VIEWS = ['overview', 'semester', 'week'];
+const TOP_VIEWS = ['overview', 'semester', 'week', 'habits'];
 const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'notes'];
 const CATEGORY_GLYPH = { course: '◇', ner: '⚡', project: '▲', personal: '○' };
 
@@ -104,12 +106,31 @@ function paintChrome() {
 
   // each category, with its areas nested underneath
   for (const cat of AREA_CATEGORIES) {
-    rail.append(navButton({
+    const caret = h('button', {
+      class: 'rail-caret', 'aria-label': `Show or hide ${cat.label}`,
+      onclick: (e) => {
+        e.stopPropagation();          // the row itself navigates; the caret must not
+        commit(() => {
+          const map = state.settings.railClosed || (state.settings.railClosed = {});
+          map[cat.id] = !map[cat.id];
+        });
+        paintChrome();
+      }
+    }, '›');
+
+    const row = navButton({
       glyph: CATEGORY_GLYPH[cat.id], label: cat.label,
       current: isCurrent('category', cat.id), onclick: () => go(cat.id)
-    }));
+    });
+    row.prepend(caret);
+    rail.append(row);
     const areas = areasInCategory(cat.id);
     if (!areas.length) continue;
+
+    const closed = !!state.settings.railClosed?.[cat.id];
+    caret.classList.toggle('is-closed', closed);
+    caret.setAttribute('aria-expanded', String(!closed));
+    if (closed) continue;
 
     const host = h('div', { class: 'rail-areas' });
     for (const a of areas) {
@@ -245,6 +266,24 @@ function boot() {
   wireKeys();
 
   $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+
+  // collapsing the sidebar: the toggle lives in the topbar, so it is still
+  // there to bring it back once the sidebar itself is gone
+  const railToggle = $('#rail-toggle');
+  const paintRailToggle = () => {
+    const hidden = document.body.classList.contains('rail-hidden');
+    railToggle.textContent = hidden ? '⟩' : '⟨';
+    railToggle.setAttribute('aria-expanded', String(!hidden));
+    railToggle.setAttribute('aria-label', hidden ? 'Show sidebar' : 'Hide sidebar');
+    railToggle.title = railToggle.getAttribute('aria-label');
+  };
+  document.body.classList.toggle('rail-hidden', !!state.settings.railHidden);
+  paintRailToggle();
+  railToggle.addEventListener('click', () => {
+    const hidden = document.body.classList.toggle('rail-hidden');
+    commit(() => { state.settings.railHidden = hidden; });
+    paintRailToggle();
+  });
   $('#peek-scrim').addEventListener('click', closePeek);
   $('#sync').addEventListener('click', () => go('settings'));
   $('#cloudsync').addEventListener('click', () => go('settings'));
