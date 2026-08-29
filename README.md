@@ -32,7 +32,9 @@ No config needed. The whole app is static files.
 - **iPhone:** open the site in Safari → Share → Add to Home Screen. Launches standalone.
 - **Windows:** Chrome/Edge → install icon in the address bar.
 
-Data is per-origin. `localhost:8000` and your Vercel URL are separate stores; use **Settings → Export backup** to move between them.
+Data is per-origin. `localhost:8000` and your deployed URL are separate stores until you sign in to
+cloud sync on both — after that they are the same account. Without an account, **Settings → Export
+backup** moves data between them.
 
 ---
 
@@ -84,6 +86,122 @@ resize the block in Google Calendar and the planner picks up the new time. Turn 
   don't run this on a shared machine.
 - Only events inside your semester date range are mirrored.
 
+
+---
+
+## Cloud sync (Supabase)
+
+Google Calendar covers anything with a time on it. Supabase covers everything
+else — tasks with no planned slot, subtasks, notes, study history, your theme —
+and makes the planner genuinely the same app on your laptop and your phone.
+
+Local-first: `localStorage` stays the working copy, so the app is instant and
+works with no signal. Postgres is durable storage plus the fan-out between
+devices.
+
+### Set it up
+
+1. Create a project at **supabase.com** (the free tier is plenty).
+2. **SQL Editor** → paste `supabase/schema.sql` → Run. One table, one policy,
+   one trigger.
+3. **Settings → API** → copy the **Project URL** and the **anon public** key
+   into the planner's Settings → Cloud sync.
+4. Enter an email and password → **Create account**. If your project has email
+   confirmation on (the default), confirm, then **Sign in**.
+5. Repeat steps 3–4 on your phone with the same account.
+
+The anon key is designed to be public. Row level security is what protects your
+data: the policy in `schema.sql` restricts every read and write to
+`auth.uid() = user_id`, so the key alone gets an attacker nothing.
+
+### How it works
+
+**Change detection is a snapshot diff.** After each save the client hashes every
+row and compares against the hashes from the last successful sync. Changed rows
+get pushed; rows that disappeared become tombstones. The alternative — flagging
+each row as dirty at the point of mutation — needs every one of the dozens of
+`commit(() => { t.done = true })` call sites across the views to remember to do
+it, and would silently rot the first time someone forgot. This way there is
+nothing to forget.
+
+**Conflicts settle last-write-wins per row.** Each row carries two timestamps:
+
+| Column | Clock | Used for |
+|---|---|---|
+| `updated_at` | the writing device | deciding who wins a conflict |
+| `synced_at` | the server | the pull cursor |
+
+Splitting them matters. If the cursor used device clocks, a phone running three
+minutes fast would make the laptop skip changes forever. With a server cursor,
+skew can at worst settle a genuine simultaneous edit the wrong way — and both
+devices are yours, so that window is small.
+
+A local row only contests a remote one if it actually changed since the last
+sync. On a device's **first** sync there is no baseline to judge against, so the
+established cloud copy wins any true conflict, while rows that exist only
+locally are still pushed up. Signing in on a new device merges; it never
+clobbers.
+
+**Realtime.** The client subscribes to `postgres_changes` on your own rows, so a
+change on the laptop lands on the phone in about a second. A 5-minute interval
+sits behind it as a safety net for a dropped socket, and drops to 60 seconds if
+realtime never connects.
+
+**What does not sync, deliberately.** Google OAuth tokens, the Supabase URL and
+key, and both sync cursors stay on the device that owns them. Semester dates,
+courses, tasks, subtasks, notes, study sessions, theme, fonts and text size all
+sync.
+
+### If the two ever drift apart
+
+Settings → Cloud sync → **Rebuild sync**. It clears this device's bookkeeping,
+pulls the whole account down again, and re-uploads. No data is deleted.
+
+Signing out leaves everything on the device. The planner keeps working offline
+exactly as it did before you ever connected an account.
+
+---
+
+## Putting it on GitHub
+
+The repo *is* the site — no build step, so the workflow is just edit, commit, push.
+
+```bash
+gh repo create semester-planner --private --source=. --push
+# or, without the gh CLI:
+git remote add origin git@github.com:<you>/semester-planner.git
+git push -u origin main
+```
+
+The folder ships with a commit already made, so `git log` will show one entry
+before you have touched anything.
+
+### Publish it with GitHub Pages
+
+`.github/workflows/deploy.yml` publishes on every push to `main`. Turn it on
+once: **repo → Settings → Pages → Source: GitHub Actions**. Your site lands at
+`https://<you>.github.io/semester-planner/`.
+
+The workflow parses every module and the manifest before publishing, so a typo
+fails the build instead of shipping a blank page.
+
+Relative paths are used throughout, so the `/semester-planner/` subpath Pages
+gives you works with no configuration. Add that URL — and
+`https://<you>.github.io/semester-planner/index.html` — to your Google OAuth
+client if you want Calendar sync on the deployed copy.
+
+### Day to day
+
+```bash
+git add -A
+git commit -m "what changed"
+git push
+```
+
+Editing notes are in `CONTRIBUTING.md`. The short version: hard-reload after
+edits, and bump `VERSION` in `sw.js` whenever you change the file list it
+caches, or browsers will keep serving the old copy.
+
 ---
 
 ## Files
@@ -99,6 +217,8 @@ js/util.js                 dates, DOM helper, formatting
 js/ui.js                   toasts, modals, peek panel, pointer drag
 js/editor.js               task detail panel
 js/gcal.js                 Google Calendar auth + two-way sync
+js/cloud.js                Supabase auth + snapshot-diff sync + realtime
+supabase/schema.sql        run once in the Supabase SQL editor
 js/appearance.js           themes and typography
 js/syllabus.js             PDF text extraction + date detection + review step
 js/views/*.js              one file per screen
@@ -166,9 +286,7 @@ tab. Only focus periods are logged; breaks aren't.
 
 ## Not built
 
-- Supabase accounts and cloud sync — Google Calendar covers cross-device for anything with a time on it,
-  but tasks without a planned time still live per-device. Export/import is the bridge for now.
-- Push notifications and reminders (needs a server).
+- Push notifications and reminders (needs a server that can hold a schedule).
 - Weighted grade categories. Grades are per-task with a simple per-course percentage.
 - Server-side LLM syllabus parsing. Current detection is regex heuristics — it will miss things, which
   is exactly why the review step is mandatory.
