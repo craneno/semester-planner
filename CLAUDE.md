@@ -135,6 +135,8 @@ total. There is no runner and nothing to install.
 |---|---|
 | `tests/harness.js` | the whole framework: `suite()`, the guards, `freshStore()` |
 | `tests/store.test.html` | migration, categories, selectors, study removal |
+| `tests/capture.test.html` | notecards, filing, card sync, the version-pinned seeds |
+| `tests/gcal.test.html` | deriving a schedule from recurring calendar events |
 | `tests/sync.test.html` | delete durability against a stand-in Supabase |
 
 Suites drive the real modules, so they clobber app state as they run. Two
@@ -147,7 +149,10 @@ the pages never reach the live site.
 `store.js` reads `localStorage` once, at import, so `migrate()` can only be
 exercised on a fresh module instance. `freshStore()` imports it with a new
 query string to get one; `storeWith(raw)` seeds storage and does that in a
-step.
+step. A fresh instance has its own `state`, so a suite that pokes state and
+then calls into `gcal.js` or `cloud.js` must use `sharedStoreWith()` instead —
+those modules import the canonical store, and two instances never see each
+other.
 
 ## Never sync device credentials
 
@@ -181,6 +186,44 @@ Schema 4 filed areas under a free-form `kind`; `migrate()` maps it through
 sessions array without also handling the `session` rows still sitting in
 existing Supabase accounts.
 
+**Seeds are pinned to the version that introduced them**, never to
+`SCHEMA_VERSION`: `if (from < 5) seed('Rocket', 'project')`. Writing the guard
+against `SCHEMA_VERSION` means the next bump resurrects a seed the user
+deliberately deleted.
+
+## Captured notes
+
+`state.cards` are notecards: `{ id, text, areaId, createdAt, updatedAt }`, with
+`areaId: null` meaning unfiled. Distinct from `state.notes`, which is the
+per-day focus text keyed by date — same word, different thing.
+
+Capture lives in [js/capture.js](js/capture.js) and appears on Overview and on
+the Notes page. Enter is the contract: it must stay the shortest path out, so
+it files to unfiled and never asks a question. Shift+Enter is a newline;
+everything else is one Tab away.
+
+`cardToItem()` runs the card's text through `parseQuickAdd()`, so a capture
+dates itself exactly as the top bar would. `as: 'timed'` also books a `plan`
+block — **a due date alone is never pushed to Google Calendar**, only planned
+work is, so the block is what puts it on the calendar.
+
+Card rows sync as `kind: 'card'`, which the Supabase CHECK constraint must
+allow; see the migration note at the bottom of `supabase/schema.sql`.
+
+## Recognising courses from the calendar
+
+`recurringSeries()` in [js/gcal.js](js/gcal.js) groups `state.events` by
+`recurringEventId` and reads the schedule back off the instances. We sync with
+`singleEvents: true`, so a weekly lecture arrives as one event per week rather
+than as an RRULE — reading the instances is both easier and truer than parsing
+a rule, and it catches a course that also meets for a Friday lab under the same
+parent event. A slot seen only once is dropped, so one rescheduled week doesn't
+become a phantom weekly meeting.
+
+The picker expands *inside* the area editor rather than opening its own modal:
+`ui.js` keeps one modal at a time, so a modal on top would close the editor
+underneath it.
+
 ## Adding a field to a task
 
 1. Add it to the object literal in `upsertItem()` in `js/store.js`.
@@ -195,6 +238,8 @@ Cloud sync ships whatever shape the object has, so nothing else is needed.
 |---|---|
 | how a screen looks | `js/views/<screen>.js` |
 | category pages, one area's page | `js/views/areas.js` |
+| the capture box | `js/capture.js` |
+| the notes page | `js/views/notes.js` |
 | the set of categories | `AREA_CATEGORIES` in `js/store.js` |
 | shell, router, sidebar, quick add | `js/app.js` |
 | toasts, modals, peek panel, drag | `js/ui.js` |

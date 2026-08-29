@@ -280,6 +280,17 @@ uncheck bad detections.
 one of four categories, which are the sidebar's top level. A category page lists its areas with each
 one's next few deadlines under it; clicking an area opens everything in it.
 
+**Course recognition.** Adding an area offers **Pull from calendar**: it groups the repeating events on
+your Google Calendar and fills the name, room, meeting days and times from one of them. It reads the
+schedule off the event's actual instances, so a course that also meets for a lab comes back as two
+meeting blocks, and a single rescheduled week is ignored. Works for any area — a lecture, a lab, a
+weekly NER meeting.
+
+**Capture.** Write in the box on Overview and press Enter; it becomes a notecard in **Notes**, unfiled,
+and you decide later. Without leaving the box you can instead file it straight to an area, to a task,
+or to a task with a deadline and a time blocked — that last one lands on your calendar. Shift+Enter is a
+newline, Tab reaches the filing buttons.
+
 **Keyboard.** `1`–`4` switch views, `/` or `n` focus quick add, `Esc` closes panels.
 
 ---

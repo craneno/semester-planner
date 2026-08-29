@@ -8,7 +8,7 @@
 
 create table if not exists public.planner_rows (
   user_id    uuid        not null references auth.users(id) on delete cascade,
-  kind       text        not null check (kind in ('area', 'item', 'session', 'note', 'meta')),
+  kind       text        not null check (kind in ('area', 'item', 'note', 'card', 'meta')),
   id         text        not null,
   data       jsonb       not null default '{}'::jsonb,
   deleted    boolean     not null default false,
@@ -52,3 +52,12 @@ alter publication supabase_realtime add table public.planner_rows;
 
 -- Realtime respects RLS only when replica identity carries the filter column.
 alter table public.planner_rows replica identity full;
+
+
+-- Upgrading an existing database (schema 6: notecards in, study sessions out).
+-- Safe to run more than once.
+--
+--   alter table public.planner_rows drop constraint planner_rows_kind_check;
+--   alter table public.planner_rows add constraint planner_rows_kind_check
+--     check (kind in ('area', 'item', 'note', 'card', 'meta'));
+--   delete from public.planner_rows where kind = 'session';

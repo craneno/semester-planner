@@ -302,9 +302,22 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 23px; height: 23px; border-radius: 4px; margin-top: 2px;
 }
-.allday-rail { display: grid; grid-template-columns: var(--gutter-w) repeat(7, minmax(0,1fr)); border-bottom: 1px solid var(--rule); background: var(--surface-2); min-height: 24px; }
-.allday-rail .cell { border-left: 1px solid var(--rule-soft); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; }
-.allday-rail .gutter { display: flex; align-items: center; justify-content: flex-end; padding-right: 7px; }
+.allday-rail {
+  display: grid; grid-template-columns: var(--gutter-w) repeat(7, minmax(0,1fr));
+  border-bottom: 1px solid var(--rule); background: var(--surface-2);
+  /* room for three stacked all-day items before it needs to scroll */
+  min-height: 74px; max-height: 148px; overflow-y: auto;
+}
+.allday-rail .cell { border-left: 1px solid var(--rule-soft); padding: 5px 4px; display: flex; flex-direction: column; gap: 3px; }
+.allday-rail .gutter {
+  display: flex; align-items: flex-start; justify-content: flex-end;
+  padding: 6px 7px 0 0; text-align: right; line-height: 1.3; letter-spacing: .03em;
+  font-size: 9px;   /* "Due · all day" has to fit the hour gutter */
+}
+.tz-chip {
+  border: 1px solid var(--rule); border-radius: 999px;
+  padding: 1px 8px; color: var(--ink-3); cursor: default;
+}
 .due-flag {
   font-size: calc(11px * var(--scale)); line-height: 1.35; border-radius: 3px;
   padding: 1px 5px; border-left: 2px solid var(--c);
@@ -571,3 +584,76 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .cat-load-name { font-size: calc(13px * var(--scale)); color: var(--ink); }
 .cat-load-h .num { margin-left: auto; }
 .cat-load:hover .cat-load-name { text-decoration: underline; text-underline-offset: 3px; }
+
+
+/* ---------- capture ---------- */
+
+.capture { margin: 0 0 20px; }
+.capture-box {
+  width: 100%; min-height: 46px; resize: none; overflow-y: auto;
+  padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: calc(14px * var(--scale)); line-height: 1.5;
+}
+.capture-box::placeholder { color: var(--ink-3); }
+.capture-box:focus { outline: none; border-color: var(--accent); background: var(--paper); }
+.capture-actions { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.capture-actions[hidden] { display: none; }   /* display:flex would beat the UA rule */
+.capture-hint { color: var(--ink-3); }
+
+/* the area menu, shared by capture and the notes page */
+.area-menu {
+  position: absolute; top: calc(100% + 5px); right: 0; z-index: 40; width: 240px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: var(--r);
+  box-shadow: 0 8px 28px rgba(0,0,0,.14); padding: 6px;
+}
+.area-menu-filter {
+  width: 100%; margin-bottom: 5px; padding: 6px 8px;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink);
+}
+.area-menu-list { max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.area-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 7px 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--ink-2); font-size: calc(13px * var(--scale)); cursor: pointer;
+}
+.area-menu-item:hover, .area-menu-item:focus-visible {
+  background: var(--rule-soft); color: var(--ink); outline: none;
+}
+.area-menu-none { padding: 8px; color: var(--ink-3); font-size: 13px; }
+
+/* ---------- notes ---------- */
+
+.note-card {
+  border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); padding: 12px 14px; margin-bottom: 9px;
+}
+.note-card .card-text {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: calc(14px * var(--scale)); line-height: 1.55; color: var(--ink);
+}
+.note-card .card-text:focus { outline: none; }
+.note-foot {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--rule-soft);
+}
+
+/* ---------- calendar series picker ---------- */
+
+.series-host {
+  display: flex; flex-direction: column; gap: 5px;
+  max-height: 260px; overflow-y: auto; margin-bottom: 9px;
+  padding: 8px; border: 1px solid var(--rule); border-radius: var(--r); background: var(--surface-2);
+}
+.series-host[hidden] { display: none; }
+.series-note { color: var(--ink-3); margin-bottom: 3px; }
+.series-list { display: flex; flex-direction: column; gap: 5px; max-height: 55vh; overflow-y: auto; }
+.series {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink);
+}
+.series:hover, .series:focus-visible { border-color: var(--accent); outline: none; }
+.series-title { font-size: calc(14px * var(--scale)); font-weight: 550; margin-bottom: 3px; }
+.series-when { color: var(--ink-2); }
+.series-where { color: var(--ink-3); margin-top: 2px; }

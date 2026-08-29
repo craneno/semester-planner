@@ -204,8 +204,76 @@ function normalise(ev) {
     link: ev.htmlLink || '',
     calendarId: cfg().calendarId,
     plannerItemId: ev.extendedProperties?.private?.plannerItemId || null,
+    // instances of a repeating event all carry the same parent id; that is the
+    // only thing marking them as repeating, since we sync with singleEvents
+    recurringEventId: ev.recurringEventId || null,
     updated: ev.updated
   };
+}
+
+/**
+ * Repeating events on the synced calendar, grouped from their instances.
+ *
+ * We ask Google for singleEvents, so a weekly lecture arrives as one event per
+ * week rather than as an RRULE. Reading the schedule back off those instances
+ * is both easier and truer than parsing the rule: what you get is when the
+ * thing actually met, including a moved room or a second weekly block.
+ *
+ * @returns {Array<{id, title, location, schedule, count, first, last}>}
+ *   `schedule` is shaped exactly like an area's, ready to assign.
+ */
+export function recurringSeries({ minInstances = 3 } = {}) {
+  const groups = new Map();
+  for (const e of state.events) {
+    if (!e.recurringEventId || e.allDay || !e.start) continue;
+    if (!groups.has(e.recurringEventId)) groups.set(e.recurringEventId, []);
+    groups.get(e.recurringEventId).push(e);
+  }
+
+  const out = [];
+  for (const [id, evs] of groups) {
+    if (evs.length < minInstances) continue;
+    evs.sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    // one schedule row per distinct day+time, so a lecture that also meets for
+    // a Friday lab comes back as two rows rather than one averaged mess
+    const slots = new Map();
+    for (const e of evs) {
+      const dow = new Date(e.date + 'T00:00:00').getDay();
+      const key = `${dow}|${e.start}|${e.end || ''}`;
+      if (!slots.has(key)) slots.set(key, { dow, start: e.start, end: e.end, n: 0, location: e.location });
+      slots.get(key).n++;
+    }
+    // a one-off moved meeting shouldn't become part of the schedule
+    const solid = [...slots.values()].filter((s) => s.n > 1 || slots.size === 1);
+    const schedule = [];
+    for (const slot of solid.length ? solid : [...slots.values()]) {
+      const row = schedule.find((r) => r.start === slot.start && r.end === slot.end);
+      if (row) row.days.push(slot.dow);
+      else schedule.push({ days: [slot.dow], start: slot.start, end: slot.end, location: slot.location || '' });
+    }
+    for (const r of schedule) r.days.sort();
+
+    out.push({
+      id,
+      title: mode(evs.map((e) => e.title)),
+      location: mode(evs.map((e) => e.location).filter(Boolean)) || '',
+      schedule,
+      count: evs.length,
+      first: evs[0].date,
+      last: evs[evs.length - 1].date
+    });
+  }
+  return out.sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+}
+
+/** The most common value in a list — titles and rooms drift over a semester. */
+function mode(list) {
+  const n = new Map();
+  for (const v of list) n.set(v, (n.get(v) || 0) + 1);
+  let best = null, bestN = 0;
+  for (const [v, c] of n) if (c > bestN) { best = v; bestN = c; }
+  return best;
 }
 
 /** Pull a page set. Uses syncToken when we have one, else a bounded full sync. */

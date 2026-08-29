@@ -10,7 +10,7 @@ import {
 import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { openSyllabusImport } from '../syllabus.js';
-import { pushItem } from '../gcal.js';
+import { pushItem, recurringSeries, gcal } from '../gcal.js';
 
 const PREVIEW = 3;   // deadlines shown under each area before "see all"
 
@@ -245,12 +245,26 @@ function editArea(area, categoryId, navigate) {
       }
     })));
 
+  const picker = calendarPicker(draft, () => drawMeetings(), {
+    get nameInput() { return nameInput; },
+    get locationInput() { return locationInput; }
+  });
+
+  const nameInput = h('input', {
+    type: 'text', value: draft.name, placeholder: 'Thermodynamics II',
+    oninput: (e) => { draft.name = e.target.value; }
+  });
+  const locationInput = h('input', {
+    type: 'text', value: draft.location, placeholder: 'Snell 108',
+    oninput: (e) => { draft.location = e.target.value; }
+  });
+
   modal({
     title: area ? 'Edit area' : `New ${categoryById(draft.category).singular}`,
     body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
       h('div', { class: 'field' },
         h('label', {}, 'Name'),
-        h('input', { type: 'text', value: draft.name, placeholder: 'Thermodynamics II', oninput: (e) => { draft.name = e.target.value; } })),
+        nameInput),
       h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
         h('div', { class: 'field' },
           h('label', {}, 'Category'),
@@ -259,12 +273,15 @@ function editArea(area, categoryId, navigate) {
               h('option', { value: c.id, selected: c.id === draft.category }, c.label)))),
         h('div', { class: 'field' },
           h('label', {}, 'Default location'),
-          h('input', { type: 'text', value: draft.location, placeholder: 'Snell 108', oninput: (e) => { draft.location = e.target.value; } }))),
+          locationInput)),
       h('div', { class: 'field' },
         h('label', {}, 'Color'),
         h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, swatches, custom)),
       h('div', { class: 'field' },
-        h('label', {}, 'Recurring meetings'),
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
+          h('label', { style: { flex: 1 } }, 'Recurring meetings'),
+          picker.button),
+        picker.host,
         meetingsHost)),
     footer: [
       area && h('button', {
@@ -294,4 +311,60 @@ function editArea(area, categoryId, navigate) {
       }, area ? 'Save changes' : 'Create')
     ]
   });
+}
+
+
+/* ---------------- pull a schedule off Google Calendar ---------------- */
+
+/**
+ * Anything repeating on the synced calendar can become an area's schedule:
+ * a lecture, a lab, a weekly NER meeting. Days, times, room and name all come
+ * from what the event actually does, so there is nothing to retype.
+ *
+ * This expands inside the editor rather than opening a second modal — ui.js
+ * keeps one modal at a time, so a modal on top would close the editor under it.
+ */
+function calendarPicker(draft, redrawMeetings, fields) {
+  const series = gcal.status === 'off' ? [] : recurringSeries();
+  const host = h('div', { class: 'series-host', hidden: true });
+  if (!series.length) return { button: null, host };
+
+  const button = h('button', {
+    class: 'btn sm ghost', type: 'button',
+    onclick: () => { host.hidden = !host.hidden; if (!host.hidden) draw(); }
+  }, 'Pull from calendar');
+
+  function draw() {
+    clear(host);
+    host.append(h('div', { class: 'eyebrow series-note' },
+      'Repeating events on your calendar — picking one fills the times below'));
+    for (const sx of series) {
+      host.append(h('button', {
+        class: 'series', type: 'button',
+        onclick: () => {
+          draft.schedule = sx.schedule.map((r) => ({ ...r, days: [...r.days] }));
+          if (!draft.name.trim()) { draft.name = sx.title; fields.nameInput.value = sx.title; }
+          if (!draft.location && sx.location) {
+            draft.location = sx.location;
+            fields.locationInput.value = sx.location;
+          }
+          redrawMeetings();
+          host.hidden = true;
+          toast(`Filled from “${sx.title}”`);
+        }
+      },
+      h('div', { class: 'series-title' }, sx.title),
+      h('div', { class: 'eyebrow num series-when' }, describe(sx)),
+      sx.location ? h('div', { class: 'eyebrow series-where' }, sx.location) : null));
+    }
+  }
+
+  return { button, host };
+}
+
+function describe(sx) {
+  const when = sx.schedule.map((r) =>
+    `${r.days.map((d) => DOW[d]).join('/')} ${fmtTime(r.start, state.settings.hour12)}`
+    + (r.end ? `–${fmtTime(r.end, state.settings.hour12)}` : '')).join('   ');
+  return `${when}   ·   ${sx.count} meetings`;
 }

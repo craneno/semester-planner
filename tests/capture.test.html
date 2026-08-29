@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Capture tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, storeWith } from './harness.js';
+
+const base = (over = {}) => ({
+  version: 6,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [
+    { id: 'a1', name: 'Thermo', category: 'course' },
+    { id: 'a2', name: 'Rocket', category: 'project' }
+  ],
+  items: [], cards: [], notes: {},
+  ...over
+});
+
+suite('Capture — notecards and filing', async ({ check }) => {
+
+  /* ---- capturing ---- */
+
+  {
+    const s = await storeWith(base());
+    s.addCard('  ask advisor about co-op timing  ');
+    check('a card is stored trimmed', s.state.cards[0].text === 'ask advisor about co-op timing');
+    check('a fresh card is unfiled', s.unfiledCards().length === 1);
+    check('newest capture sits first', s.addCard('second') === s.state.cards[0]);
+    check('filing to an area takes it out of unfiled',
+      s.addCard('third', { areaId: 'a1' }) && s.unfiledCards().length === 2);
+    check('cardsForArea finds it', s.cardsForArea('a1').length === 1);
+  }
+
+  {
+    const s = await storeWith(base({ cards: [{ id: 'c1', text: '   ' }] }));
+    check('an empty card does not survive a reload', s.state.cards.length === 0);
+  }
+
+  /* ---- becoming a task ---- */
+
+  {
+    const s = await storeWith(base());
+    const card = s.addCard('email registrar about override');
+    const item = s.cardToItem(card.id);
+    check('a plain task keeps the text as its title', item.title === 'email registrar about override');
+    check('a plain task gets no due date', item.due === null, `got ${item.due}`);
+    check('a plain task books no time', item.plan === null);
+    check('the card is consumed', s.cardById(card.id) === null);
+    check('the task is in the store', s.itemById(item.id) !== null);
+  }
+
+  {
+    // the whole point of "timed": a due date alone is never pushed to Google,
+    // so this has to book a block as well or it never reaches the calendar
+    const s = await storeWith(base());
+    const card = s.addCard('call advisor thu 2pm 30m');
+    const item = s.cardToItem(card.id, { as: 'timed' });
+    check('a timed task parses the date out of the text', !!item.due, `got ${item.due}`);
+    check('a timed task keeps the time', item.dueTime === '14:00', `got ${item.dueTime}`);
+    check('a timed task books a block', !!item.plan && item.plan.start === '14:00');
+    check('the block matches the due date', item.plan.date === item.due);
+    check('the block uses the stated duration', item.plan.mins === 30, `got ${item.plan?.mins}`);
+    check('the parsed noise is out of the title', item.title === 'call advisor', `got "${item.title}"`);
+  }
+
+  {
+    const s = await storeWith(base());
+    const card = s.addCard('undated thing');
+    const item = s.cardToItem(card.id, { as: 'timed' });
+    check('a timed task with no date in the text still books today',
+      item.plan && item.plan.date === item.due && !!item.due);
+  }
+
+  {
+    const s = await storeWith(base());
+    const card = s.addCard('read chapter 4', { areaId: 'a1' });
+    const item = s.cardToItem(card.id);
+    check('a filed card keeps its area when it becomes a task', item.areaId === 'a1');
+  }
+
+  {
+    const s = await storeWith(base());
+    const card = s.addCard('some note');
+    const item = s.cardToItem(card.id, { areaId: 'a2' });
+    check('an explicit area wins', item.areaId === 'a2');
+    check('cardToItem on a missing card is harmless', s.cardToItem('nope') === null);
+  }
+
+  /* ---- editing and deleting ---- */
+
+  {
+    const s = await storeWith(base());
+    const card = s.addCard('first text');
+    const before = card.updatedAt;
+    s.updateCard(card.id, { text: 'edited' });
+    check('editing a card changes its text', s.cardById(card.id).text === 'edited');
+    check('editing stamps updatedAt', s.cardById(card.id).updatedAt >= before);
+    s.updateCard(card.id, { areaId: 'a1' });
+    check('a card can be moved into an area', s.cardsForArea('a1').length === 1);
+    s.updateCard(card.id, { areaId: null });
+    check('...and back to unfiled', s.unfiledCards().length === 1);
+    s.deleteCard(card.id);
+    check('a card can be deleted', s.state.cards.length === 0);
+  }
+
+  /* ---- cards sync ---- */
+
+  {
+    const s = await storeWith(base());
+    s.addCard('syncs across devices');
+    const row = s.snapshotRows().find((r) => r.kind === 'card');
+    check('cards are offered to the sync engine', !!row);
+    check('a card row carries its text', row.data.text === 'syncs across devices');
+    check('rowStamp resolves a card', typeof s.rowStamp('card', row.id) === 'string');
+    check('an inbound card row is applied',
+      s.applyRow({ kind: 'card', id: 'remote1', data: { id: 'remote1', text: 'from the phone', areaId: null } }) === true
+      && s.cardById('remote1') !== null);
+    check('an inbound card tombstone deletes it',
+      s.applyRow({ kind: 'card', id: 'remote1', deleted: true }) === true && s.cardById('remote1') === null);
+  }
+
+  /* ---- the NER seed, and that neither seed comes back ---- */
+
+  {
+    const s = await storeWith({ version: 5, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
+    check('upgrading to 6 seeds NER Meetings',
+      s.areasInCategory('ner').map((a) => a.name).join() === 'NER Meetings');
+    check('...and does not re-seed Rocket, which v5 already offered',
+      !s.state.areas.some((a) => a.name === 'Rocket'),
+      'seeds must be pinned to their own version, not SCHEMA_VERSION');
+  }
+  {
+    const s = await storeWith({ version: 6, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
+    check('nothing is seeded once already on 6', s.state.areas.length === 1);
+  }
+});
+</script>
+</body>
+</html>

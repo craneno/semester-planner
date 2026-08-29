@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -46,6 +46,7 @@ const DEFAULTS = () => {
     },
     areas: [],
     items: [],
+    cards: [],          // captured notes, unfiled until given an areaId
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
     events: [],         // external Google events, read-only mirror
     outbox: [],         // queued Google writes while offline/signed out
@@ -94,6 +95,13 @@ function migrate(raw) {
   s.events = Array.isArray(raw.events) ? raw.events : [];
   s.outbox = Array.isArray(raw.outbox) ? raw.outbox : [];
   s.notes = raw.notes && typeof raw.notes === 'object' ? raw.notes : {};
+  s.cards = (Array.isArray(raw.cards) ? raw.cards : []).map((c) => ({
+    id: c.id || uid('c'),
+    text: c.text || '',
+    areaId: c.areaId || null,
+    createdAt: c.createdAt || new Date().toISOString(),
+    updatedAt: c.updatedAt || c.createdAt || new Date().toISOString()
+  })).filter((c) => c.text.trim());
   delete s.sessions;   // study logging was removed in schema 5
 
   // normalise areas
@@ -110,15 +118,19 @@ function migrate(raw) {
     grading: Array.isArray(a.grading) ? a.grading : []
   }));
 
-  // One-time on the upgrade into schema 5: the sidebar shows Projects whether
-  // or not it holds anything, so give it its one real project rather than an
-  // empty heading. Guarded by version so a deleted Rocket stays deleted.
-  if ((raw.version || 0) < SCHEMA_VERSION && !s.areas.some((a) => a.category === 'project')) {
+  // Seed a category that would otherwise be an empty heading, once, on the
+  // upgrade that introduced it. Each is pinned to its own version rather than
+  // SCHEMA_VERSION: a later bump must not resurrect one the user deleted.
+  const from = raw.version || 0;
+  const seed = (name, category) => {
+    if (s.areas.some((a) => a.category === category)) return;
     s.areas.push({
-      id: uid('a'), name: 'Rocket', color: AREA_COLORS[s.areas.length % AREA_COLORS.length],
-      category: 'project', location: '', archived: false, schedule: [], grading: []
+      id: uid('a'), name, color: AREA_COLORS[s.areas.length % AREA_COLORS.length],
+      category, location: '', archived: false, schedule: [], grading: []
     });
-  }
+  };
+  if (from < 5) seed('Rocket', 'project');
+  if (from < 6) seed('NER Meetings', 'ner');
 
   // normalise items (older schemas used plannedDate / dueDate / estimate)
   s.items = s.items.map((t) => {
@@ -242,6 +254,12 @@ export function categoryLoad() {
     };
   });
 }
+
+/* ---- captured cards ---- */
+
+export const unfiledCards = () => state.cards.filter((c) => !c.areaId);
+export const cardsForArea = (areaId) => state.cards.filter((c) => c.areaId === areaId);
+export const cardById = (id) => state.cards.find((c) => c.id === id) || null;
 
 /** The next few open items for an area, soonest first — undated last. */
 export function nextForArea(areaId, limit = 3) {
@@ -375,6 +393,53 @@ export function deleteArea(id) {
   const i = state.areas.findIndex((a) => a.id === id);
   if (i >= 0) state.areas.splice(i, 1);
   for (const t of state.items) if (t.areaId === id) t.areaId = null;
+}
+
+/* ---- cards ---- */
+
+/** Capture a note. Unfiled unless an area is named. */
+export function addCard(text, { areaId = null } = {}) {
+  const now = new Date().toISOString();
+  const card = { id: uid('c'), text: text.trim(), areaId, createdAt: now, updatedAt: now };
+  state.cards.unshift(card);
+  return card;
+}
+
+export function updateCard(id, patch) {
+  const c = cardById(id);
+  if (c) Object.assign(c, patch, { updatedAt: new Date().toISOString() });
+  return c;
+}
+
+export function deleteCard(id) {
+  const i = state.cards.findIndex((c) => c.id === id);
+  if (i >= 0) state.cards.splice(i, 1);
+}
+
+/**
+ * Turn a card into a task and consume it. The card's own text goes through the
+ * quick-add parser, so "call advisor thu 2pm 30m" arrives dated exactly as it
+ * would from the bar up top.
+ * @param {'task'|'timed'} as  'timed' also books a work block, which is what
+ *   makes it reach Google Calendar — a due date alone is never pushed.
+ */
+export function cardToItem(id, { as = 'task', areaId } = {}) {
+  const card = cardById(id);
+  if (!card) return null;
+  const parsed = parseQuickAdd(card.text);
+  if (areaId !== undefined) parsed.areaId = areaId;
+  else if (card.areaId) parsed.areaId = card.areaId;
+
+  if (as === 'timed') {
+    const date = parsed.due || parsed.plan?.date || today();
+    const start = parsed.dueTime || parsed.plan?.start || '09:00';
+    parsed.due = date;
+    parsed.dueTime = start;
+    parsed.plan = { date, start, mins: parsed.estMins || 60 };
+  }
+  const item = upsertItem(parsed);
+  deleteCard(id);
+  return item;
 }
 
 export function note(date) {
@@ -544,6 +609,7 @@ export function snapshotRows() {
   const rows = [];
   for (const a of state.areas) rows.push({ kind: 'area', id: a.id, data: a });
   for (const t of state.items) rows.push({ kind: 'item', id: t.id, data: t });
+  for (const c of state.cards) rows.push({ kind: 'card', id: c.id, data: c });
   for (const [date, n] of Object.entries(state.notes)) {
     if (!emptyNote(n)) rows.push({ kind: 'note', id: date, data: n });
   }
@@ -564,6 +630,7 @@ export function applyRow({ kind, id, data, deleted }) {
   switch (kind) {
     case 'area': return put(state.areas, data);
     case 'item': return put(state.items, data);
+    case 'card': return put(state.cards, data);
     case 'note':
       if (deleted) { if (state.notes[id]) { delete state.notes[id]; return true; } return false; }
       state.notes[id] = data;
@@ -582,6 +649,7 @@ export function applyRow({ kind, id, data, deleted }) {
 /** Local modification time for a row, used to settle conflicts. */
 export function rowStamp(kind, id) {
   if (kind === 'item') return itemById(id)?.updatedAt || null;
+  if (kind === 'card') return cardById(id)?.updatedAt || null;
   return null;
 }
 
@@ -601,6 +669,8 @@ export function importJson(text, { merge = false } = {}) {
     state.items.push(...next.items.filter((t) => !seen.has(t.id)));
     const seenA = new Set(state.areas.map((a) => a.id));
     state.areas.push(...next.areas.filter((a) => !seenA.has(a.id)));
+    const seenC = new Set(state.cards.map((c) => c.id));
+    state.cards.push(...next.cards.filter((c) => !seenC.has(c.id)));
     Object.assign(state.notes, next.notes);
   }
   save();

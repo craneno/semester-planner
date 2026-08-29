@@ -151,6 +151,17 @@ export const tz = () => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'UTC'; }
 };
 
+/** Short zone label for the UI — "EDT" where the browser knows one, else the
+ *  IANA city. Recomputed per call so it follows daylight saving. */
+export const tzLabel = (on = new Date()) => {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(on);
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (name && !/^GMT[+-]/.test(name)) return name;
+    return name || tz().split('/').pop().replace(/_/g, ' ');
+  } catch { return tz(); }
+};
+
 /* ---------- misc ---------- */
 
 export function debounce(fn, ms = 300) {

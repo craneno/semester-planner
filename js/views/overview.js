@@ -7,6 +7,7 @@ import {
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
+import { captureStrip } from '../capture.js';
 
 export function renderOverview(root, { navigate, go }) {
   clear(root);
@@ -32,6 +33,8 @@ export function renderOverview(root, { navigate, go }) {
       + (late.length ? ` · ${late.length} past due` : '')),
     h('div', { class: 'meter', style: { marginTop: '14px', maxWidth: '460px' } },
       h('span', { style: { width: pct + '%' } }))));
+
+  pad.append(captureStrip(navigate));
 
   /* three cards */
   const cards = h('div', { class: 'grid cols-3', style: { marginBottom: '18px' } });

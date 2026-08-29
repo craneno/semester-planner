@@ -3,7 +3,7 @@
 import { h, $, clear, today, fmtDate, debounce, diffDays } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, semesterProgress, weekNumber,
-  AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById
+  AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById, unfiledCards
 } from './store.js';
 import { toast, closePeek } from './ui.js';
 import { applyAppearance } from './appearance.js';
@@ -13,6 +13,7 @@ import { renderSemester } from './views/semester.js';
 import { renderWeek, goToWeekOf } from './views/week.js';
 import { renderToday, goToDay } from './views/today.js';
 import { renderCategory, renderArea } from './views/areas.js';
+import { renderNotes } from './views/notes.js';
 import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
 import * as C from './cloud.js';
@@ -24,6 +25,7 @@ const VIEWS = {
   semester: { label: 'Semester', glyph: '☰', render: renderSemester, title: () => 'Semester' },
   week:     { label: 'Week',     glyph: '▦', render: renderWeek,     title: () => 'Week', bare: true },
   today:    { label: 'Today',    glyph: '◉', render: renderToday,    title: () => 'Today' },
+  notes:    { label: 'Notes',    glyph: '✎', render: renderNotes,    title: () => 'Notes' },
   settings: { label: 'Settings', glyph: '⚙', render: renderSettings, title: () => 'Settings' }
 };
 
@@ -121,7 +123,14 @@ function paintChrome() {
     }
   }
 
-  rail.append(h('div', { style: { marginTop: '10px' } }, navButton({
+  const waiting = unfiledCards().length;
+  const notes = navButton({
+    glyph: '✎', label: 'Notes',
+    current: isCurrent('view', 'notes'), onclick: () => go('notes')
+  });
+  if (waiting) notes.append(h('span', { class: 'count eyebrow num' }, String(waiting)));
+
+  rail.append(h('div', { style: { marginTop: '10px' } }, notes, navButton({
     glyph: '⚙', label: 'Settings',
     current: isCurrent('view', 'settings'), onclick: () => go('settings')
   })));

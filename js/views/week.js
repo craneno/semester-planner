@@ -2,7 +2,7 @@
 
 import {
   h, clear, ymd, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration,
-  DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours
+  DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel
 } from '../util.js';
 import {
   state, commit, itemById, upsertItem, areaById, areaColor, classesOn, eventsOn,
@@ -43,6 +43,7 @@ export function renderWeek(root, { navigate } = {}) {
     h('div', { style: { flex: 1 } }),
     h('span', { class: 'eyebrow num', title: 'Planned work this week' },
       `${load.count} tasks · ${fmtHours(load.mins)}`),
+    h('span', { class: 'eyebrow tz-chip', title: `All times shown in ${tz()}` }, tzLabel()),
     h('button', {
       class: 'btn ghost sm desktop-only',
       'aria-pressed': String(showExternal),
@@ -51,7 +52,10 @@ export function renderWeek(root, { navigate } = {}) {
 
   /* ---- header + all-day rail ---- */
   const head = h('div', { class: 'week-head' }, h('div', {}));
-  const rail = h('div', { class: 'allday-rail' }, h('div', { class: 'gutter eyebrow' }, 'Due'));
+  const rail = h('div', { class: 'allday-rail' }, h('div', {
+    class: 'gutter eyebrow',
+    title: 'Due dates, all-day events, and planned work with no time set'
+  }, 'All day'));
 
   for (const d of days) {
     const dt = parseYmd(d);

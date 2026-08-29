@@ -16,6 +16,8 @@ bump `VERSION` in the same file so browsers fetch the new files.
 |---|---|
 | how a screen looks | `js/views/<screen>.js` |
 | category pages, one area's page | `js/views/areas.js` |
+| the capture box | `js/capture.js` |
+| the notes page | `js/views/notes.js` |
 | the categories themselves | `AREA_CATEGORIES` in `js/store.js` |
 | colours, spacing, the week grid | `css/app.css` |
 | what a task stores | `js/store.js` (add to `upsertItem`, then the editor) |

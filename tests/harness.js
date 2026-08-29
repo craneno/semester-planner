@@ -73,7 +73,22 @@ function report(title, failed, passed) {
 
 /** Seed localStorage with a planner payload, then load a store that reads it. */
 export async function storeWith(raw) {
+  seed(raw);
+  return freshStore();
+}
+
+/**
+ * Same, but returns the *canonical* store module — the instance gcal.js and
+ * cloud.js import. A fresh instance has its own `state`, so a suite that pokes
+ * state and then calls into another module has to share this one or the two
+ * never see each other. Only usable before anything else imports store.js.
+ */
+export async function sharedStoreWith(raw) {
+  seed(raw);
+  return import('../js/store.js');
+}
+
+function seed(raw) {
   if (raw === null) localStorage.removeItem('semesterPlanner.v1');
   else localStorage.setItem('semesterPlanner.v1', JSON.stringify(raw));
-  return freshStore();
 }
