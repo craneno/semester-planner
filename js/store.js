@@ -4,14 +4,13 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
    nav, on the overview breakdown, and as a filter, with no other change. */
 export const AREA_CATEGORIES = [
   { id: 'course', label: 'Courses', singular: 'course' },
-  { id: 'ner', label: 'NER', singular: 'NER area', note: 'Northeastern Electric Racing' },
   { id: 'project', label: 'Projects', singular: 'project' },
   { id: 'personal', label: 'Personal', singular: 'personal area' }
 ];
@@ -22,6 +21,17 @@ export const categoryById = (id) => AREA_CATEGORIES.find((c) => c.id === id) || 
 const KIND_TO_CATEGORY = {
   course: 'course', personal: 'personal',
   research: 'project', thesis: 'project', work: 'project', applications: 'project'
+};
+
+/** Categories folded into another one. NER stopped being a heading of its own
+ *  in schema 11 — an NER subteam is a project like any other. Unlike a seed
+ *  this is not pinned to a version: a category that no longer exists has to be
+ *  translated every time it is read, not once. */
+const MERGED_CATEGORY = { ner: 'project' };
+
+const areaCategory = (a) => {
+  const c = MERGED_CATEGORY[a.category] || a.category;
+  return CATEGORY_IDS.includes(c) ? c : (KIND_TO_CATEGORY[a.kind || a.type] || 'course');
 };
 
 /* Four kinds of thing, not eleven. An event or a meeting happens at a time;
@@ -128,9 +138,7 @@ function migrate(raw) {
     // array position is local; only a field on the row itself syncs
     order: Number.isFinite(a.order) ? a.order : i,
     color: a.color || AREA_COLORS[i % AREA_COLORS.length],
-    category: CATEGORY_IDS.includes(a.category)
-      ? a.category
-      : (KIND_TO_CATEGORY[a.kind || a.type] || 'course'),
+    category: areaCategory(a),
     location: a.location || '',
     archived: !!a.archived,
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
@@ -149,7 +157,6 @@ function migrate(raw) {
     });
   };
   if (from < 5) seed('Rocket', 'project');
-  if (from < 6) seed('NER Meetings', 'ner');
   if (from < 8) seed('Personal', 'personal');
 
   // the habit page is useless empty, so give it the ones it was built for.
@@ -814,7 +821,10 @@ export function applyRow({ kind, id, data, deleted }) {
     return true;
   };
   switch (kind) {
-    case 'area': return put(state.areas, data);
+    // A device still on an older schema pushes its own category names. One it
+    // no longer has a heading for would land here and vanish from the sidebar,
+    // so translate on the way in, exactly as migrate() does on the way up.
+    case 'area': return put(state.areas, deleted ? data : { ...data, category: areaCategory(data) });
     case 'item': return put(state.items, data);
     case 'card': return put(state.cards, data);
     case 'note':

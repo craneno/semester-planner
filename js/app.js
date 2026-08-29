@@ -32,7 +32,7 @@ const VIEWS = {
 
 const TOP_VIEWS = ['overview', 'semester', 'week', 'habits'];
 const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'notes'];
-const CATEGORY_GLYPH = { course: '◇', ner: '⚡', project: '▲', personal: '○' };
+const CATEGORY_GLYPH = { course: '◇', project: '▲', personal: '○' };
 
 /** { kind: 'view'|'category'|'area', id } — what the hash currently points at. */
 let current = { kind: 'view', id: 'overview' };

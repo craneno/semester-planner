@@ -276,8 +276,8 @@ an iPhone and a trackpad.
 the schedule table. Nothing is added until you approve it in the review list — edit titles, fix dates,
 uncheck bad detections.
 
-**Categories.** Every area — a course, an NER subteam, a project, something personal — is filed under
-one of four categories, which are the sidebar's top level. A category page lists its areas with each
+**Categories.** Every area — a course, a project, something personal — is filed under
+one of three categories, which are the sidebar's top level. A category page lists its areas with each
 one's next few deadlines under it; clicking an area opens everything in it.
 
 **Course recognition.** Adding an area offers **Pull from calendar**: it groups the repeating events on

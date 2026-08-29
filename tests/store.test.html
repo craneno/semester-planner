@@ -49,9 +49,32 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
 
   {
     const s = await storeWith(v4({
-      areas: [{ id: 'a1', name: 'Aero', kind: 'course', category: 'ner' }]
+      areas: [{ id: 'a1', name: 'Aero', kind: 'course', category: 'project' }]
     }));
-    check('an explicit category beats the old kind', s.areaById('a1').category === 'ner');
+    check('an explicit category beats the old kind', s.areaById('a1').category === 'project');
+  }
+
+  /* ---- NER folded into Projects at schema 11 ---- */
+
+  {
+    const s = await storeWith({
+      version: 10,
+      areas: [{ id: 'a1', name: 'NER Meetings', category: 'ner' }],
+      items: []
+    });
+    check('an NER area becomes a project', s.areaById('a1').category === 'project');
+    check('...and shows up under Projects',
+      s.areasInCategory('project').some((a) => a.name === 'NER Meetings'));
+    check('NER is no longer a category of its own', !s.CATEGORY_IDS.includes('ner'),
+      s.CATEGORY_IDS.join());
+  }
+  {
+    // a phone still on 10 pushes its own category name; it must not land in a
+    // heading that no longer exists and disappear from the sidebar
+    const s = await storeWith({ version: 11, areas: [], items: [] });
+    s.applyRow({ kind: 'area', id: 'r1', data: { id: 'r1', name: 'Aero', category: 'ner' } });
+    check('an inbound NER row is translated too',
+      s.areaById('r1').category === 'project', s.areaById('r1').category);
   }
 
   /* ---- the Rocket seed ---- */
@@ -145,7 +168,7 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     });
     const load = Object.fromEntries(s.categoryLoad().map((c) => [c.id, c]));
     check('categoryLoad reports an empty category as zero',
-      load.ner.open === 0 && load.ner.areas === 0);
+      load.personal.open === 0 && load.personal.areas === 0);
     check('nothing is seeded on data already at the current schema',
       s.state.areas.length === 1, s.state.areas.map((a) => a.name).join());
   }

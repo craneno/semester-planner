@@ -123,13 +123,11 @@ suite('Capture — notecards and filing', async ({ check }) => {
       s.applyRow({ kind: 'card', id: 'remote1', deleted: true }) === true && s.cardById('remote1') === null);
   }
 
-  /* ---- the NER seed, and that neither seed comes back ---- */
+  /* ---- that a seed already offered does not come back ---- */
 
   {
     const s = await storeWith({ version: 5, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
-    check('upgrading to 6 seeds NER Meetings',
-      s.areasInCategory('ner').map((a) => a.name).join() === 'NER Meetings');
-    check('...and does not re-seed Rocket, which v5 already offered',
+    check('upgrading from 5 does not re-seed Rocket, which v5 already offered',
       !s.state.areas.some((a) => a.name === 'Rocket'),
       'seeds must be pinned to their own version, not SCHEMA_VERSION');
   }

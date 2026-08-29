@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **10**, service worker **planner-v16**.
+Currently schema **11**, service worker **planner-v17**.
 
 ## Working on it
 
@@ -133,18 +133,22 @@ area lands in the Personal area via `defaultAreaId()`.
 
 ### Schema history
 
-Each migration is pinned to the version that introduced it — `if (from < 5)`,
+Each *seed* is pinned to the version that introduced it — `if (from < 5)`,
 never `< SCHEMA_VERSION`, or the next bump resurrects something the user
-deliberately deleted.
+deliberately deleted. A *rename* is the opposite: `MERGED_CATEGORY` is applied
+unpinned, in `areaCategory()`, because a category id that no longer exists has
+to be translated every time one is read — including in `applyRow()`, since a
+device still on the old schema keeps pushing the old name.
 
 | v | change |
 |---|---|
 | 5 | `kind` → `category`; study logging removed; seeds Rocket |
-| 6 | notecards; seeds NER Meetings |
+| 6 | notecards; seeded NER Meetings (the seed is gone; the area survives) |
 | 7 | `order` on areas |
 | 8 | four item types; `grade` dropped; seeds a Personal area |
 | 9 | habits; seeds the first five |
 | 10 | seeds Sunscreen |
+| 11 | the `ner` category folds into `project` (`MERGED_CATEGORY`) |
 
 ## Routing and views
 

@@ -59,7 +59,6 @@ export function renderCategory(root, { navigate, go }, categoryId) {
 function emptyBlurb(categoryId) {
   switch (categoryId) {
     case 'course': return 'Add the courses you are taking, then import a syllabus to fill in the deadlines.';
-    case 'ner': return 'Subteams and workstreams for Northeastern Electric Racing.';
     case 'project': return 'Anything you are building that is not a course.';
     default: return 'Appointments, applications, errands — work that is yours alone.';
   }
