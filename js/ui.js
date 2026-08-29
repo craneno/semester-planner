@@ -45,14 +45,19 @@ export function closeModal() {
 
 export function confirmDialog(question, detail, confirmLabel = 'Delete') {
   return new Promise((resolve) => {
+    // Every path out of the dialog — button, ✕, scrim, Escape — ends in
+    // closeModal(), which fires onClose. So the buttons only latch an answer
+    // and onClose is the single place that settles the promise. Resolving in
+    // the button handler too would settle false first and lose the answer.
+    let answer = false;
     modal({
       title: question,
       body: h('p', { style: { margin: 0, color: 'var(--ink-2)' } }, detail || ''),
       footer: [
-        h('button', { class: 'btn', onclick: () => { closeModal(); resolve(false); } }, 'Cancel'),
-        h('button', { class: 'btn primary', onclick: () => { closeModal(); resolve(true); } }, confirmLabel)
+        h('button', { class: 'btn', onclick: () => { answer = false; closeModal(); } }, 'Cancel'),
+        h('button', { class: 'btn primary', onclick: () => { answer = true; closeModal(); } }, confirmLabel)
       ],
-      onClose: () => resolve(false)
+      onClose: () => resolve(answer)
     });
   });
 }

@@ -199,7 +199,8 @@ function boot() {
 
   // re-render on any state change that came from outside this view
   subscribe((meta) => {
-    if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud') navigate();
+    if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
+      || meta?.source === 'editor') navigate();
   });
 
   navigate();

@@ -47,9 +47,14 @@ function render(item) {
       onclick: async () => {
         if (await confirmDialog('Delete this task?', item.title, 'Delete')) {
           const snapshot = JSON.parse(JSON.stringify(item));
-          commit(() => deleteItem(item.id));
+          // tagged so the view underneath repaints — the peek floats over
+          // whichever view is showing, and it still lists this item
+          commit(() => deleteItem(item.id), { source: 'editor' });
           closePeek();
-          toast('Task deleted', { action: 'Undo', onAction: () => commit(() => state.items.push(snapshot)) });
+          toast('Task deleted', {
+            action: 'Undo',
+            onAction: () => commit(() => state.items.push(snapshot), { source: 'editor' })
+          });
         }
       }
     }, '🗑'),
