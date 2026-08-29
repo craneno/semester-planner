@@ -1,7 +1,7 @@
 // sw.js — offline shell. App files are cache-first with a background refresh;
 // anything else (Google APIs, PDF.js) goes straight to the network.
 
-const VERSION = 'planner-v7';
+const VERSION = 'planner-v8';
 const SHELL = [
   './',
   './index.html',
@@ -31,7 +31,11 @@ const SHELL = [
 self.addEventListener('install', (e) => {
   e.waitUntil(
     caches.open(VERSION)
-      .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
+      // cache: 'reload' fetches past the HTTP cache. Without it a plain c.add()
+      // is served by it, and since Pages sends max-age=600 a freshly bumped
+      // VERSION can be filled with the files it was bumped to replace.
+      .then((c) => Promise.allSettled(
+        SHELL.map((u) => c.add(new Request(u, { cache: 'reload' })))))
       .then(() => self.skipWaiting())
   );
 });

@@ -26,6 +26,11 @@ copy and your change appears to do nothing.
 
 Adding a new module? Add it to `SHELL` *and* bump `VERSION`.
 
+The install handler fetches with `cache: 'reload'` so the new cache is filled
+from the network. Keep it that way — a plain `c.add(u)` reads through the HTTP
+cache, and since Pages sends `max-age=600` a freshly bumped `VERSION` can be
+populated with the very files it was bumped to replace.
+
 ### When a change appears not to take effect
 
 Almost always a cache, not your code. Two different ones bite, in two places:
@@ -61,8 +66,23 @@ class H(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 ```
 
-Before concluding a fix does not work, confirm the browser is running it:
-`fetch('./js/ui.js?x=' + Math.random()).then(r => r.text()).then(t => console.log(t.includes('some new string')))`
+**Do not verify with a cache-busting query string.** `sw.js` matches with
+`ignoreSearch: true`, so `?x=Math.random()` is ignored and you are handed the
+cached copy. `fetch(url, { cache: 'reload' })` is no better: the request still
+goes through the worker, which returns its hit before touching the network. On
+a controlled page both *look* like network reads and are not.
+
+What actually tells you the truth:
+
+- **DevTools → Application → Service workers → Bypass for network.** Page
+  fetches then skip the worker entirely, so you see what the server has. This
+  is the one in-browser check that is not lying to you.
+- `await caches.keys()` in the console — which `VERSION` is live here.
+- From outside the browser, where no worker can intercept:
+  `curl -s https://craneno.github.io/semester-planner/js/cloud.js | grep -c 'some new string'`
+
+While developing, tick **Update on reload** in that same panel. The worker then
+updates every reload and the two-load behaviour above stops applying.
 
 ## js/store.js is the source of truth
 
