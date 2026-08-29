@@ -10,7 +10,7 @@
 import { suite, storeWith } from './harness.js';
 
 const base = (over = {}) => ({
-  version: 9,
+  version: 10,
   semester: { name: 'Fall 2026', start: '2026-08-01', end: '2026-12-12' },
   areas: [], items: [], cards: [], notes: {},
   habits: [], habitLog: {},
@@ -24,23 +24,34 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
   {
     const s = await storeWith({ version: 8, areas: [], items: [] });
     const names = s.activeHabits().map((x) => x.name);
-    check('upgrading to 9 seeds the starting habits', names.length === 5, names.join(' | '));
+    check('a fresh upgrade seeds every starting habit', names.length === 6, names.join(' | '));
     check('the three phone habits are separate rows',
       names.filter((n) => n.startsWith('No phone')).length === 3, names.join(' | '));
-    check('...and are in the order given',
-      names.join(' | ') === 'No phone — morning | No phone — eating | No phone — night | 10k steps or workout | Out of bed by 9:00',
+    check('...and they are in the order given',
+      names.join(' | ') === 'No phone — morning | No phone — eating | No phone — night | 10k steps or workout | Out of bed by 9:00 | Sunscreen',
       names.join(' | '));
+  }
+  {
+    // already on 9 with the first five: only the one 10 adds should appear
+    const s = await storeWith(base({
+      version: 9,
+      habits: ['No phone — morning', '10k steps or workout'].map((name, i) => ({ id: 'h' + i, name, order: i }))
+    }));
+    check('a later bump adds only its own habit',
+      s.activeHabits().map((x) => x.name).join(' | ') === 'No phone — morning | 10k steps or workout | Sunscreen',
+      s.activeHabits().map((x) => x.name).join(' | '));
+  }
+  {
+    const s = await storeWith(base({ version: 10, habits: [] }));
+    check('no seed once already on 10', s.activeHabits().length === 0,
+      'a habit deleted on purpose must not come back at the next bump');
   }
   {
     const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Mine', order: 0 }] }));
     check('an existing set of habits is left alone',
       s.activeHabits().map((x) => x.name).join() === 'Mine');
   }
-  {
-    // deleted every habit on purpose: schema 9 has already run, so leave it empty
-    const s = await storeWith(base({ habits: [] }));
-    check('no re-seed once already on 9', s.activeHabits().length === 0);
-  }
+
 
   /* ---- ticking ---- */
 
@@ -86,6 +97,31 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
     s.toggleHabit('2026-08-27', 'h1', true);
     check('today being untouched does not break the streak',
       s.habitStreak('h1', '2026-08-29') === 2, String(s.habitStreak('h1', '2026-08-29')));
+  }
+
+  /* ---- the 21-day countdown ---- */
+
+  {
+    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
+    const ref = '2026-08-29';
+    const back = (n) => new Date(Date.UTC(2026, 7, 29) - n * 86400000).toISOString().slice(0, 10);
+
+    check('the target is 21 days', s.HABIT_TARGET === 21);
+    check('a habit with no run has the whole way to go',
+      s.habitRemaining('h1', ref) === 21, String(s.habitRemaining('h1', ref)));
+
+    for (let i = 0; i < 3; i++) s.toggleHabit(back(i), 'h1', true);
+    check('the countdown follows the streak',
+      s.habitRemaining('h1', ref) === 18, String(s.habitRemaining('h1', ref)));
+
+    for (let i = 3; i < 21; i++) s.toggleHabit(back(i), 'h1', true);
+    check('reaching the target leaves nothing to go',
+      s.habitRemaining('h1', ref) === 0, String(s.habitRemaining('h1', ref)));
+
+    for (let i = 21; i < 30; i++) s.toggleHabit(back(i), 'h1', true);
+    check('a longer run does not go negative',
+      s.habitStreak('h1', ref) === 30 && s.habitRemaining('h1', ref) === 0,
+      `streak ${s.habitStreak('h1', ref)}, remaining ${s.habitRemaining('h1', ref)}`);
   }
 
   /* ---- editing ---- */

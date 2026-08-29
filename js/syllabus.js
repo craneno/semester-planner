@@ -1,6 +1,6 @@
 // syllabus.js — pull dates out of a syllabus, then make you approve every one.
 
-import { h, clear, pad, today, MONTHS } from './util.js';
+import { h, clear, pad } from './util.js';
 import { state, commit, upsertItem, ITEM_TYPES } from './store.js';
 import { modal, closeModal, toast } from './ui.js';
 

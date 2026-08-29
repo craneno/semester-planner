@@ -317,6 +317,11 @@ semester that is nothing.
 
 `habitStreak()` counts back from today, and an untouched *today* does not
 break a run — the day is not over yet — but a missed yesterday does.
+`habitRemaining()` is the countdown to `HABIT_TARGET` (21 days), floored at 0.
+
+Habit seeds are pinned per version like the area seeds: `from < 9` added the
+first five, `from < 10` added Sunscreen. A later bump must not resurrect a
+habit that was deleted on purpose.
 
 ## Sidebar
 

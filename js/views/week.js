@@ -1,12 +1,10 @@
 // views/week.js — the calendar. Owned blocks are filled, borrowed ones are outlined.
 
 import {
-  h, clear, ymd, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration,
-  DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel
+  h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel
 } from '../util.js';
 import {
-  state, commit, itemById, upsertItem, areaById, areaColor, classesOn, eventsOn,
-  itemsDueOn, workloadFor, weekNumber
+  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor, weekNumber
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -17,7 +15,6 @@ let showExternal = true;
 
 const COMPACT_H = 42;          // below this a block gets one line, not two
 
-export function goToWeekOf(date) { anchor = date; }
 
 export function renderWeek(root, { navigate } = {}) {
   clear(root);

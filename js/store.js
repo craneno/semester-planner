@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -152,13 +152,25 @@ function migrate(raw) {
   if (from < 6) seed('NER Meetings', 'ner');
   if (from < 8) seed('Personal', 'personal');
 
-  // the habit page is useless empty, so give it the ones it was built for
+  // the habit page is useless empty, so give it the ones it was built for.
+  // Pinned per version like the area seeds: a habit deleted on purpose must
+  // not reappear at the next bump.
+  const addHabits = (names) => {
+    for (const name of names) {
+      if (s.habits.some((x) => x.name === name)) continue;
+      s.habits.push({
+        id: uid('h'), name, order: s.habits.length,
+        archived: false, createdAt: new Date().toISOString()
+      });
+    }
+  };
   if (from < 9 && !s.habits.length) {
-    s.habits = [
+    addHabits([
       'No phone — morning', 'No phone — eating', 'No phone — night',
       '10k steps or workout', 'Out of bed by 9:00'
-    ].map((name, i) => ({ id: uid('h'), name, order: i, archived: false, createdAt: new Date().toISOString() }));
+    ]);
   }
+  if (from < 10) addHabits(['Sunscreen']);
 
   // normalise items (older schemas used plannedDate / dueDate / estimate)
   s.items = s.items.map((t) => {
@@ -446,6 +458,13 @@ export function deleteArea(id) {
 }
 
 /* ---- habits ---- */
+
+/** Days of an unbroken run before a habit is taken to have stuck. */
+export const HABIT_TARGET = 21;
+
+/** Days still to go, or 0 once the run is long enough. */
+export const habitRemaining = (id, ref = today()) =>
+  Math.max(0, HABIT_TARGET - habitStreak(id, ref));
 
 export const activeHabits = () =>
   state.habits.filter((x) => !x.archived).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

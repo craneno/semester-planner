@@ -1,6 +1,6 @@
 // ui.js — shared chrome: toasts, modals, the peek panel, pointer drag.
 
-import { h, $, clear, hexAlpha, readableOn, fmtDate, diffDays, today } from './util.js';
+import { h, $, clear, hexAlpha, fmtDate, diffDays, today } from './util.js';
 import { areaById } from './store.js';
 
 /* ---------------- toasts ---------------- */

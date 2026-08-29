@@ -9,8 +9,8 @@
 //        extendedProperties.private.plannerItemId, so a round trip never
 //        creates a duplicate.
 
-import { state, commit, itemById, upsertItem, areaById } from './store.js';
-import { ymd, toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays } from './util.js';
+import { state, commit, itemById, areaById } from './store.js';
+import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays } from './util.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 const SCOPES = [
@@ -399,28 +399,6 @@ export async function pushItem(itemId) {
     queue({ kind: wantsEvent ? 'upsert' : 'delete', itemId });
     setStatus('error', err.message);
   }
-}
-
-/** Create a plain calendar event (not backed by a task). */
-export async function createEvent({ title, date, start, mins, location: loc }) {
-  const calId = encodeURIComponent(cfg().calendarId || 'primary');
-  const body = {
-    summary: title,
-    location: loc || '',
-    start: { dateTime: toRfc3339(date, start), timeZone: tz() },
-    end: { dateTime: toRfc3339(date, fromMin(toMin(start) + (mins || 60))), timeZone: tz() }
-  };
-  const ev = await api(`/calendars/${calId}/events`, { method: 'POST', body });
-  const n = normalise(ev);
-  if (n) { state.events.push(n); commit(null, { source: 'gcal-push' }); }
-  return n;
-}
-
-export async function deleteEvent(eventId) {
-  const calId = encodeURIComponent(cfg().calendarId || 'primary');
-  await api(`/calendars/${calId}/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
-  state.events = state.events.filter((e) => e.id !== eventId);
-  commit(null, { source: 'gcal-push' });
 }
 
 export async function flushOutbox() {

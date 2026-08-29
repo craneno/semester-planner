@@ -6,7 +6,7 @@
 import { h, clear, today, addDays, startOfWeek, weekDays, parseYmd, DOW, MONTHS } from '../util.js';
 import {
   state, commit, activeHabits, habitDone, toggleHabit, habitStreak,
-  addHabit, updateHabit, deleteHabit, reorderHabits
+  habitRemaining, HABIT_TARGET, addHabit, updateHabit, deleteHabit, reorderHabits
 } from '../store.js';
 import { confirmDialog, toast, reorderable } from '../ui.js';
 
@@ -51,7 +51,8 @@ export function renderHabits(root, { navigate }) {
       h('div', { class: 'eyebrow' }, DOW[dt.getDay()][0]),
       h('div', { class: 'habit-dnum num' }, String(dt.getDate())));
     }),
-    h('div', { class: 'habit-streak eyebrow' }, 'streak'));
+    h('div', { class: 'habit-streak eyebrow' }, 'streak'),
+    h('div', { class: 'habit-goal eyebrow' }, `to ${HABIT_TARGET}`));
   table.append(head);
 
   for (const x of habits) {
@@ -90,14 +91,15 @@ export function renderHabits(root, { navigate }) {
             const nowOn = commitTick(d, x.id);
             e.currentTarget.classList.toggle('on', nowOn);
             e.currentTarget.setAttribute('aria-pressed', String(nowOn));
-            // only the streak needs recomputing; re-rendering would lose focus
-            const cell = e.currentTarget.closest('.habit-row').querySelector('.habit-streak');
-            if (cell) cell.textContent = streakLabel(x.id);
+            paintProgress(e.currentTarget.closest('.habit-row'), x.id);
           }
         }, on ? '✓' : '')));
     }
 
     row.append(h('div', { class: 'habit-streak num' }, streakLabel(x.id)));
+    row.append(h('div', { class: 'habit-goal' },
+      h('span', { class: 'goal-n num' }, goalLabel(x.id)),
+      h('span', { class: 'meter goal-bar' }, h('span', { style: { width: goalPct(x.id) + '%' } }))));
     table.append(row);
   }
 
@@ -140,3 +142,21 @@ const streakLabel = (id) => {
   const n = habitStreak(id);
   return n ? String(n) : '—';
 };
+
+/** How much further to a habit that has stuck — or nothing left to say. */
+const goalLabel = (id) => {
+  const left = habitRemaining(id);
+  return left ? String(left) : '✓';
+};
+const goalPct = (id) => Math.min(100, Math.round((habitStreak(id) / HABIT_TARGET) * 100));
+
+/** A tick only changes that habit's own numbers, and re-rendering the page
+ *  would take focus off the box you just clicked. */
+function paintProgress(row, id) {
+  const streak = row.querySelector('.habit-streak');
+  if (streak) streak.textContent = streakLabel(id);
+  const n = row.querySelector('.goal-n');
+  if (n) n.textContent = goalLabel(id);
+  const bar = row.querySelector('.goal-bar > span');
+  if (bar) bar.style.width = goalPct(id) + '%';
+}

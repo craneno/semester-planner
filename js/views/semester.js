@@ -1,7 +1,7 @@
 // views/semester.js — every piece of work, grouped by month. The database view.
 
-import { h, clear, today, fmtDate, monthKey, monthLabel, fmtDuration } from '../util.js';
-import { state, commit, toggleItem, areaColor, ITEM_TYPES, progress } from '../store.js';
+import { h, clear, fmtDate, monthKey, monthLabel, fmtDuration } from '../util.js';
+import { state, commit, toggleItem, ITEM_TYPES, progress } from '../store.js';
 import { areaTag, dueChip, priorityTag, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { pushItem } from '../gcal.js';

@@ -1,16 +1,17 @@
 // app.js — shell, router, quick add.
 
-import { h, $, clear, today, fmtDate, debounce, diffDays } from './util.js';
+import { h, $, clear, fmtDate, debounce } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, semesterProgress, weekNumber,
-  AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById, unfiledCards, reorderAreas
+  AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
+  unfiledCards, reorderAreas
 } from './store.js';
 import { toast, closePeek, reorderable } from './ui.js';
 import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
 import { renderSemester } from './views/semester.js';
-import { renderWeek, goToWeekOf } from './views/week.js';
+import { renderWeek } from './views/week.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderNotes } from './views/notes.js';
 import { renderHabits } from './views/habits.js';
