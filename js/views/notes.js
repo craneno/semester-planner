@@ -3,7 +3,7 @@
 import { h, clear, fmtDate } from '../util.js';
 import {
   state, commit, updateCard, deleteCard, cardToItem, unfiledCards, cardsForArea,
-  areasInCategory, areaById, AREA_CATEGORIES
+  areasInCategory, areaById, AREA_CATEGORIES, unfiledLinks, deleteLink, updateLink
 } from '../store.js';
 import { toast, confirmDialog, modal, closeModal } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -23,6 +23,14 @@ export function renderNotes(root, { navigate, go }) {
     h('div', { style: { flex: 1 } })));
 
   pad.append(captureStrip(navigate));
+
+  // A link normally lands in an area. One only gets here if its area was
+  // deleted out from under it, or if there was no personal area to default to.
+  const loose = unfiledLinks();
+  if (loose.length) {
+    pad.append(group('Links with no home', loose.length));
+    for (const l of loose) pad.append(looseLinkRow(l, navigate));
+  }
 
   if (!state.cards.length) {
     pad.append(h('div', { class: 'empty', style: { marginTop: '20px' } },
@@ -49,6 +57,34 @@ export function renderNotes(root, { navigate, go }) {
   }
 
   root.append(pad);
+}
+
+function looseLinkRow(l, navigate) {
+  return h('div', { class: 'row link-row' },
+    h('a', {
+      class: 'title link-title', href: l.url, title: l.url,
+      target: '_blank', rel: 'noopener noreferrer'
+    }, l.title),
+    h('select', {
+      'aria-label': `File ${l.title}`,
+      onchange: (e) => {
+        if (!e.target.value) return;
+        commit(() => updateLink(l.id, { areaId: e.target.value }));
+        navigate();
+      }
+    },
+    h('option', { value: '' }, 'File it…'),
+    ...AREA_CATEGORIES.flatMap((cat) => areasInCategory(cat.id)
+      .map((a) => h('option', { value: a.id }, `${cat.label} · ${a.name}`)))),
+    h('button', {
+      class: 'btn sm ghost', 'aria-label': `Remove ${l.title}`,
+      onclick: async () => {
+        if (await confirmDialog('Remove this link?', l.title, 'Remove')) {
+          commit(() => deleteLink(l.id));
+          navigate();
+        }
+      }
+    }, '✕'));
 }
 
 const group = (label, n, color) => h('div', { class: 'group-h' },

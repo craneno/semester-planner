@@ -714,6 +714,42 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .area-chip:hover .drag-handle, .drag-handle:focus-visible { opacity: 1; }
 @media (hover: none) { .area-chip .drag-handle { opacity: .6; } }
 
+/* a pinned view inside a category group: no grip, so it pays the grip's width
+   in padding instead and still lines up with the areas above it */
+.area-chip.is-pin { padding-left: 31px; }
+.pin-glyph { width: 8px; flex: none; color: var(--ink-3); font-size: 11px; line-height: 1; }
+
+
+/* ---------------- links ---------------- */
+
+.link-row { grid-template-columns: minmax(0, 1fr) auto auto auto; cursor: default; }
+.link-row .link-title {
+  color: var(--ink); text-decoration: none;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.link-row .link-title:hover, .link-row .link-title:focus-visible {
+  text-decoration: underline; text-decoration-color: var(--ink-3);
+}
+.link-row .link-edit {
+  padding: 5px 8px; border: 1px solid var(--accent); border-radius: var(--r);
+  background: var(--surface); color: var(--ink); font: inherit; min-width: 0;
+}
+.link-row select {
+  padding: 4px 6px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink-2); font: inherit;
+  font-size: calc(12px * var(--scale));
+}
+.link-new {
+  padding: 6px 9px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink); font: inherit;
+  font-size: calc(13px * var(--scale)); min-width: 210px;
+}
+
+@media (max-width: 620px) {
+  .link-new { min-width: 0; width: 100%; }
+  .group-h .link-new { margin-top: 6px; }
+}
+
 
 /* ---------- scheduled / deadline toggle ---------- */
 

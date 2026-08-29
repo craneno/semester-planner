@@ -4,7 +4,7 @@ import { h, $, clear, fmtDate, debounce } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, semesterProgress, weekNumber,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
-  unfiledCards, reorderAreas
+  unfiledCards, reorderAreas, parseLinkAdd, addLink
 } from './store.js';
 import { toast, closePeek, reorderable } from './ui.js';
 import { applyAppearance } from './appearance.js';
@@ -30,7 +30,13 @@ const VIEWS = {
   settings: { label: 'Settings', glyph: '⚙', render: renderSettings, title: () => 'Settings' }
 };
 
-const TOP_VIEWS = ['overview', 'semester', 'week', 'habits'];
+const TOP_VIEWS = ['overview', 'semester', 'week'];
+
+/* A view pinned inside a category's group in the sidebar. Habits are personal
+   but they are not an area — there is no work in them and nothing is ever due
+   — so they sit under Personal as a link to their own page rather than as a
+   fake row in state.areas. */
+const CATEGORY_PINS = { personal: [{ view: 'habits', label: 'Habits', glyph: '◴' }] };
 const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'notes'];
 const CATEGORY_GLYPH = { course: '◇', project: '▲', personal: '○' };
 
@@ -126,7 +132,8 @@ function paintChrome() {
     row.prepend(caret);
     rail.append(row);
     const areas = areasInCategory(cat.id);
-    if (!areas.length) continue;
+    const pins = CATEGORY_PINS[cat.id] || [];
+    if (!areas.length && !pins.length) continue;
 
     const closed = !!state.settings.railClosed?.[cat.id];
     caret.classList.toggle('is-closed', closed);
@@ -155,6 +162,23 @@ function paintChrome() {
       handle: '.drag-handle',
       onDrop: (ids) => { commit(() => reorderAreas(cat.id, ids)); navigate(); }
     });
+
+    // pinned views sit outside the reorderable host: they have no reorderId,
+    // and a drop that included them would have nowhere to write the order
+    if (pins.length) {
+      const pinHost = h('div', { class: 'rail-areas' });
+      for (const p of pins) {
+        pinHost.append(h('div', { class: 'area-chip is-pin' },
+          h('button', {
+            class: 'area-chip-open',
+            'aria-current': isCurrent('view', p.view) ? 'page' : null,
+            onclick: () => { go(p.view); closeSidebar(); }
+          },
+          h('span', { class: 'pin-glyph' }, p.glyph),
+          h('span', { class: 'nav-label' }, p.label))));
+      }
+      rail.append(pinHost);
+    }
   }
 
   const waiting = unfiledCards().length;
@@ -233,6 +257,22 @@ function wireQuickAdd() {
   const input = $('#quickadd-input');
   input.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || !input.value.trim()) return;
+
+    // A line that starts with a URL is a bookmark, not something to do.
+    const link = parseLinkAdd(input.value);
+    if (link) {
+      let made;
+      commit(() => { made = addLink(link.url, { areaId: link.areaId, title: link.title }); });
+      input.value = '';
+      const home = areaById(link.areaId);
+      toast(`Saved to ${home ? home.name : 'Notes'} · ${made.title}`, {
+        action: 'Open',
+        onAction: () => go(home ? `area/${home.id}` : 'notes')
+      });
+      navigate();
+      return;
+    }
+
     const parsed = parseQuickAdd(input.value);
     let created;
     commit(() => { created = upsertItem(parsed); });

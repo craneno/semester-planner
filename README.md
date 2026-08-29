@@ -1,7 +1,7 @@
 # Semester Planner
 
 A static PWA: Notion-style database views over a Google Calendar–style time grid.
-One task object feeds Overview, Semester, Week, Today, and course progress — you never enter it twice.
+One task object feeds Overview, Semester, Week, and course progress — you never enter it twice.
 
 No build step, no framework, no bundler. Plain ES modules, one CSS file, one service worker.
 
@@ -285,6 +285,12 @@ your Google Calendar and fills the name, room, meeting days and times from one o
 schedule off the event's actual instances, so a course that also meets for a lab comes back as two
 meeting blocks, and a single rescheduled week is ignored. Works for any area — a lecture, a lab, a
 weekly NER meeting.
+
+**Links.** Paste a link into the Add bar and it is saved rather than turned into a task —
+the tabs you mean to come back to, filed where the work is. A word after it names the area
+(`nasa.gov/... ner`), anything else becomes the title, and with nothing after it the link goes to
+**General**. Every area page has its pile at the bottom; the title is guessed from the URL and can be
+edited in place, since a page's real title cannot be read from another origin.
 
 **Capture.** Write in the box on Overview and press Enter; it becomes a notecard in **Notes**, unfiled,
 and you decide later. Without leaving the box you can instead file it straight to an area, to a task,

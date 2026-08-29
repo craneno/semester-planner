@@ -54,10 +54,6 @@ alter publication supabase_realtime add table public.planner_rows;
 alter table public.planner_rows replica identity full;
 
 
--- Upgrading an existing database (schema 6: notecards in, study sessions out).
--- Safe to run more than once.
---
---   alter table public.planner_rows drop constraint planner_rows_kind_check;
---   alter table public.planner_rows add constraint planner_rows_kind_check
---     check (kind in ('area', 'item', 'note', 'card', 'meta'));
---   delete from public.planner_rows where kind = 'session';
+-- Already have a project from an earlier version of this file? Run
+-- `upgrade.sql` beside this one instead. It is idempotent, and it is what the
+-- planner points you at when a push is rejected.

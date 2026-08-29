@@ -132,14 +132,20 @@ suite('Capture — notecards and filing', async ({ check }) => {
       'seeds must be pinned to their own version, not SCHEMA_VERSION');
   }
   {
+    // 6 to current runs 8's seed and 12's, and neither 5's nor a second copy
+    // of anything: each seed is pinned to the version that introduced it
     const s = await storeWith({ version: 6, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
-    check('upgrading 6 to 8 seeds only what 8 added',
-      s.state.areas.map((a) => a.name).join() === 'Thermo,Personal',
+    check('upgrading from 6 runs every later seed, in order',
+      s.state.areas.map((a) => a.name).join() === 'Thermo,General,Job search',
       s.state.areas.map((a) => a.name).join());
+    check('...and not one from a version already passed',
+      !s.state.areas.some((a) => a.name === 'Rocket'));
   }
   {
-    const s = await storeWith({ version: 8, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
-    check('nothing is seeded once already current', s.state.areas.length === 1);
+    const current = (await storeWith(null)).SCHEMA_VERSION;
+    const s = await storeWith({ version: current, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
+    check('nothing is seeded once already current', s.state.areas.length === 1,
+      s.state.areas.map((a) => a.name).join());
   }
 });
 </script>

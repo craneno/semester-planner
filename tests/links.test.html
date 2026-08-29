@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Link tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, storeWith } from './harness.js';
+
+/* The areas a real install has after schema 12, so the hints under test are
+   the ones actually typed: "ner", "rocket", "thermo", "personal". */
+const withAreas = (over = {}) => ({
+  version: 12,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [
+    { id: 'c1', name: 'Thermodynamics', category: 'course', order: 0 },
+    { id: 'c2', name: 'EE lab', category: 'course', order: 1 },
+    { id: 'p1', name: 'NER Meetings', category: 'project', order: 2 },
+    { id: 'p2', name: 'Rocket', category: 'project', order: 3 },
+    { id: 'x1', name: 'General', category: 'personal', order: 4 },
+    { id: 'x2', name: 'Job search', category: 'personal', order: 5 }
+  ],
+  items: [], cards: [], links: [], habits: [], habitLog: {}, notes: {},
+  ...over
+});
+
+suite('Links — parsing, filing and titles', async ({ check }) => {
+
+  /* ---- what counts as a link ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    const isLink = (t) => !!s.parseLinkAdd(t);
+
+    check('a full url is a link', isLink('https://example.com/thing'));
+    check('a bare domain is a link', isLink('example.com'));
+    check('www. is a link', isLink('www.fhjfjgbrjb.com'));
+    check('a deep path is a link', isLink('https://en.wikipedia.org/wiki/Entropy'));
+
+    check('ordinary work is not a link', !isLink('Problem set 3 due fri 5pm'));
+    check('a sentence with a dot is not a link', !isLink('email prof. about the lab'));
+    check('a url later in the line is not a link', !isLink('read example.com tonight'),
+      'only a line that starts with one is a bookmark');
+    check('nothing is not a link', !isLink('   '));
+  }
+
+  /* ---- schemes ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    check('a bare domain gets https', s.normalizeUrl('example.com') === 'https://example.com/');
+    check('http is left alone', s.normalizeUrl('http://example.com/x') === 'http://example.com/x');
+    check('javascript: is refused', s.normalizeUrl('javascript:alert(1)') === null,
+      'a stored javascript: url would run as the app the moment it is clicked');
+    check('data: is refused', s.normalizeUrl('data:text/html,<b>x') === null);
+    check('a hostname without a dot is refused', s.normalizeUrl('notadomain') === null);
+    check('addLink refuses what normalizeUrl refuses',
+      s.addLink('javascript:alert(1)') === null && s.state.links.length === 0);
+  }
+
+  /* ---- which repo it lands in ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    const where = (t) => s.areaById(s.parseLinkAdd(t).areaId)?.name;
+
+    check('no hint defaults to the general personal area',
+      where('example.com') === 'General', where('example.com'));
+    check('"ner" finds NER Meetings', where('example.com ner') === 'NER Meetings');
+    check('"rocket" finds Rocket', where('example.com rocket') === 'Rocket');
+    check('"thermo" finds Thermodynamics', where('example.com thermo') === 'Thermodynamics');
+    check('a two-word area works', where('example.com ee lab') === 'EE lab');
+    check('matching ignores case', where('example.com NER') === 'NER Meetings');
+    check('an exact name works', where('example.com Job search') === 'Job search');
+    check('a category name lands in its first area',
+      where('example.com personal') === 'General');
+  }
+
+  /* ---- words that name no area ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    const parsed = s.parseLinkAdd('https://example.com/x read this before thursday');
+    check('unmatched words become the title',
+      parsed.title === 'read this before thursday', parsed.title);
+    check('...and it still files to the default',
+      s.areaById(parsed.areaId).name === 'General');
+  }
+
+  /* ---- titles guessed from the url ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    const t = (u) => s.linkTitleFromUrl(u);
+
+    check('a bare domain is its own title', t('https://www.fhjfjgbrjb.com') === 'fhjfjgbrjb.com', t('https://www.fhjfjgbrjb.com'));
+    check('www is dropped', !t('https://www.example.com').startsWith('www.'));
+    check('the last path segment names it',
+      t('https://en.wikipedia.org/wiki/Entropy') === 'Entropy — en.wikipedia.org',
+      t('https://en.wikipedia.org/wiki/Entropy'));
+    check('a slug becomes words',
+      t('https://example.com/how-to-size-a-nozzle') === 'How to size a nozzle — example.com',
+      t('https://example.com/how-to-size-a-nozzle'));
+    check('a file extension is dropped',
+      t('https://example.com/syllabus.html') === 'Syllabus — example.com',
+      t('https://example.com/syllabus.html'));
+    check('a pdf is named by the file, not the folder above it',
+      t('https://www.ti.com/lit/ds/symlink/lm741.pdf') === 'Lm741 — ti.com',
+      t('https://www.ti.com/lit/ds/symlink/lm741.pdf'));
+    check('an id is skipped for the segment above it',
+      t('https://example.com/lectures/48291') === 'Lectures — example.com',
+      t('https://example.com/lectures/48291'));
+    check('an empty segment is skipped',
+      t('https://example.com/docs/index.html') === 'Docs — example.com',
+      t('https://example.com/docs/index.html'));
+    check('a title is never empty', t('https://example.com/') === 'example.com');
+  }
+
+  /* ---- storing, editing, removing ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    const made = s.addLink('example.com/nozzle', { areaId: 'p2' });
+    check('a link is stored', s.state.links.length === 1);
+    check('...filed where it was told', s.linksForArea('p2').length === 1);
+    check('...with a guessed title', made.title === 'Nozzle — example.com', made.title);
+    check('...and nothing lands in another area', s.linksForArea('p1').length === 0);
+
+    s.updateLink(made.id, { title: '  Nozzle sizing  ' });
+    check('a title can be edited', s.linkById(made.id).title === 'Nozzle sizing');
+    s.updateLink(made.id, { title: '   ' });
+    check('a blank title keeps the old one', s.linkById(made.id).title === 'Nozzle sizing',
+      'a link with no name is unclickable in practice');
+    s.updateLink(made.id, { url: 'javascript:alert(1)' });
+    check('a bad url is refused on edit too',
+      s.linkById(made.id).url === 'https://example.com/nozzle', s.linkById(made.id).url);
+
+    s.deleteLink(made.id);
+    check('a link can be removed', s.state.links.length === 0);
+  }
+
+  /* ---- links with no home ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    s.addLink('example.com/a', { areaId: 'p2' });
+    s.addLink('example.com/b', { areaId: null });
+    check('an explicit null areaId stays unfiled', s.unfiledLinks().length === 1);
+
+    s.deleteArea('p2');
+    check('deleting an area unfiles its links, it does not lose them',
+      s.unfiledLinks().length === 2, String(s.unfiledLinks().length));
+  }
+
+  /* ---- sync, without a new row kind ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    s.addLink('example.com/nozzle', { areaId: 'p2' });
+    const kinds = [...new Set(s.snapshotRows().map((r) => r.kind))];
+    check('links add no new row kind', !kinds.includes('link'),
+      'a new kind would need the Supabase CHECK constraint widened');
+
+    const meta = s.snapshotRows().find((r) => r.kind === 'meta');
+    check('links ride in the meta row', meta.data.links.length === 1);
+    check('meta still carries what it always did',
+      !!meta.data.semester && !!meta.data.settings && Array.isArray(meta.data.habits));
+
+    const applied = s.applyRow({
+      kind: 'meta', id: 'meta',
+      data: {
+        semester: s.state.semester, settings: {}, habits: [], habitLog: {},
+        links: [{ id: 'r1', url: 'https://example.com/phone', title: 'From the phone', areaId: 'p1' }]
+      }
+    });
+    check('an inbound meta row brings links with it',
+      applied === true && s.linksForArea('p1').map((l) => l.title).join() === 'From the phone');
+
+    // a device on schema 11 knows nothing about links and sends none
+    s.applyRow({
+      kind: 'meta', id: 'meta',
+      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {} }
+    });
+    check('an older device pushing meta does not wipe the pile',
+      s.state.links.length === 1, String(s.state.links.length));
+  }
+
+  /* ---- the schema 12 areas ---- */
+
+  {
+    const s = await storeWith({
+      version: 11,
+      areas: [{ id: 'x1', name: 'Personal', category: 'personal', order: 0 }],
+      items: []
+    });
+    check('the Personal area becomes General', s.areaById('x1').name === 'General');
+    check('...keeping its id, so what was filed there stays filed',
+      s.areasInCategory('personal').some((a) => a.id === 'x1'));
+    check('Job search is seeded beside it',
+      s.areasInCategory('personal').map((a) => a.name).join() === 'General,Job search',
+      s.areasInCategory('personal').map((a) => a.name).join());
+  }
+  {
+    const s = await storeWith({
+      version: 12,
+      areas: [{ id: 'x1', name: 'Personal', category: 'personal', order: 0 }],
+      items: []
+    });
+    check('no rename or seed once already on 12',
+      s.areasInCategory('personal').map((a) => a.name).join() === 'Personal',
+      'a rename pinned to its version must not run twice');
+  }
+  {
+    const s = await storeWith({
+      version: 11,
+      areas: [
+        { id: 'x1', name: 'Personal', category: 'personal', order: 0 },
+        { id: 'x2', name: 'General', category: 'personal', order: 1 }
+      ],
+      items: []
+    });
+    check('a General area already there stops the rename',
+      s.areaById('x1').name === 'Personal',
+      'two areas called General would be indistinguishable in the sidebar');
+  }
+});
+</script>
+</body>
+</html>

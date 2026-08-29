@@ -162,6 +162,20 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     await fn();
   }
 
+  /* ---- the one Postgres error worth explaining ---- */
+
+  {
+    const help = /upgrade\.sql/;
+    check('a kind CHECK violation names the file to run',
+      help.test(C.describeSyncError({ code: '23514', message: 'violates check constraint' })));
+    check('...matched by name too, since PostgREST may drop the code',
+      help.test(C.describeSyncError({ message: 'new row violates check constraint "planner_rows_kind_check"' })));
+    check('any other error is passed through as it came',
+      C.describeSyncError({ code: '42501', message: 'permission denied' }) === 'permission denied');
+    check('a thrown non-error still reads as something',
+      C.describeSyncError('network down') === 'network down');
+  }
+
   // stand down before the harness restores localStorage
   state.settings.cloud.enabled = false;
   C.stop();

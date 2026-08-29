@@ -40,6 +40,24 @@ export const onCloud = (fn) => { listeners.add(fn); return () => listeners.delet
 const emit = () => { for (const fn of listeners) fn(cloud); };
 function setStatus(s, msg = '') { cloud.status = s; cloud.message = msg; emit(); }
 
+/**
+ * Turn a Postgres error into something worth reading. The one that actually
+ * happens is the kind CHECK: a project created before notecards existed
+ * refuses `kind = 'card'`, so every sync fails on a row the client is right to
+ * send. Reporting Postgres verbatim leaves you with a constraint name and no
+ * idea that the fix is one file in the SQL editor.
+ */
+export function describeSyncError(err) {
+  const text = err?.message || String(err || '');
+  // 23514 is check_violation; the name is matched too, since PostgREST does
+  // not always pass the code through
+  if (err?.code === '23514' || /planner_rows_kind_check/.test(text)) {
+    return 'This database is older than the app. Open the Supabase SQL editor '
+      + 'and run supabase/upgrade.sql from the repo, then sync again.';
+  }
+  return text;
+}
+
 const cfg = () => state.settings.cloud;
 export const isConfigured = () => !!(cfg().url && cfg().anonKey);
 export const isSignedIn = () => !!cloud.userId;
@@ -175,7 +193,7 @@ export async function sync({ full = false } = {}) {
     setStatus('ready');
   } catch (err) {
     console.warn('cloud sync', err);
-    setStatus('error', err.message || String(err));
+    setStatus('error', describeSyncError(err));
   } finally {
     syncing = false;
     if (pending) { pending = false; setTimeout(() => sync(), 250); }

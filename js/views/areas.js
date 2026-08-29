@@ -5,7 +5,8 @@
 import { h, clear, fmtTime, DOW } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, deleteArea, areasInCategory, itemsForArea,
-  nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress
+  nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress,
+  linksForArea, updateLink, deleteLink, addLink, cardsForArea
 } from '../store.js';
 import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta, reorderable } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -101,6 +102,9 @@ function areaGroup(a, { navigate, go }) {
     h('span', { class: 'dot', style: { background: a.color } }),
       h('button', { class: 'area-name', onclick: () => go(`area/${a.id}`) }, a.name),
       h('span', { class: 'eyebrow num' }, `${done}/${mine.length}`),
+      linksForArea(a.id).length
+        ? h('span', { class: 'eyebrow num' }, `${linksForArea(a.id).length} links`)
+        : null,
       h('div', { style: { flex: 1 } }),
       h('button', { class: 'btn sm ghost', onclick: () => editArea(a, a.category, navigate) }, 'Edit'),
       a.category === 'course'
@@ -132,6 +136,8 @@ export function renderArea(root, { navigate, go }, areaId) {
   const mine = itemsForArea(a.id);
   const open = mine.filter((t) => !t.done);
   const done = mine.filter((t) => t.done);
+  const links = linksForArea(a.id);
+  const cards = cardsForArea(a.id);
 
   pad.append(h('div', { class: 'page-h' },
     h('div', {},
@@ -144,11 +150,12 @@ export function renderArea(root, { navigate, go }, areaId) {
       ? h('button', { class: 'btn', onclick: () => openSyllabusImport(navigate, a.id) }, 'Syllabus')
       : null));
 
-  if (!mine.length) {
+  if (!mine.length && !links.length && !cards.length) {
     pad.append(h('div', { class: 'empty' },
       h('h3', {}, 'Nothing here yet'),
       h('p', { style: { margin: '4px 0 0', color: 'var(--ink-2)' } },
-        'Add work from the bar up top — it lands here when you tag it ' + a.name + '.')));
+        'Add work from the bar up top — it lands here when you tag it ' + a.name
+        + '. Paste a link there and it joins the pile below.')));
   }
 
   if (open.length) {
@@ -161,8 +168,115 @@ export function renderArea(root, { navigate, go }, areaId) {
       h('h2', {}, 'Done'), h('span', { class: 'eyebrow num' }, String(done.length))));
     for (const t of sortByDue(done)) pad.append(fullRow(t, navigate));
   }
+  if (cards.length) {
+    pad.append(h('div', { class: 'group-h' },
+      h('h2', {}, 'Notes'), h('span', { class: 'eyebrow num' }, String(cards.length)),
+      h('div', { style: { flex: 1 } }),
+      h('button', { class: 'btn sm ghost', onclick: () => go('notes') }, 'All notes →')));
+    for (const c of cards) {
+      pad.append(h('div', { class: 'row', onclick: () => go('notes') },
+        h('span', { class: 'title' }, c.text)));
+    }
+  }
 
+  pad.append(linkSection(a, navigate));
   root.append(pad);
+}
+
+/* ---------------- links ----------------
+   The pile of things to come back to. Titles are guessed from the URL — the
+   page's own <title> is not readable across origins — so every one of them
+   can be corrected in place. */
+
+function linkSection(area, rerender) {
+  const links = linksForArea(area.id);
+  const host = h('div', {});
+
+  const add = h('input', {
+    class: 'link-new', type: 'url', placeholder: 'Paste a link…',
+    'aria-label': `Add a link to ${area.name}`,
+    onkeydown: (e) => {
+      if (e.key !== 'Enter' || !e.target.value.trim()) return;
+      let made;
+      commit(() => { made = addLink(e.target.value, { areaId: area.id }); });
+      if (!made) { toast('That does not look like a web address.'); return; }
+      e.target.value = '';
+      rerender();
+    }
+  });
+
+  host.append(h('div', { class: 'group-h' },
+    h('h2', {}, 'Links'),
+    h('span', { class: 'eyebrow num' }, String(links.length)),
+    h('div', { style: { flex: 1 } }),
+    add));
+
+  if (!links.length) {
+    host.append(h('div', { class: 'area-none' },
+      `Nothing saved yet. Paste a link up top followed by "${hintFor(area)}" and it lands here.`));
+  }
+  for (const l of links) host.append(linkRow(l, rerender));
+  return host;
+}
+
+/** The shortest thing you could type after a URL to reach this area. */
+function hintFor(area) {
+  const first = area.name.split(/\s+/)[0].toLowerCase();
+  const clash = state.areas.some((x) => x.id !== area.id && !x.archived
+    && x.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(first)));
+  return clash ? area.name.toLowerCase() : first;
+}
+
+function linkRow(l, rerender) {
+  const row = h('div', { class: 'row link-row' });
+  let host = l.url;
+  try { host = new URL(l.url).hostname.replace(/^www\./i, ''); } catch { /* keep the raw url */ }
+
+  const draw = () => {
+    clear(row);
+    row.append(
+      h('a', {
+        class: 'title link-title', href: l.url, title: l.url,
+        target: '_blank', rel: 'noopener noreferrer'
+      }, l.title),
+      meta(h('span', { class: 'eyebrow' }, host)),
+      h('button', {
+        class: 'btn sm ghost', 'aria-label': `Rename ${l.title}`, title: 'Rename', onclick: edit
+      }, '✎'),
+      h('button', {
+        class: 'btn sm ghost', 'aria-label': `Remove ${l.title}`, title: 'Remove',
+        onclick: async () => {
+          if (await confirmDialog('Remove this link?', l.title, 'Remove')) {
+            commit(() => deleteLink(l.id));
+            rerender();
+          }
+        }
+      }, '✕'));
+  };
+
+  function edit() {
+    let cancelled = false;
+    const input = h('input', {
+      class: 'link-edit', value: l.title, 'aria-label': 'Link title',
+      onkeydown: (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        // Escape redraws, which takes the input out of the document and fires
+        // blur on the way — the flag stops that from saving what was rejected.
+        if (e.key === 'Escape') { e.preventDefault(); cancelled = true; draw(); }
+      },
+      onblur: () => {
+        if (cancelled) return;
+        commit(() => updateLink(l.id, { title: input.value }));
+        draw();
+      }
+    });
+    clear(row).append(input, h('span', { class: 'eyebrow' }, host));
+    input.focus();
+    input.select();
+  }
+
+  draw();
+  return row;
 }
 
 const sortByDue = (list) => list.slice().sort((a, b) => {

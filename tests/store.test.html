@@ -161,9 +161,12 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
 
   {
     // every category but course has a seed behind it, so a genuinely empty one
-    // only exists on data already at the current schema
+    // only exists on data already at the current schema. Read the version off
+    // the module rather than pinning it here: this check is about "already
+    // current", so it has to move with each bump, unlike the seeds themselves.
+    const current = (await storeWith(null)).SCHEMA_VERSION;
     const s = await storeWith({
-      version: 8, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
+      version: current, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
       areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [], cards: [], notes: {}
     });
     const load = Object.fromEntries(s.categoryLoad().map((c) => [c.id, c]));

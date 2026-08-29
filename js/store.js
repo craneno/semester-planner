@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -64,6 +64,7 @@ const DEFAULTS = () => {
     areas: [],
     items: [],
     cards: [],          // captured notes, unfiled until given an areaId
+    links: [],          // saved links, filed to an area — the "come back to this" pile
     habits: [],         // daily habits, ticked per day
     habitLog: {},       // 'YYYY-MM-DD' -> [habitId] ticked that day
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
@@ -121,6 +122,17 @@ function migrate(raw) {
     createdAt: c.createdAt || new Date().toISOString(),
     updatedAt: c.updatedAt || c.createdAt || new Date().toISOString()
   })).filter((c) => c.text.trim());
+  s.links = (Array.isArray(raw.links) ? raw.links : []).map((l) => {
+    const url = normalizeUrl(l.url);
+    return url ? {
+      id: l.id || uid('l'),
+      url,
+      title: String(l.title || '').trim() || linkTitleFromUrl(url),
+      areaId: l.areaId || null,
+      createdAt: l.createdAt || new Date().toISOString(),
+      updatedAt: l.updatedAt || l.createdAt || new Date().toISOString()
+    } : null;
+  }).filter(Boolean);
   s.habits = (Array.isArray(raw.habits) ? raw.habits : []).map((x, i) => ({
     id: x.id || uid('h'),
     name: x.name || 'Untitled habit',
@@ -156,8 +168,26 @@ function migrate(raw) {
       category, order: s.areas.length, location: '', archived: false, schedule: [], grading: []
     });
   };
+  /** Seed one named area even where its category already has others. */
+  const seedNamed = (name, category) => {
+    if (s.areas.some((a) => a.name.toLowerCase() === name.toLowerCase())) return;
+    s.areas.push({
+      id: uid('a'), name, color: AREA_COLORS[s.areas.length % AREA_COLORS.length],
+      category, order: s.areas.length, location: '', archived: false, schedule: [], grading: []
+    });
+  };
+
   if (from < 5) seed('Rocket', 'project');
   if (from < 8) seed('Personal', 'personal');
+  // v12: the seeded Personal area is the general one — whatever belongs to no
+  // course or project — and job hunting is its own thing rather than a pile of
+  // tasks inside it. Renamed rather than replaced, so what is already filed
+  // there stays filed.
+  if (from < 12) {
+    const general = s.areas.find((a) => a.category === 'personal' && a.name === 'Personal');
+    if (general && !s.areas.some((a) => a.name.toLowerCase() === 'general')) general.name = 'General';
+    seedNamed('Job search', 'personal');
+  }
 
   // the habit page is useless empty, so give it the ones it was built for.
   // Pinned per version like the area seeds: a habit deleted on purpose must
@@ -462,6 +492,159 @@ export function deleteArea(id) {
   const i = state.areas.findIndex((a) => a.id === id);
   if (i >= 0) state.areas.splice(i, 1);
   for (const t of state.items) if (t.areaId === id) t.areaId = null;
+  for (const l of state.links) if (l.areaId === id) l.areaId = null;
+}
+
+/* ---------------- links ----------------
+   A saved link is a bookmark with a home. Paste one into the bar up top and
+   it joins an area's pile instead of becoming a task — the tabs you mean to
+   come back to, filed where the work is.
+
+   Titles are derived from the URL and nowhere else. A page's real <title>
+   cannot be read from here: a cross-origin fetch returns a response the page
+   is not allowed to look inside. So the guess is editable, and that is the
+   point rather than a gap. */
+
+const URL_HEAD = /^(?:https?:\/\/|www\.)/i;
+const BARE_DOMAIN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?::\d+)?(?:[/?#]\S*)?$/i;
+
+/**
+ * http(s) only, always absolute. Anything else is refused rather than stored:
+ * a `javascript:` URL saved here would run as this page the moment it is
+ * clicked, and the whole point of the pile is that you click things in it.
+ */
+export function normalizeUrl(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : 'https://' + text;
+  let u;
+  try { u = new URL(withScheme); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (!u.hostname.includes('.')) return null;
+  return u.href;
+}
+
+/** Path segments that name nothing: every site has them. */
+const EMPTY_SEGMENT = /^(?:index|home|default|main|page|view|watch|item|post|article|en|us)$/i;
+
+/** A readable name for a URL, from the URL alone. */
+export function linkTitleFromUrl(raw) {
+  const href = normalizeUrl(raw);
+  if (!href) return '';
+  const u = new URL(href);
+  const host = u.hostname.replace(/^www\./i, '');
+  const segs = u.pathname.split('/').filter(Boolean);
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const name = prettySegment(segs[i]);
+    if (name) return `${name} — ${host}`;
+  }
+  return host;
+}
+
+/** '/semester-planner.html' -> 'Semester planner'; an id or a hash -> ''. */
+function prettySegment(seg) {
+  let s = seg;
+  try { s = decodeURIComponent(s); } catch { /* keep it as it came */ }
+  s = s.replace(/\.(html?|php|aspx?|jsp|cgi|pdf|docx?|pptx?|txt|md)$/i, '')
+    .replace(/[-_+]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s || EMPTY_SEGMENT.test(s)) return '';
+  if (/^\d+$/.test(s)) return '';                       // an id
+  if (s.length > 60) return '';                         // a token
+  if (s.length > 8 && !/[aeiou]/i.test(s)) return '';    // a hash
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+const firstAreaOfCategory = (q) => {
+  const cat = AREA_CATEGORIES.find((c) => c.id === q || c.label.toLowerCase() === q);
+  return cat ? areasInCategory(cat.id)[0] || null : null;
+};
+
+/**
+ * Resolve "ner", "rocket", "ee lab" to an area. Deliberately loose: it is
+ * typed in a hurry after a pasted URL, so a word that starts any part of the
+ * name is enough — "ner" has to find "NER Meetings".
+ */
+export function findAreaByHint(hint) {
+  const q = String(hint || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!q) return null;
+  const live = state.areas.filter((a) => !a.archived);
+  const norm = (a) => a.name.toLowerCase().replace(/\s+/g, ' ').trim();
+  const squash = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  return live.find((a) => norm(a) === q)
+    || live.find((a) => squash(a.name) === squash(q))
+    || live.find((a) => norm(a).startsWith(q))
+    || live.find((a) => norm(a).split(' ').some((w) => w.startsWith(q)))
+    || live.find((a) => norm(a).includes(q))
+    || firstAreaOfCategory(q)
+    || null;
+}
+
+/**
+ * A quick-add line beginning with a URL is a link, not a task.
+ *   "example.com"              -> the default area, title from the URL
+ *   "example.com ner"          -> NER Meetings, title from the URL
+ *   "example.com read this"    -> the default area, titled "read this"
+ * Words that name no area become the title rather than being dropped, so
+ * nothing typed is ever silently lost.
+ * @returns {{url: string, title: string, areaId: string|null}|null}
+ */
+export function parseLinkAdd(input) {
+  const text = String(input || '').trim();
+  if (!text) return null;
+  const [first, ...rest] = text.split(/\s+/);
+  if (!URL_HEAD.test(first) && !BARE_DOMAIN.test(first)) return null;
+  const url = normalizeUrl(first);
+  if (!url) return null;
+
+  const hint = rest.join(' ').trim();
+  const area = hint ? findAreaByHint(hint) : null;
+  return {
+    url,
+    title: (hint && !area) ? hint : linkTitleFromUrl(url),
+    areaId: (area?.id) ?? defaultAreaId()
+  };
+}
+
+export const linkById = (id) => state.links.find((l) => l.id === id) || null;
+export const linksForArea = (areaId) => state.links.filter((l) => l.areaId === areaId);
+/** Links with no home, including ones whose area has since been deleted. */
+export const unfiledLinks = () => state.links.filter((l) => !l.areaId || !areaById(l.areaId));
+
+export function addLink(url, { areaId, title } = {}) {
+  const href = normalizeUrl(url);
+  if (!href) return null;
+  const now = new Date().toISOString();
+  const link = {
+    id: uid('l'),
+    url: href,
+    title: String(title || '').trim() || linkTitleFromUrl(href),
+    areaId: areaId === undefined ? defaultAreaId() : areaId,
+    createdAt: now,
+    updatedAt: now
+  };
+  state.links.unshift(link);
+  return link;
+}
+
+export function updateLink(id, patch) {
+  const l = linkById(id);
+  if (!l) return null;
+  const next = { ...patch };
+  if (next.url !== undefined) {
+    const href = normalizeUrl(next.url);
+    if (href) next.url = href; else delete next.url;    // keep the one that works
+  }
+  if (next.title !== undefined) next.title = String(next.title).trim() || l.title;
+  Object.assign(l, next, { updatedAt: new Date().toISOString() });
+  return l;
+}
+
+export function deleteLink(id) {
+  const i = state.links.findIndex((l) => l.id === id);
+  if (i >= 0) state.links.splice(i, 1);
 }
 
 /* ---- habits ---- */
@@ -802,12 +985,16 @@ export function snapshotRows() {
   }
   const settings = {};
   for (const k of SYNCED_SETTINGS) settings[k] = state.settings[k];
-  // habits travel in meta rather than as their own kind: the planner_rows
+  // habits and links travel in meta rather than as their own kind: the planner_rows
   // CHECK constraint only knows the kinds it was created with, and this needs
   // no migration to reach another device
   rows.push({
     kind: 'meta', id: 'meta',
-    data: { semester: state.semester, settings, habits: state.habits, habitLog: state.habitLog }
+    data: {
+      semester: state.semester, settings,
+      habits: state.habits, habitLog: state.habitLog,
+      links: state.links
+    }
   });
   return rows;
 }
@@ -839,6 +1026,9 @@ export function applyRow({ kind, id, data, deleted }) {
       }
       if (Array.isArray(data.habits)) state.habits = data.habits;
       if (data.habitLog && typeof data.habitLog === 'object') state.habitLog = data.habitLog;
+      // absent, not empty: a device on an older schema sends no links at all,
+      // and must not wipe the pile just by pushing its meta row
+      if (Array.isArray(data.links)) state.links = data.links;
       return true;
     default: return false;
   }

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **11**, service worker **planner-v17**.
+Currently schema **12**, service worker **planner-v19**.
 
 ## Working on it
 
@@ -108,9 +108,17 @@ tokens, the Supabase URL/anon key, or sync cursors. Settings sync by allowlist
 (`SYNCED_SETTINGS`); anything absent stays device-local, which is how
 `settings.railClosed` and `settings.railHidden` stay per-device.
 
+Links ride in `meta` for the same reason habits do — see below. `applyRow`
+takes `data.links` only when the key is **present**: a device on an older
+schema sends no links at all, and absent must not read as empty or its next
+meta push wipes the pile.
+
 Row kinds are constrained by Postgres. `supabase/schema.sql` allows
 `area, item, note, card, meta` — **a new kind needs an `ALTER` the user must
-run**, which is why habits ride inside the `meta` row instead.
+run**, which is why habits and links ride inside the `meta` row instead.
+`supabase/upgrade.sql` is that migration for a database made before the current
+schema; it is idempotent, and `describeSyncError()` names it when a push is
+rejected rather than surfacing the constraint name.
 
 ## Data model
 
@@ -120,6 +128,7 @@ run**, which is why habits ride inside the `meta` row instead.
 | `state.areas` | courses/projects/etc. One `category` each, plus an `order` |
 | `state.cards` | notecards. `areaId: null` = unfiled |
 | `state.notes` | per-day focus text keyed by date — **not** the same as cards |
+| `state.links` | saved links, `areaId` naming the pile. Rides in the `meta` row |
 | `state.habits` / `habitLog` | habits and `date -> [habitId]` |
 | `state.events` / `outbox` | Google mirror, and queued writes |
 
@@ -129,7 +138,8 @@ calendar".
 
 `ITEM_TYPES` is four: `event`, `task`, `meeting`, `homework` (`LEGACY_TYPE`
 maps the pre-schema-8 eleven). Items have no `grade`. An item created with no
-area lands in the Personal area via `defaultAreaId()`.
+area lands in the first personal area — General — via `defaultAreaId()`, and
+so does a link with no area named after it.
 
 ### Schema history
 
@@ -149,6 +159,7 @@ device still on the old schema keeps pushing the old name.
 | 9 | habits; seeds the first five |
 | 10 | seeds Sunscreen |
 | 11 | the `ner` category folds into `project` (`MERGED_CATEGORY`) |
+| 12 | links; the Personal area is renamed General; seeds Job search |
 
 ## Routing and views
 
@@ -160,6 +171,11 @@ hashes fall back to Overview, so old links still land.
 `AREA_CATEGORIES` in store.js is the single source for the sidebar, the
 overview breakdown and the editor's select; add an entry plus a
 `CATEGORY_GLYPH` in app.js and it appears everywhere.
+
+Habits sit under Personal in the sidebar but are **not** an area — nothing is
+ever due in them. `CATEGORY_PINS` in app.js hangs a plain view off a category
+group, outside the `reorderable()` host: a pinned row has no `reorderId`, and a
+drop that swept it up would have nowhere to write the order.
 
 **Overview is the day** — there is no Today page. Left column is a 24-hour
 clock opened at 8am (`--day-hour-h`, read from CSS rather than hard-coded);
@@ -177,6 +193,13 @@ right column is focus, top three, open work, end-of-day note.
 - `body.rail-hidden` makes `#app` a **single-column** grid. `display:none`
   removes the sidebar from the grid, so `0 1fr` would leave main in the
   zero-width column and render a blank page.
+- Quick add checks `parseLinkAdd()` **first**: a line starting with a URL is a
+  bookmark, not something to do. Trailing words name the area (`… ner`), and
+  words that name none become the title rather than being dropped.
+- A link's title comes from its URL and nothing else. The page's own `<title>`
+  is unreadable across origins, so the guess is meant to be corrected — and
+  only `http`/`https` are stored, since a saved `javascript:` URL would run as
+  the app the moment it was clicked.
 - `parseRange()` runs before `parseWhen()` in quick add, or one half of "12-7"
   becomes a due time and the other is stranded in the title. Bare hours read as
   people say them (7–11 morning, 12 noon, 1–6 afternoon); a range after
@@ -191,7 +214,7 @@ right column is focus, top three, open work, end-of-day note.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 181 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 242 checks.
 
 | file | covers |
 |---|---|
@@ -200,8 +223,9 @@ Serve the repo, open `/tests/`. No runner, no dependencies. 181 checks.
 | `parse.test.html` | quick add: dates, time ranges, types, areas |
 | `capture.test.html` | notecards, filing, card sync, version-pinned seeds |
 | `habits.test.html` | ticking, streaks, the 21-day countdown, meta-row sync |
+| `links.test.html` | what parses as a link, which pile it lands in, titles |
 | `gcal.test.html` | deriving a schedule from recurring events |
-| `sync.test.html` | delete durability against a stand-in Supabase |
+| `sync.test.html` | delete durability against a stand-in Supabase; error text |
 
 Suites drive the real modules and clobber app state, so **both guards must
 stay**: refuse to run outside localhost, and restore `localStorage` afterwards
@@ -229,13 +253,13 @@ Sync ships whatever shape the object has; nothing else is needed.
 | shell, router, sidebar, quick add | `js/app.js` |
 | state, schema, migrations, parser | `js/store.js` |
 | a screen | `js/views/<screen>.js` |
-| category pages, one area's page | `js/views/areas.js` |
+| category pages, one area's page, its link pile | `js/views/areas.js` |
 | today's clock, focus, end-of-day | `js/views/overview.js` |
 | the capture box | `js/capture.js` |
 | toasts, modals, peek, drag, reorder | `js/ui.js` |
 | the task detail panel | `js/editor.js` |
 | Google Calendar | `js/gcal.js` |
-| Supabase sync | `js/cloud.js`, `supabase/schema.sql` |
+| Supabase sync | `js/cloud.js`, `supabase/schema.sql`, `supabase/upgrade.sql` |
 | colours, spacing, grids | `css/app.css` |
 | themes and fonts | `js/appearance.js` |
 
