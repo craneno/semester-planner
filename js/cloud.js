@@ -163,11 +163,14 @@ export async function sync({ full = false } = {}) {
     if (full) { cfg().cursor = ''; storeBaseline(null); }
 
     const cursorAfterPull = await pull(c);
-    const cursorAfterPush = await push(c);
+    const pushed = await push(c);
 
-    cfg().cursor = [cfg().cursor, cursorAfterPull, cursorAfterPush].filter(Boolean).sort().pop() || cfg().cursor;
+    cfg().cursor = [cfg().cursor, cursorAfterPull, pushed.cursor].filter(Boolean).sort().pop() || cfg().cursor;
     cfg().lastSync = new Date().toISOString();
-    storeBaseline(currentHashes());
+    // Record what push saw, not what state holds now: an edit or delete made
+    // while the round trip was in flight has not been sent yet, and baking it
+    // into the baseline would hide it from the next push forever.
+    storeBaseline(pushed.hashes);
     save();
     setStatus('ready');
   } catch (err) {
@@ -223,7 +226,16 @@ async function pull(c) {
 function winner(row, baseline, hashes) {
   const k = key(row.kind, row.id);
   const localHash = hashes[k];
-  if (localHash === undefined) return row.deleted ? 'local' : 'remote';
+  if (localHash === undefined) {
+    if (row.deleted) return 'local';
+    // Missing locally has two very different causes, and the baseline tells
+    // them apart: if we had this row at our last sync and it is gone now, it
+    // was deleted here and its tombstone has not gone up yet — adopting the
+    // server's live copy would undo the delete. Without a baseline (first
+    // sync, or after a rebuild) we cannot tell, so the cloud still wins.
+    if (baseline && baseline[k] !== undefined) return 'local';
+    return 'remote';
+  }
 
   const dirty = baseline ? baseline[k] !== localHash : true;
   if (!dirty) return 'remote';
@@ -234,7 +246,11 @@ function winner(row, baseline, hashes) {
   return stamp ? 'remote' : 'local';    // no local timestamp to compare: keep the edit we can see
 }
 
-/** Send up anything that changed here, plus tombstones for anything deleted here. */
+/**
+ * Send up anything that changed here, plus tombstones for anything deleted here.
+ * Returns the pushed cursor and the hashes it actually sent — those hashes, not
+ * the state at the end of the sync, are what the next baseline must record.
+ */
 async function push(c) {
   const baseline = loadBaseline();
   const rows = snapshotRows();
@@ -257,7 +273,7 @@ async function push(c) {
       out.push({ user_id: cloud.userId, kind, id: rest.join(':'), data: {}, deleted: true, updated_at: now });
     }
   }
-  if (!out.length) return '';
+  if (!out.length) return { cursor: '', hashes };
 
   let maxSynced = '';
   for (let i = 0; i < out.length; i += 200) {
@@ -268,7 +284,7 @@ async function push(c) {
     if (error) throw error;
     for (const row of data || []) if (row.synced_at > maxSynced) maxSynced = row.synced_at;
   }
-  return maxSynced;
+  return { cursor: maxSynced, hashes };
 }
 
 /* ---------------- realtime ---------------- */

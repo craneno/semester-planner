@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cloud sync tests</title>
+<style>
+  body { font: 14px ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 24px; line-height: 1.7; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  p.note { color: #666; margin: 0 0 18px; }
+  .pass { color: #1a7f37; } .fail { color: #b3261e; font-weight: bold; }
+  .total { margin-top: 14px; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<h1>Cloud sync — delete durability</h1>
+<p class="note">
+  Runs against the real <code>js/cloud.js</code> with a stand-in Supabase client
+  injected through <code>_setClient()</code>. Serve the repo and open this page:
+  <code>python3 -m http.server 8000</code> → <code>/tests/sync.test.html</code>
+</p>
+<div id="out"></div>
+
+<script type="module">
+/* This test drives the real store and clobbers app state, so it refuses to run
+   anywhere but localhost, and puts localStorage back exactly as it found it. */
+const LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const out = document.getElementById('out');
+const log = (msg, cls = '') => out.insertAdjacentHTML('beforeend', `<div class="${cls}">${msg}</div>`);
+
+if (!LOCAL) {
+  log('Refusing to run outside localhost — this test overwrites planner state.', 'fail');
+} else {
+  const backup = { ...localStorage };
+  try {
+    await run();
+  } finally {
+    // save() is debounced 120ms and cloud.js's pushSoon 1500ms: restoring before
+    // those drain just lets them overwrite the restore. Wait them out first.
+    await new Promise((r) => setTimeout(r, 2000));
+    localStorage.clear();
+    for (const [k, v] of Object.entries(backup)) localStorage.setItem(k, v);
+    log('localStorage restored.', 'pass');
+  }
+}
+
+async function run() {
+  const { state, commit, upsertItem, deleteItem, itemById } = await import('../js/store.js');
+  const C = await import('../js/cloud.js');
+
+  let failures = 0;
+  const check = (name, cond, detail = '') => {
+    if (cond) log(`PASS  ${name}`, 'pass');
+    else { failures++; log(`FAIL  ${name} ${detail}`, 'fail'); }
+  };
+
+  /* A stand-in for Supabase: one in-memory table that stamps synced_at on write,
+     mirroring the planner_touch() trigger in supabase/schema.sql. The query
+     object is a thenable so it serves both call shapes cloud.js uses —
+     .select().gt().order().limit() for pull, .upsert().select() for push. */
+  function makeFake(seed = []) {
+    const table = seed.slice();
+    let clock = 100;
+    const stamp = () => new Date(Date.UTC(2026, 0, 1) + (++clock) * 1000).toISOString();
+    const api = {
+      table,
+      from() {
+        const q = {
+          _gt: null, _up: null,
+          select() { return q; },
+          gt(_col, val) { q._gt = val; return q; },
+          order() { return q; },
+          limit() { return q; },
+          upsert(list) { q._up = list; return q; },
+          then(res) {
+            if (q._up) {
+              const data = [];
+              for (const r of q._up) {
+                const i = table.findIndex((x) => x.kind === r.kind && x.id === r.id);
+                const row = { ...r, synced_at: stamp() };
+                if (i >= 0) table[i] = row; else table.push(row);
+                data.push({ synced_at: row.synced_at });
+              }
+              res({ data, error: null });
+            } else {
+              const data = table
+                .filter((r) => !q._gt || r.synced_at > q._gt)
+                .sort((a, b) => (a.synced_at < b.synced_at ? -1 : 1));
+              res({ data, error: null });
+            }
+          }
+        };
+        return q;
+      }
+    };
+    return api;
+  }
+
+  const USER = 'test-user';
+  const serverRow = (fake, id) => fake.table.find((r) => r.kind === 'item' && r.id === id);
+
+  function reset() {
+    state.items.length = 0; state.areas.length = 0; state.sessions.length = 0;
+    for (const k of Object.keys(state.notes)) delete state.notes[k];
+    Object.assign(state.settings.cloud, {
+      url: 'https://fake.supabase.co', anonKey: 'anon', enabled: true, cursor: '', lastSync: null
+    });
+    localStorage.removeItem(`semesterPlanner.cloudBase.${USER}`);
+  }
+
+  function fresh(seed) {
+    reset();
+    const fake = makeFake(seed);
+    C._setClient(fake, { userId: USER, email: 't@e.st' });
+    return fake;
+  }
+
+  /* A delete must survive a pull that still sees the row alive on the server.
+     Regression: winner() treated "missing locally" as "new from the cloud" and
+     re-added it, after which push saw it present and never wrote the tombstone. */
+  async function tDeleteBeatsLivePull() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'hw', title: 'hw' }); });
+    await C.sync();
+    check('setup: server has the item', !!serverRow(fake, 'hw') && !serverRow(fake, 'hw').deleted);
+
+    // another device touches the row, so our next pull re-fetches it
+    serverRow(fake, 'hw').synced_at = new Date(Date.UTC(2026, 0, 2)).toISOString();
+
+    commit(() => deleteItem('hw'));
+    await C.sync();
+
+    check('delete survives a pull', !itemById('hw'), '(it came back)');
+    check('tombstone reaches the server', !!serverRow(fake, 'hw')?.deleted,
+          `(deleted=${serverRow(fake, 'hw')?.deleted})`);
+  }
+
+  /* A delete landing mid-round-trip must still be pushed. Regression: the
+     baseline was snapshotted from state after push returned, so a delete made
+     during the await looked already-synced and its tombstone was never sent —
+     gone here, still alive on every other device. */
+  async function tDeleteDuringPush() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'ps4', title: 'ps4' }); });
+    await C.sync();
+
+    let fired = false;
+    const origFrom = fake.from.bind(fake);
+    fake.from = () => {
+      const q = origFrom();
+      const origThen = q.then.bind(q);
+      q.then = (res) => {
+        if (q._up && !fired) { fired = true; commit(() => deleteItem('ps4')); }
+        origThen(res);
+      };
+      return q;
+    };
+
+    commit(() => { upsertItem({ id: 'ps4', title: 'ps4 edited' }); });
+    await C.sync();          // the delete lands inside this sync's push
+    fake.from = origFrom;
+    await C.sync();          // the next sync must still tombstone it
+
+    check('delete during push survives', !itemById('ps4'), '(it came back)');
+    check('tombstone still reaches the server', !!serverRow(fake, 'ps4')?.deleted,
+          `(deleted=${serverRow(fake, 'ps4')?.deleted})`);
+  }
+
+  /* Guards on the fix: a row genuinely new to this device must still arrive. */
+  async function tRemoteRowAdopted() {
+    fresh([{
+      user_id: USER, kind: 'item', id: 'remote1',
+      data: { id: 'remote1', title: 'from other device', subtasks: [], done: false },
+      deleted: false,
+      updated_at: new Date(Date.UTC(2026, 0, 3)).toISOString(),
+      synced_at: new Date(Date.UTC(2026, 0, 3)).toISOString()
+    }]);
+    await C.sync();
+    check('new remote row is adopted', !!itemById('remote1'), '(never arrived)');
+  }
+
+  /* ...and a delete made on another device must still remove it here. */
+  async function tRemoteTombstoneApplied() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'gone', title: 'gone' }); });
+    await C.sync();
+
+    const row = serverRow(fake, 'gone');
+    row.deleted = true;
+    row.updated_at = new Date(Date.UTC(2026, 0, 5)).toISOString();
+    row.synced_at = new Date(Date.UTC(2026, 0, 5)).toISOString();
+
+    await C.sync();
+    check('remote tombstone deletes locally', !itemById('gone'), '(still here)');
+  }
+
+  const tests = [
+    ['delete beats a live pull', tDeleteBeatsLivePull],
+    ['delete during push', tDeleteDuringPush],
+    ['remote row adopted', tRemoteRowAdopted],
+    ['remote tombstone applied', tRemoteTombstoneApplied]
+  ];
+  for (const [name, fn] of tests) {
+    try { await fn(); } catch (e) { failures++; log(`ERROR ${name}: ${e.message}`, 'fail'); console.error(e); }
+  }
+
+  // stand down before the restore: no timer, no channel, and a disabled config
+  // so any already-queued pushSoon finds nothing to do
+  state.settings.cloud.enabled = false;
+  C.stop();
+
+  log(`<b>${failures === 0 ? 'ALL PASS' : failures + ' FAILURE(S)'}</b>`,
+      'total ' + (failures ? 'fail' : 'pass'));
+}
+</script>
+</body>
+</html>

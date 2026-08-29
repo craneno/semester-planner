@@ -26,6 +26,44 @@ copy and your change appears to do nothing.
 
 Adding a new module? Add it to `SHELL` *and* bump `VERSION`.
 
+### When a change appears not to take effect
+
+Almost always a cache, not your code. Two different ones bite, in two places:
+
+**In production, an open tab needs two loads.** `sw.js` is cache-first, so a tab
+is served entirely from the *previous* version's cache. The first reload lets
+the new worker install; the second is served by it. A tab left open for hours —
+or an installed PWA window — never gets there on its own. To settle it in one
+step, from DevTools console on the page:
+
+```js
+(async () => {
+  for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  for (const k of await caches.keys()) await caches.delete(k);
+  location.reload();
+})();
+```
+
+That clears the worker and its asset caches only — `localStorage`, and so all
+planner data, is untouched.
+
+**Locally, `python3 -m http.server` sends no `Cache-Control`.** Chrome then
+applies heuristic freshness — roughly 10% of the file's age since
+`Last-Modified` — so once files are a few weeks old it stops revalidating and
+serves stale modules indefinitely. `location.reload(true)` will not help; that
+argument is ignored in modern browsers. Symptom: you edit a module, reload, and
+watch the *old* behaviour. Serve with no-store headers when it matters:
+
+```python
+class H(http.server.SimpleHTTPRequestHandler):
+    def end_headers(self):
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+```
+
+Before concluding a fix does not work, confirm the browser is running it:
+`fetch('./js/ui.js?x=' + Math.random()).then(r => r.text()).then(t => console.log(t.includes('some new string')))`
+
 ## js/store.js is the source of truth
 
 `state` in [js/store.js](js/store.js) is the one live object. Views do not keep
@@ -53,6 +91,32 @@ remember something would rot immediately. Just mutate and commit.
 
 Conflicts settle last-write-wins per row: `updated_at` (writing client's clock)
 decides who wins, `synced_at` (server clock) is the pull cursor.
+
+**The baseline is what was last *pushed*, not what state holds now.** Two rules
+follow, and both have been regressions:
+
+- A row missing locally is only "new from the cloud" if the baseline never had
+  it. If the baseline *did* have it, it was deleted here and its tombstone has
+  not gone up yet — adopting the server's live copy silently undoes the delete.
+- Store the hashes `push()` actually sent, never a fresh snapshot taken after
+  it returns. A delete made during the round trip would otherwise look
+  already-synced, and its tombstone would never be sent at all.
+
+There is no baseline on a device's first sync or after `resetLocalSyncState()`
+("Rebuild sync"). Neither rule can apply then, so the cloud wins by design — an
+unpushed local deletion does not survive a rebuild.
+
+### Tests
+
+`tests/sync.test.html` covers the above. There is no runner and no dependency:
+serve the repo and open `/tests/sync.test.html`. It drives the real `cloud.js`
+with a stand-in Supabase client injected through the `_setClient()` seam.
+
+It refuses to run anywhere but localhost and restores `localStorage` when it
+finishes, because it clobbers app state as it runs. If you add to it, keep both
+guards — and remember `save()` is debounced 120ms and `pushSoon` 1500ms, so the
+restore has to wait those out or they overwrite it. `tests/` is excluded from
+the deploy so the page never reaches the live site.
 
 ## Never sync device credentials
 

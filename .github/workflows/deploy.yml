@@ -40,7 +40,7 @@ jobs:
         run: |
           mkdir -p _site
           rsync -a --exclude '.git' --exclude '.github' --exclude 'node_modules' \
-                --exclude 'supabase' --exclude '_site' ./ _site/
+                --exclude 'supabase' --exclude 'tests' --exclude '_site' ./ _site/
 
       - uses: actions/upload-pages-artifact@v3
         with:
