@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **12**, service worker **planner-v19**.
+Currently schema **13**, service worker **planner-v20**.
 
 ## Working on it
 
@@ -108,10 +108,10 @@ tokens, the Supabase URL/anon key, or sync cursors. Settings sync by allowlist
 (`SYNCED_SETTINGS`); anything absent stays device-local, which is how
 `settings.railClosed` and `settings.railHidden` stay per-device.
 
-Links ride in `meta` for the same reason habits do — see below. `applyRow`
-takes `data.links` only when the key is **present**: a device on an older
-schema sends no links at all, and absent must not read as empty or its next
-meta push wipes the pile.
+Links and the wishlist ride in `meta` for the same reason habits do — see
+below. `applyRow` takes `data.links` and `data.wishlist` only when the key is
+**present**: a device on an older schema sends neither, and absent must not
+read as empty or its next meta push wipes the lot.
 
 Row kinds are constrained by Postgres. `supabase/schema.sql` allows
 `area, item, note, card, meta` — **a new kind needs an `ALTER` the user must
@@ -129,6 +129,7 @@ rejected rather than surfacing the constraint name.
 | `state.cards` | notecards. `areaId: null` = unfiled |
 | `state.notes` | per-day focus text keyed by date — **not** the same as cards |
 | `state.links` | saved links, `areaId` naming the pile. Rides in the `meta` row |
+| `state.wishlist` | things wanted and the parcels they become — one object, `status` moves along `WISH_STATUSES`. Rides in `meta` |
 | `state.habits` / `habitLog` | habits and `date -> [habitId]` |
 | `state.events` / `outbox` | Google mirror, and queued writes |
 
@@ -160,10 +161,12 @@ device still on the old schema keeps pushing the old name.
 | 10 | seeds Sunscreen |
 | 11 | the `ner` category folds into `project` (`MERGED_CATEGORY`) |
 | 12 | links; the Personal area is renamed General; seeds Job search |
+| 13 | the wishlist |
 
 ## Routing and views
 
-`VIEWS` in `js/app.js`: overview, semester, week, habits, notes, settings.
+`VIEWS` in `js/app.js`: overview, semester, week, habits, wishlist, notes,
+settings.
 Categories and areas are **data, not screens**, so `route()` resolves three
 shapes: `#/week` (a view), `#/course` (a category page), `#/area/<id>`. Unknown
 hashes fall back to Overview, so old links still land.
@@ -172,10 +175,16 @@ hashes fall back to Overview, so old links still land.
 overview breakdown and the editor's select; add an entry plus a
 `CATEGORY_GLYPH` in app.js and it appears everywhere.
 
-Habits sit under Personal in the sidebar but are **not** an area — nothing is
-ever due in them. `CATEGORY_PINS` in app.js hangs a plain view off a category
-group, outside the `reorderable()` host: a pinned row has no `reorderId`, and a
-drop that swept it up would have nowhere to write the order.
+Habits and the wishlist sit under Personal in the sidebar but are **not**
+areas — no work is ever due in them. `CATEGORY_PINS` in app.js hangs a plain
+view off a category group, outside the `reorderable()` host: a pinned row has
+no `reorderId`, and a drop that swept it up would have nowhere to write the
+order.
+
+A category row is a top-level row like Overview, so **the caret is appended
+after the label, never prepended**. Anything in front of the glyph pushes the
+whole row right and breaks the one alignment the sidebar has; only areas are
+indented (`.area-chip`, 33px — glyph width plus the gap).
 
 **Overview is the day** — there is no Today page. Left column is a 24-hour
 clock opened at 8am (`--day-hour-h`, read from CSS rather than hard-coded);
@@ -214,7 +223,7 @@ right column is focus, top three, open work, end-of-day note.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 242 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 298 checks.
 
 | file | covers |
 |---|---|
@@ -224,6 +233,7 @@ Serve the repo, open `/tests/`. No runner, no dependencies. 242 checks.
 | `capture.test.html` | notecards, filing, card sync, version-pinned seeds |
 | `habits.test.html` | ticking, streaks, the 21-day countdown, meta-row sync |
 | `links.test.html` | what parses as a link, which pile it lands in, titles |
+| `wishlist.test.html` | one-line add, the status lifecycle, ETA urgency, totals |
 | `gcal.test.html` | deriving a schedule from recurring events |
 | `sync.test.html` | delete durability against a stand-in Supabase; error text |
 

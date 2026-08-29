@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wishlist tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, storeWith } from './harness.js';
+
+const base = (over = {}) => ({
+  version: 13,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [], items: [], cards: [], links: [], wishlist: [],
+  habits: [], habitLog: {}, notes: {},
+  ...over
+});
+
+suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
+
+  /* ---- one line in ---- */
+
+  {
+    const s = await storeWith(base());
+    const p = (t) => s.parseWishAdd(t);
+
+    check('a bare name is the title', p('Nozzle heater').title === 'Nozzle heater');
+    check('a price is taken out', p('Nozzle heater $48.50').price === 48.5);
+    check('...and out of the title', p('Nozzle heater $48.50').title === 'Nozzle heater');
+    check('a whole-dollar price works', p('Calipers $30').price === 30);
+    check('a link is taken out',
+      p('Nozzle heater mcmaster.com/1234').url === 'https://mcmaster.com/1234');
+    check('...and out of the title too',
+      p('Nozzle heater mcmaster.com/1234').title === 'Nozzle heater');
+
+    const all = p('Nozzle heater $48.50 https://mcmaster.com/1234');
+    check('a price and a link together still leave the name',
+      all.title === 'Nozzle heater' && all.price === 48.5 && all.url === 'https://mcmaster.com/1234',
+      `${all.title} | ${all.price} | ${all.url}`);
+
+    check('a version number is not a link',
+      p('3.5in case fan').url === null && p('3.5in case fan').title === '3.5in case fan',
+      String(p('3.5in case fan').url));
+    check('no price means no price', p('Nozzle heater').price === null);
+    check('an empty line still names something', p('   ').title === 'Untitled');
+  }
+
+  /* ---- adding ---- */
+
+  {
+    const s = await storeWith(base());
+    const w = s.addWish('Nozzle heater $48.50 mcmaster.com/1234');
+    check('a wish is stored', s.state.wishlist.length === 1);
+    check('it starts out wanted', w.status === 'wanted');
+    check('it starts with no ETA', w.eta === null);
+    check('newest sits first', s.addWish('Calipers') === s.state.wishlist[0]);
+    check('a nameless wish is refused',
+      s.addWish('   ') === null && s.state.wishlist.length === 2);
+  }
+
+  /* ---- the lifecycle ---- */
+
+  {
+    const s = await storeWith(base());
+    const w = s.addWish('Calipers $30');
+    check('wanted to begin with', s.wishesWanted().length === 1 && s.wishesInFlight().length === 0);
+
+    s.updateWish(w.id, { status: 'ordered', eta: '2026-09-10' });
+    check('ordering takes it out of wanted', s.wishesWanted().length === 0);
+    check('...and puts it on the way', s.wishesInFlight().length === 1);
+    check('...with the ETA it was given', s.wishById(w.id).eta === '2026-09-10');
+
+    s.updateWish(w.id, { status: 'shipped' });
+    check('shipped is still on the way', s.wishesInFlight().length === 1);
+
+    s.updateWish(w.id, { status: 'delivered' });
+    check('delivered leaves the on-the-way list', s.wishesInFlight().length === 0);
+    check('...and joins delivered', s.wishesDelivered().length === 1);
+    check('...dropping its ETA, which is now history',
+      s.wishById(w.id).eta === null, String(s.wishById(w.id).eta));
+
+    check('an unknown status is ignored',
+      (s.updateWish(w.id, { status: 'teleported' }), s.wishById(w.id).status === 'delivered'));
+  }
+
+  /* ---- the ETA is the part with a clock on it ---- */
+
+  {
+    const s = await storeWith(base());
+    const ref = '2026-09-10';
+    const at = (status, eta) => ({ status, eta, title: 'x' });
+
+    check('no date says nothing', s.etaState(at('ordered', null), ref) === '');
+    check('yesterday is late', s.etaState(at('ordered', '2026-09-09'), ref) === 'late');
+    check('today is today', s.etaState(at('ordered', '2026-09-10'), ref) === 'today');
+    check('tomorrow is soon', s.etaState(at('shipped', '2026-09-11'), ref) === 'soon');
+    check('two days out is still soon', s.etaState(at('shipped', '2026-09-12'), ref) === 'soon');
+    check('next week is just a date', s.etaState(at('ordered', '2026-09-20'), ref) === '');
+    check('something already here says nothing',
+      s.etaState(at('delivered', '2026-09-01'), ref) === '');
+  }
+
+  /* ---- order on the page ---- */
+
+  {
+    const s = await storeWith(base());
+    const mk = (title, eta) => {
+      const w = s.addWish(title);
+      s.updateWish(w.id, { status: 'ordered', eta });
+      return w;
+    };
+    mk('Later', '2026-09-20');
+    mk('No date', null);
+    mk('Sooner', '2026-09-11');
+
+    check('on the way sorts by ETA',
+      s.wishesInFlight().map((w) => w.title).join() === 'Sooner,Later,No date',
+      s.wishesInFlight().map((w) => w.title).join());
+    check('undated goes last, not first',
+      s.wishesInFlight()[2].title === 'No date',
+      'a parcel with no ETA must not hide one arriving tomorrow');
+  }
+
+  /* ---- what it costs ---- */
+
+  {
+    const s = await storeWith(base());
+    s.addWish('A $10');
+    s.addWish('B $5.50');
+    s.addWish('C');
+    check('a total adds up the priced ones', s.wishTotal(s.wishesWanted()) === 15.5,
+      String(s.wishTotal(s.wishesWanted())));
+    check('an unpriced wish counts as nothing, not NaN',
+      Number.isFinite(s.wishTotal(s.wishesWanted())));
+    check('an empty list totals zero', s.wishTotal([]) === 0);
+  }
+
+  /* ---- editing ---- */
+
+  {
+    const s = await storeWith(base());
+    const w = s.addWish('Callipers $30');
+    s.updateWish(w.id, { title: '  Calipers  ' });
+    check('a name can be corrected', s.wishById(w.id).title === 'Calipers');
+    s.updateWish(w.id, { title: '   ' });
+    check('a blank name keeps the old one', s.wishById(w.id).title === 'Calipers');
+
+    s.updateWish(w.id, { price: '42.50' });
+    check('a price typed as text becomes a number', s.wishById(w.id).price === 42.5);
+    s.updateWish(w.id, { price: '' });
+    check('a cleared price is nothing, not zero', s.wishById(w.id).price === null);
+    s.updateWish(w.id, { price: 'abc' });
+    check('nonsense leaves the price alone', s.wishById(w.id).price === null);
+
+    s.updateWish(w.id, { url: 'javascript:alert(1)' });
+    check('a bad url is refused here too', s.wishById(w.id).url === null);
+    s.updateWish(w.id, { url: 'mcmaster.com/1234' });
+    check('a bare domain still gets a scheme',
+      s.wishById(w.id).url === 'https://mcmaster.com/1234');
+
+    s.deleteWish(w.id);
+    check('a wish can be removed', s.state.wishlist.length === 0);
+    check('removing one that is gone is harmless',
+      (s.deleteWish('nope'), s.state.wishlist.length === 0));
+  }
+
+  /* ---- surviving a reload ---- */
+
+  {
+    const s = await storeWith(base({
+      wishlist: [
+        { id: 'w1', title: 'Kept', price: '19.99', status: 'shipped', eta: '2026-09-12', url: 'mcmaster.com' },
+        { id: 'w2', title: '', status: 'nonsense', price: 'abc', url: 'javascript:alert(1)' }
+      ]
+    }));
+    const a = s.wishById('w1'), b = s.wishById('w2');
+    check('a saved wish comes back whole',
+      a.title === 'Kept' && a.price === 19.99 && a.status === 'shipped' && a.eta === '2026-09-12');
+    check('...with its link normalised', a.url === 'https://mcmaster.com/');
+    check('a nameless one is not dropped, just named', b.title === 'Untitled');
+    check('an unknown status falls back to wanted', b.status === 'wanted');
+    check('an unparseable price becomes nothing', b.price === null);
+    check('a dangerous url does not survive a reload', b.url === null);
+  }
+
+  /* ---- sync, without a new row kind ---- */
+
+  {
+    const s = await storeWith(base());
+    s.addWish('Calipers $30');
+    const kinds = [...new Set(s.snapshotRows().map((r) => r.kind))];
+    check('the wishlist adds no new row kind', !kinds.includes('wish') && !kinds.includes('wishlist'),
+      'a new kind would need the Supabase CHECK constraint widened');
+
+    const meta = s.snapshotRows().find((r) => r.kind === 'meta');
+    check('it rides in the meta row', meta.data.wishlist.length === 1);
+    check('meta still carries everything else it did',
+      !!meta.data.semester && !!meta.data.settings
+      && Array.isArray(meta.data.habits) && Array.isArray(meta.data.links));
+
+    const applied = s.applyRow({
+      kind: 'meta', id: 'meta',
+      data: {
+        semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [],
+        wishlist: [{ id: 'r1', title: 'From the phone', status: 'ordered', eta: '2026-09-15', price: null, url: null }]
+      }
+    });
+    check('an inbound meta row brings the wishlist with it',
+      applied === true && s.wishesInFlight().map((w) => w.title).join() === 'From the phone');
+
+    // a device on schema 12 knows nothing about a wishlist and sends none
+    s.applyRow({
+      kind: 'meta', id: 'meta',
+      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [] }
+    });
+    check('an older device pushing meta does not wipe the list',
+      s.state.wishlist.length === 1, String(s.state.wishlist.length));
+  }
+});
+</script>
+</body>
+</html>

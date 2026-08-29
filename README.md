@@ -292,6 +292,11 @@ the tabs you mean to come back to, filed where the work is. A word after it name
 **General**. Every area page has its pile at the bottom; the title is guessed from the URL and can be
 edited in place, since a page's real title cannot be read from another origin.
 
+**Wishlist.** Personal → Wishlist. One list for things you want and the parcels they turn into —
+ordering something is a status change, never a retype. Add in one line (`Nozzle heater $48.50
+mcmaster.com/1234`); the price and the link are pulled out and the rest is the name. Anything ordered
+or shipped sorts to the top by ETA, and that date goes amber within two days and red once it is late.
+
 **Capture.** Write in the box on Overview and press Enter; it becomes a notecard in **Notes**, unfiled,
 and you decide later. Without leaving the box you can instead file it straight to an area, to a task,
 or to a task with a deadline and a time blocked — that last one lands on your calendar. Shift+Enter is a

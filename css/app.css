@@ -716,7 +716,7 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 
 /* a pinned view inside a category group: no grip, so it pays the grip's width
    in padding instead and still lines up with the areas above it */
-.area-chip.is-pin { padding-left: 31px; }
+.area-chip.is-pin { padding-left: 32px; }
 .pin-glyph { width: 8px; flex: none; color: var(--ink-3); font-size: 11px; line-height: 1; }
 
 
@@ -751,6 +751,48 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 }
 
 
+/* ---------------- wishlist ---------------- */
+
+.wish-add { display: flex; gap: 8px; margin: 4px 0 10px; max-width: 560px; }
+.wish-new {
+  flex: 1; min-width: 0; padding: 8px 10px;
+  border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink); font: inherit;
+}
+
+.wish-row {
+  grid-template-columns: minmax(0, 1fr) 76px 116px 148px auto;
+  cursor: default;
+}
+.wish-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wish-name .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wish-rename {
+  width: 100%; padding: 5px 8px; border: 1px solid var(--accent);
+  border-radius: var(--r); background: var(--surface); color: var(--ink); font: inherit;
+}
+
+.wish-price, .wish-status, .wish-eta {
+  padding: 4px 6px; border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--surface); color: var(--ink-2); font: inherit;
+  font-size: calc(12px * var(--scale)); min-width: 0; width: 100%;
+}
+.wish-price { text-align: right; font-family: var(--font-mono); }
+.wish-price:placeholder-shown { color: var(--ink-3); }
+
+/* the ETA is the only thing here with a clock on it, so it is the only thing
+   that changes colour */
+.wish-eta.is-soon { color: var(--warn); border-color: var(--warn); }
+.wish-eta.is-today { color: var(--warn); border-color: var(--warn); font-weight: 550; }
+.wish-eta.is-late { color: var(--danger); border-color: var(--danger); font-weight: 550; }
+.wish-eta-none { text-align: center; color: var(--ink-3); }
+
+@media (max-width: 820px) {
+  .wish-row { grid-template-columns: minmax(0, 1fr) 64px 100px; row-gap: 6px; }
+  .wish-row .wish-eta, .wish-row .wish-eta-none { grid-column: 1 / -1; }
+  .wish-add { max-width: none; }
+}
+
+
 /* ---------- scheduled / deadline toggle ---------- */
 
 .mode-toggle {
@@ -770,7 +812,7 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 
 .rail-caret {
   border: 0; background: transparent; cursor: pointer; flex: none;
-  width: 14px; padding: 0; margin-left: -4px;
+  width: 14px; padding: 0; margin-left: auto;
   color: var(--ink-3); font-size: 12px; line-height: 1;
   transform: rotate(90deg); transition: transform .15s ease;
 }

@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -46,6 +46,10 @@ const LEGACY_TYPE = {
   admin: 'task', personal: 'task', research: 'task'
 };
 
+/* A thing you want and a parcel on its way are one object at two points in its
+   life. Declared up here because migrate() runs at import and needs it. */
+export const WISH_STATUSES = ['wanted', 'ordered', 'shipped', 'delivered'];
+
 export const AREA_COLORS = [
   '#3C6E8F', '#7A5C9E', '#2F7D62', '#B4713C', '#9E4A5C',
   '#4B6BA8', '#7E7A2E', '#5A6572', '#A0522D', '#3F7A7A'
@@ -65,6 +69,7 @@ const DEFAULTS = () => {
     items: [],
     cards: [],          // captured notes, unfiled until given an areaId
     links: [],          // saved links, filed to an area — the "come back to this" pile
+    wishlist: [],       // things wanted, and the deliveries they turn into
     habits: [],         // daily habits, ticked per day
     habitLog: {},       // 'YYYY-MM-DD' -> [habitId] ticked that day
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
@@ -133,6 +138,16 @@ function migrate(raw) {
       updatedAt: l.updatedAt || l.createdAt || new Date().toISOString()
     } : null;
   }).filter(Boolean);
+  s.wishlist = (Array.isArray(raw.wishlist) ? raw.wishlist : []).map((w) => ({
+    id: w.id || uid('w'),
+    title: String(w.title || '').trim() || 'Untitled',
+    url: normalizeUrl(w.url) || null,
+    price: Number.isFinite(Number(w.price)) && w.price !== null && w.price !== '' ? Number(w.price) : null,
+    status: WISH_STATUSES.includes(w.status) ? w.status : 'wanted',
+    eta: w.eta || null,
+    createdAt: w.createdAt || new Date().toISOString(),
+    updatedAt: w.updatedAt || w.createdAt || new Date().toISOString()
+  }));
   s.habits = (Array.isArray(raw.habits) ? raw.habits : []).map((x, i) => ({
     id: x.id || uid('h'),
     name: x.name || 'Untitled habit',
@@ -647,6 +662,121 @@ export function deleteLink(id) {
   if (i >= 0) state.links.splice(i, 1);
 }
 
+/* ---------------- wishlist ----------------
+   One list, not two. A thing you want and a parcel on its way are the same
+   object at different points in its life, so wanting, ordering and waiting for
+   something never means retyping it — the status moves and the ETA appears. */
+
+/** Ordered, shipped: bought and not here yet. This is what an ETA is for. */
+export const WISH_IN_FLIGHT = ['ordered', 'shipped'];
+const isInFlight = (w) => WISH_IN_FLIGHT.includes(w.status);
+
+export const wishById = (id) => state.wishlist.find((w) => w.id === id) || null;
+
+/** Undated last, so a parcel with no ETA never hides one arriving tomorrow. */
+const byEta = (a, b) => (a.eta || '9999-99-99') < (b.eta || '9999-99-99') ? -1
+  : (a.eta || '9999-99-99') > (b.eta || '9999-99-99') ? 1
+    : a.title.localeCompare(b.title);
+
+export const wishesInFlight = () => state.wishlist.filter(isInFlight).sort(byEta);
+export const wishesWanted = () => state.wishlist.filter((w) => w.status === 'wanted');
+export const wishesDelivered = () => state.wishlist
+  .filter((w) => w.status === 'delivered')
+  .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+
+/** What a set of wishes would cost. Anything unpriced simply does not count. */
+export const wishTotal = (list) =>
+  list.reduce((n, w) => n + (Number.isFinite(w.price) ? w.price : 0), 0);
+
+/** '' when there is nothing to say: no date, or it has already arrived. */
+export function etaState(w, ref = today()) {
+  if (!w.eta || w.status === 'delivered') return '';
+  if (w.eta < ref) return 'late';
+  if (w.eta === ref) return 'today';
+  return diffDays(ref, w.eta) <= 2 ? 'soon' : '';
+}
+
+/**
+ * "Nozzle heater $48.50 mcmaster.com/1234" — a price and a link can be typed
+ * in any order, and whatever is left is the name. The same one-line habit as
+ * quick add rather than a form with four boxes.
+ */
+export function parseWishAdd(input) {
+  let text = ' ' + String(input || '').trim() + ' ';
+  let url = null, price = null;
+
+  for (const word of text.split(/\s+/)) {
+    if (url || !word) continue;
+    const href = /^(?:https?:\/\/|www\.)/i.test(word) ? normalizeUrl(word) : null;
+    if (href) { url = href; text = text.replace(word, ' '); }
+  }
+  // a bare domain only counts once nothing else has claimed a link, or
+  // "3.5in fan" would read the version number as a host
+  if (!url) {
+    const bare = text.split(/\s+/).find((w) => /\.[a-z]{2,}(?:[/?#]|$)/i.test(w) && normalizeUrl(w));
+    if (bare) { url = normalizeUrl(bare); text = text.replace(bare, ' '); }
+  }
+
+  const pm = text.match(/\s\$\s?(\d+(?:\.\d{1,2})?)\b/);
+  if (pm) { price = Number(pm[1]); text = text.replace(pm[0], ' '); }
+
+  return {
+    title: text.replace(/\s+/g, ' ').trim() || 'Untitled',
+    url,
+    price
+  };
+}
+
+export function addWish(input, { status = 'wanted' } = {}) {
+  // Check the raw line, not the parsed title: parseWishAdd falls back to
+  // "Untitled" so that "$40" still records something, which would otherwise
+  // let a line of pure whitespace through as a real row.
+  if (typeof input === 'string' && !input.trim()) return null;
+  const parsed = typeof input === 'string' ? parseWishAdd(input) : input;
+  if (!parsed || !String(parsed.title || '').trim()) return null;
+  const now = new Date().toISOString();
+  const wish = {
+    id: uid('w'),
+    title: String(parsed.title).trim(),
+    url: parsed.url ? normalizeUrl(parsed.url) : null,
+    price: Number.isFinite(parsed.price) ? parsed.price : null,
+    status: WISH_STATUSES.includes(status) ? status : 'wanted',
+    eta: parsed.eta || null,
+    createdAt: now,
+    updatedAt: now
+  };
+  state.wishlist.unshift(wish);
+  return wish;
+}
+
+export function updateWish(id, patch) {
+  const w = wishById(id);
+  if (!w) return null;
+  const next = { ...patch };
+  if (next.title !== undefined) next.title = String(next.title).trim() || w.title;
+  if (next.url !== undefined) next.url = next.url ? normalizeUrl(next.url) : null;
+  if (next.price !== undefined) {
+    if (next.price === '' || next.price === null) {
+      next.price = null;                  // cleared on purpose
+    } else {
+      const n = Number(next.price);
+      // nonsense leaves what was there; dropping the key is not the same as
+      // setting it to null, which is what "cleared" means one line up
+      if (Number.isFinite(n)) next.price = n; else delete next.price;
+    }
+  }
+  if (next.status !== undefined && !WISH_STATUSES.includes(next.status)) delete next.status;
+  // an ETA is a promise about a parcel; once it is here the date is history
+  if (next.status === 'delivered') next.eta = null;
+  Object.assign(w, next, { updatedAt: new Date().toISOString() });
+  return w;
+}
+
+export function deleteWish(id) {
+  const i = state.wishlist.findIndex((w) => w.id === id);
+  if (i >= 0) state.wishlist.splice(i, 1);
+}
+
 /* ---- habits ---- */
 
 /** Days of an unbroken run before a habit is taken to have stuck. */
@@ -993,7 +1123,7 @@ export function snapshotRows() {
     data: {
       semester: state.semester, settings,
       habits: state.habits, habitLog: state.habitLog,
-      links: state.links
+      links: state.links, wishlist: state.wishlist
     }
   });
   return rows;
@@ -1029,6 +1159,7 @@ export function applyRow({ kind, id, data, deleted }) {
       // absent, not empty: a device on an older schema sends no links at all,
       // and must not wipe the pile just by pushing its meta row
       if (Array.isArray(data.links)) state.links = data.links;
+      if (Array.isArray(data.wishlist)) state.wishlist = data.wishlist;
       return true;
     default: return false;
   }

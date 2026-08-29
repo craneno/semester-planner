@@ -15,6 +15,7 @@ import { renderWeek } from './views/week.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderNotes } from './views/notes.js';
 import { renderHabits } from './views/habits.js';
+import { renderWishlist } from './views/wishlist.js';
 import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
 import * as C from './cloud.js';
@@ -26,6 +27,7 @@ const VIEWS = {
   semester: { label: 'Semester', glyph: '☰', render: renderSemester, title: () => 'Semester' },
   week:     { label: 'Week',     glyph: '▦', render: renderWeek,     title: () => 'Week', bare: true },
   habits:   { label: 'Habits',   glyph: '◴', render: renderHabits,   title: () => 'Habits' },
+  wishlist: { label: 'Wishlist', glyph: '✦', render: renderWishlist, title: () => 'Wishlist' },
   notes:    { label: 'Notes',    glyph: '✎', render: renderNotes,    title: () => 'Notes' },
   settings: { label: 'Settings', glyph: '⚙', render: renderSettings, title: () => 'Settings' }
 };
@@ -36,7 +38,12 @@ const TOP_VIEWS = ['overview', 'semester', 'week'];
    but they are not an area — there is no work in them and nothing is ever due
    — so they sit under Personal as a link to their own page rather than as a
    fake row in state.areas. */
-const CATEGORY_PINS = { personal: [{ view: 'habits', label: 'Habits', glyph: '◴' }] };
+const CATEGORY_PINS = {
+  personal: [
+    { view: 'habits', label: 'Habits', glyph: '◴' },
+    { view: 'wishlist', label: 'Wishlist', glyph: '✦' }
+  ]
+};
 const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'notes'];
 const CATEGORY_GLYPH = { course: '◇', project: '▲', personal: '○' };
 
@@ -129,7 +136,10 @@ function paintChrome() {
       glyph: CATEGORY_GLYPH[cat.id], label: cat.label,
       current: isCurrent('category', cat.id), onclick: () => go(cat.id)
     });
-    row.prepend(caret);
+    // the caret goes after the label, not before it: a category is a top-level
+    // row like Overview or Week and has to start at the same left edge, so
+    // nothing may sit in front of its glyph. Only its areas are indented.
+    row.append(caret);
     rail.append(row);
     const areas = areasInCategory(cat.id);
     const pins = CATEGORY_PINS[cat.id] || [];
