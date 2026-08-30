@@ -297,8 +297,8 @@ ordering something is a status change, never a retype. Add in one line (`Nozzle 
 mcmaster.com/1234`); the price and the link are pulled out and the rest is the name. Anything ordered
 or shipped sorts to the top by ETA, and that date goes amber within two days and red once it is late.
 
-**Capture.** Write in the box on Overview and press Enter; it becomes a notecard in **Notes**, unfiled,
-and you decide later. Without leaving the box you can instead file it straight to an area, to a task,
+**Capture.** Write in the box on Overview and press Enter; it becomes a notecard, unfiled, in the
+queue directly under the box, and you decide later. Once filed it moves to that area's page. Without leaving the box you can instead file it straight to an area, to a task,
 or to a task with a deadline and a time blocked — that last one lands on your calendar. Shift+Enter is a
 newline, Tab reaches the filing buttons.
 

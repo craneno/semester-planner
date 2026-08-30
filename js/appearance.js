@@ -12,6 +12,9 @@ export const THEMES = {
   lavender: { label: 'Lavender', swatch: '#61568A' },
   bluebell: { label: 'Bluebell', swatch: '#3B5F82' },
   butter:   { label: 'Butter',   swatch: '#8A7328' },
+  // dark-on-light, off-white rather than #FFF, ~10:1 rather than 21:1, warm:
+  // the combination that holds up over a long evening. See css/app.css.
+  parchment: { label: 'Parchment (easiest on the eyes)', swatch: '#5A7365' },
   ink:      { label: 'Ink (dark)', swatch: '#7FA8C4' }
 };
 

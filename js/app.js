@@ -4,7 +4,7 @@ import { h, $, clear, fmtDate, debounce } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, semesterProgress, weekNumber,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
-  unfiledCards, reorderAreas, parseLinkAdd, addLink
+  reorderAreas, parseLinkAdd, addLink
 } from './store.js';
 import { toast, closePeek, reorderable } from './ui.js';
 import { applyAppearance } from './appearance.js';
@@ -13,7 +13,6 @@ import { renderOverview } from './views/overview.js';
 import { renderSemester } from './views/semester.js';
 import { renderWeek } from './views/week.js';
 import { renderCategory, renderArea } from './views/areas.js';
-import { renderNotes } from './views/notes.js';
 import { renderHabits } from './views/habits.js';
 import { renderWishlist } from './views/wishlist.js';
 import { renderSettings } from './views/settings.js';
@@ -28,7 +27,6 @@ const VIEWS = {
   week:     { label: 'Week',     glyph: '▦', render: renderWeek,     title: () => 'Week', bare: true },
   habits:   { label: 'Habits',   glyph: '◴', render: renderHabits,   title: () => 'Habits' },
   wishlist: { label: 'Wishlist', glyph: '✦', render: renderWishlist, title: () => 'Wishlist' },
-  notes:    { label: 'Notes',    glyph: '✎', render: renderNotes,    title: () => 'Notes' },
   settings: { label: 'Settings', glyph: '⚙', render: renderSettings, title: () => 'Settings' }
 };
 
@@ -44,7 +42,7 @@ const CATEGORY_PINS = {
     { view: 'wishlist', label: 'Wishlist', glyph: '✦' }
   ]
 };
-const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'notes'];
+const MOBILE_TABS = ['overview', 'week', 'semester', 'course', 'personal'];
 const CATEGORY_GLYPH = { course: '◇', project: '▲', personal: '○' };
 
 /** { kind: 'view'|'category'|'area', id } — what the hash currently points at. */
@@ -191,14 +189,7 @@ function paintChrome() {
     }
   }
 
-  const waiting = unfiledCards().length;
-  const notes = navButton({
-    glyph: '✎', label: 'Notes',
-    current: isCurrent('view', 'notes'), onclick: () => go('notes')
-  });
-  if (waiting) notes.append(h('span', { class: 'count eyebrow num' }, String(waiting)));
-
-  rail.append(h('div', { style: { marginTop: '10px' } }, notes, navButton({
+  rail.append(h('div', { style: { marginTop: '10px' } }, navButton({
     glyph: '⚙', label: 'Settings',
     current: isCurrent('view', 'settings'), onclick: () => go('settings')
   })));
@@ -277,7 +268,7 @@ function wireQuickAdd() {
       const home = areaById(link.areaId);
       toast(`Saved to ${home ? home.name : 'Notes'} · ${made.title}`, {
         action: 'Open',
-        onAction: () => go(home ? `area/${home.id}` : 'notes')
+        onAction: () => go(home ? `area/${home.id}` : 'overview')
       });
       navigate();
       return;

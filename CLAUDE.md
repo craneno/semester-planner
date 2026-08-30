@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **13**, service worker **planner-v20**.
+Currently schema **13**, service worker **planner-v21**.
 
 ## Working on it
 
@@ -165,8 +165,7 @@ device still on the old schema keeps pushing the old name.
 
 ## Routing and views
 
-`VIEWS` in `js/app.js`: overview, semester, week, habits, wishlist, notes,
-settings.
+`VIEWS` in `js/app.js`: overview, semester, week, habits, wishlist, settings.
 Categories and areas are **data, not screens**, so `route()` resolves three
 shapes: `#/week` (a view), `#/course` (a category page), `#/area/<id>`. Unknown
 hashes fall back to Overview, so old links still land.
@@ -213,8 +212,15 @@ right column is focus, top three, open work, end-of-day note.
   becomes a due time and the other is stranded in the title. Bare hours read as
   people say them (7–11 morning, 12 noon, 1–6 afternoon); a range after
   ch/page/problem/section is not a time.
-- Capture's **Enter must stay the shortest path out** — files to unfiled Notes,
+- Capture's **Enter must stay the shortest path out** — saves an unfiled note,
   never asks a question. Shift+Enter is a newline.
+- There is no Notes page. `unfiledQueue()` in `capture.js` renders under the box
+  on Overview, and a filed note shows on its area's page via the same exported
+  `noteCard()` — so removing the page cost nothing. Deleting the queue or that
+  export would strand every capture with no way to file, edit or delete it.
+- `.pad` is `margin-inline: auto`. Left-aligned it clings to one side and every
+  right-anchored control stops at the 1180px cap, which on a wide screen looks
+  like the middle; collapsing the sidebar then changes nothing visible.
 - `habitStreak()` forgives an untouched today (the day is not over) but not a
   missed yesterday. `habitRemaining()` counts down to `HABIT_TARGET` (21).
 - `recurringSeries()` reads a schedule off calendar *instances* (we sync
@@ -265,13 +271,13 @@ Sync ships whatever shape the object has; nothing else is needed.
 | a screen | `js/views/<screen>.js` |
 | category pages, one area's page, its link pile | `js/views/areas.js` |
 | today's clock, focus, end-of-day | `js/views/overview.js` |
-| the capture box | `js/capture.js` |
+| the capture box, the unfiled queue, a note card | `js/capture.js` |
 | toasts, modals, peek, drag, reorder | `js/ui.js` |
 | the task detail panel | `js/editor.js` |
 | Google Calendar | `js/gcal.js` |
 | Supabase sync | `js/cloud.js`, `supabase/schema.sql`, `supabase/upgrade.sql` |
 | colours, spacing, grids | `css/app.css` |
-| themes and fonts | `js/appearance.js` |
+| themes and fonts | `js/appearance.js`, `[data-theme]` in `css/app.css` |
 
 ## Conventions
 

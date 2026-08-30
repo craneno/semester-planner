@@ -15,7 +15,7 @@ import {
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
-import { captureStrip } from '../capture.js';
+import { captureStrip, unfiledQueue } from '../capture.js';
 import { pushItem } from '../gcal.js';
 
 export function renderOverview(root, { navigate, go }) {
@@ -45,6 +45,7 @@ export function renderOverview(root, { navigate, go }) {
       h('span', { style: { width: pct + '%' } }))));
 
   pad.append(captureStrip(navigate));
+  pad.append(unfiledQueue(navigate, go));
 
   pad.append(h('div', { class: 'overview-split' },
     todayColumn(day, { navigate, go }),

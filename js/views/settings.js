@@ -217,6 +217,13 @@ export function renderSettings(root, { navigate }) {
   p.append(section('Appearance', [
     h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, 'Theme'),
     swatches,
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '10px 0 0' } },
+      'Parchment is the gentlest for a long session: dark text on light, because '
+      + 'light-on-dark haloes if you have any astigmatism; an off-white rather than '
+      + 'pure white, which is a glare source at normal screen brightness; contrast '
+      + 'around 10:1 instead of black-on-white’s 21:1; and warm, so it throws off '
+      + 'less blue at night. Ambient light still matters more than any of it — match '
+      + 'the screen to the room.'),
     h('div', { class: 'props', style: { marginTop: '16px' } },
       colorRow('Page', 'paper', '--paper'),
       colorRow('Cards', 'surface', '--surface'),

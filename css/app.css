@@ -44,6 +44,20 @@
 [data-theme="lavender"]{ --paper:#F4F3F8; --surface:#FFFFFF; --surface-2:#FAF9FC; --rule:#E1DEEA; --rule-soft:#EDEBF3; --accent:#61568A; --accent-soft:rgba(97,86,138,.12); }
 [data-theme="bluebell"]{ --paper:#F1F4F7; --surface:#FFFFFF; --surface-2:#F8FAFC; --rule:#DCE3EA; --rule-soft:#E9EEF3; --accent:#3B5F82; --accent-soft:rgba(59,95,130,.12); }
 [data-theme="butter"]  { --paper:#F9F6EC; --surface:#FFFEF9; --surface-2:#FCFAF2; --rule:#E8E1CB; --rule-soft:#F1ECDD; --accent:#8A7328; --accent-soft:rgba(138,115,40,.12); }
+/* Parchment — built for reading for hours rather than for looking new.
+   Dark-on-light, because light-on-dark haloes for anyone with astigmatism;
+   an off-white rather than #FFF, which is a glare source at normal monitor
+   brightness; ink at about 10:1 rather than black-on-white's 21:1, which is
+   past the point where more contrast helps; and the whole thing pushed warm,
+   so it emits less blue late at night. */
+[data-theme="parchment"] {
+  --paper:#EFEAE1; --surface:#F7F3EC; --surface-2:#F2EDE4;
+  --ink:#3A3630; --ink-2:#6B655C; --ink-3:#948D82;
+  --rule:#DED7CA; --rule-soft:#E8E2D6;
+  --accent:#5A7365; --accent-soft:rgba(90,115,101,.14);
+  --warn:#96702F; --danger:#98524A; --ok:#4A7A62;
+}
+
 [data-theme="ink"] {
   --paper:#16181B; --surface:#1D2024; --surface-2:#212529; --ink:#E8EAED; --ink-2:#A8AEB6; --ink-3:#767D86;
   --rule:#2C3137; --rule-soft:#24282D; --accent:#7FA8C4; --accent-ink:#12161A; --accent-soft:rgba(127,168,196,.16);
@@ -173,7 +187,11 @@ a { color: var(--accent); }
 /* the week view manages its own scrolling so the tray stays reachable while dragging */
 .view.bare { overflow: hidden; display: flex; flex-direction: column; }
 .week-scroll { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; }
-.pad { padding: 22px; max-width: 1180px; }
+/* Centred, not left-aligned. Without margin-inline the column clings to the
+   left and every right-anchored control stops at 1180px — which on a wide
+   screen reads as the middle of nowhere — and collapsing the sidebar changes
+   nothing, because the width it frees is never used. */
+.pad { padding: 22px; max-width: 1180px; margin-inline: auto; }
 
 /* ---------------- primitives ---------------- */
 

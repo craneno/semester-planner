@@ -12,6 +12,7 @@ import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta, re
 import { openItem } from '../editor.js';
 import { openSyllabusImport } from '../syllabus.js';
 import { pushItem, recurringSeries, gcal } from '../gcal.js';
+import { noteCard } from '../capture.js';
 
 const PREVIEW = 3;   // deadlines shown under each area before "see all"
 
@@ -170,13 +171,8 @@ export function renderArea(root, { navigate, go }, areaId) {
   }
   if (cards.length) {
     pad.append(h('div', { class: 'group-h' },
-      h('h2', {}, 'Notes'), h('span', { class: 'eyebrow num' }, String(cards.length)),
-      h('div', { style: { flex: 1 } }),
-      h('button', { class: 'btn sm ghost', onclick: () => go('notes') }, 'All notes →')));
-    for (const c of cards) {
-      pad.append(h('div', { class: 'row', onclick: () => go('notes') },
-        h('span', { class: 'title' }, c.text)));
-    }
+      h('h2', {}, 'Notes'), h('span', { class: 'eyebrow num' }, String(cards.length))));
+    for (const c of cards) pad.append(noteCard(c, navigate));
   }
 
   pad.append(linkSection(a, navigate));
