@@ -4,10 +4,11 @@ import {
   h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel
 } from '../util.js';
 import {
-  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor, weekNumber
+  state, commit, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor, weekNumber
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
+import { dragCreate, newBlockPrompt } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 
 let anchor = today();          // any date inside the shown week
@@ -158,17 +159,24 @@ export function renderWeek(root, { navigate } = {}) {
       col.append(el);
     }
 
-    // click empty space -> new planned block
+    // double click empty space -> an hour, named the same way a drag is
     col.addEventListener('dblclick', (e) => {
       if (e.target !== col) return;
       const rect = col.getBoundingClientRect();
       const mins = snap((e.clientY - rect.top) / hourH * 60 + dayStart * 60);
-      const item = commitNewBlock(d, fromMin(mins));
-      navigate();
-      openItem(item.id);
+      newBlockPrompt({ date: d, start: fromMin(mins), mins: 60 }, { onDone: navigate });
     });
 
     body.append(col);
+  });
+
+  // press on empty grid and drag out a range, the way a calendar does
+  dragCreate(body, {
+    only: '.daycol',
+    hit: (ev) => hit(ev, body, days, dayStart, hourH),
+    hourH, origin: dayStart * 60,
+    edge: (ev) => edgeScroll(ev, body),
+    onPick: (range) => newBlockPrompt(range, { onDone: navigate })
   });
 
   const wrap = h('div', { class: 'week-wrap' }, head, rail, body);
@@ -227,15 +235,6 @@ function edgeScroll(ev, body) {
   const margin = 48;
   if (ev.clientY < r.top + margin) sc.scrollTop -= 12;
   else if (ev.clientY > r.bottom - margin) sc.scrollTop += 12;
-}
-
-function commitNewBlock(date, start) {
-  let item;
-  commit(() => {
-    item = upsertItem({ title: 'New block', plan: { date, start, mins: 60 }, estMins: 60, type: 'assignment' });
-  });
-  pushItem(item.id).catch(() => {});
-  return item;
 }
 
 /** Shared hit-test: pointer position -> {date, mins} */

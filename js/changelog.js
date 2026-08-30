@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v25', date: '2026-08-29',
+    title: 'Draw on the calendar',
+    notes: [
+      'Press on empty grid and drag — on Overview’s clock or in the Week view — to sweep out a time range, then name it. The range follows the pointer in quarter hours and reads out its own start and end while you draw it.',
+      'Double-clicking empty grid does the same thing for an hour. It used to drop an untitled block on the page and open the panel.',
+      'Dragging up works as well as down, and a press that never moves leaves nothing behind. Touch is untouched — the same gesture scrolls the grid there.'
+    ]
+  },
+  {
     version: 'v24', date: '2026-08-29',
     title: 'The end of one day starts the next',
     notes: [

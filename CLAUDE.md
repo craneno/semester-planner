@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **15**, service worker **planner-v24**.
+Currently schema **15**, service worker **planner-v25**.
 
 ## Working on it
 
@@ -227,6 +227,11 @@ end of term writes its title to its *left* and is anchored by `right` — hence
   The calendar picker expands inline inside the area editor for this reason.
 - A drag grip must `preventDefault()` on `pointerdown`, or the browser starts a
   text selection and the drag reads as a highlight.
+- `dragCreate()` in `js/timegrid.js` fires only when the press lands **on the
+  column itself** (`only: '.daycol'` / `'.day-lanes'`), never on a block drawn
+  inside it, and never on touch — the same gesture scrolls the grid there. The
+  day and the column are fixed at the press: following the pointer sideways
+  into tomorrow would silently move the block being drawn.
 - `body.rail-hidden` makes `#app` a **single-column** grid. `display:none`
   removes the sidebar from the grid, so `0 1fr` would leave main in the
   zero-width column and render a blank page.
@@ -263,7 +268,7 @@ end of term writes its title to its *left* and is anchored by `right` — hence
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 384 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 403 checks.
 
 | file | covers |
 |---|---|
@@ -275,6 +280,7 @@ Serve the repo, open `/tests/`. No runner, no dependencies. 384 checks.
 | `links.test.html` | what parses as a link, which pile it lands in, titles |
 | `wishlist.test.html` | one-line add, the status lifecycle, ETA urgency, totals |
 | `chart.test.html` | the term window, spans and clipping, lane packing, month bands |
+| `timegrid.test.html` | a swept range: direction, quarter hours, the ends of the day |
 | `gcal.test.html` | deriving a schedule from recurring events |
 | `sync.test.html` | delete durability against a stand-in Supabase; error text |
 | `version.test.html` | changelog vs `sw.js`, `SHELL` vs the import graph |
@@ -308,6 +314,7 @@ Sync ships whatever shape the object has; nothing else is needed.
 | category pages, one area's page, its link pile | `js/views/areas.js` |
 | today's clock, focus, end-of-day | `js/views/overview.js` |
 | the capture box, the unfiled queue, a note card | `js/capture.js` |
+| dragging out a time range on either grid | `js/timegrid.js` |
 | the semester chart | `js/views/semester.js` |
 | patch notes, and what version this is | `js/changelog.js` |
 | toasts, modals, peek, drag, reorder | `js/ui.js` |

@@ -402,6 +402,19 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   position: absolute; left: 3px; right: 3px; border-radius: 4px;
   border: 1px dashed var(--accent); background: var(--accent-soft); pointer-events: none; z-index: 15;
 }
+/* a range being swept out says what it is while you draw it */
+.drop-ghost.is-new { border-style: solid; overflow: hidden; }
+.drop-ghost .ghost-t {
+  position: absolute; top: 1px; left: 5px; right: 4px;
+  font-family: var(--font-mono); font-size: calc(10px * var(--scale));
+  color: var(--accent); white-space: nowrap; overflow: hidden;
+}
+/* the pointer is drawing, so nothing under it should look like text */
+body.is-sweeping, body.is-sweeping * { cursor: ns-resize; user-select: none; }
+
+.time-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.time-range input { width: auto; min-width: 116px; }
+.time-range .num { color: var(--ink-3); }
 
 /* unscheduled tray */
 .tray { border-top: 1px solid var(--rule); background: var(--surface-2); padding: 9px 22px 14px; flex: none; max-height: 30vh; overflow-y: auto; }

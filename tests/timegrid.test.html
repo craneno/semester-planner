@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Time grid tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* The gesture itself needs a pointer, but everything it decides is
+   arithmetic: which way the drag went, where the quarter hours fall, and how
+   long a block ends up. That part is testable, and it is the part that has
+   ever been wrong. */
+import { suite, sharedStoreWith } from './harness.js';
+
+suite('Time grid — sweeping out a range', async ({ check }) => {
+
+  // timegrid.js reaches the canonical store through ui.js and editor.js
+  await sharedStoreWith({
+    version: 15,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'c1', name: 'Thermo', category: 'course', order: 0 }],
+    items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {}
+  });
+  const { sweep, spanBetween, snapMins, SNAP } = await import('../js/timegrid.js');
+
+  /* ---- quarter hours ---- */
+
+  {
+    check('a snap is a quarter of an hour', SNAP === 15);
+    check('minutes round to the nearest quarter', snapMins(607) === 600, String(snapMins(607)));
+    check('...in both directions', snapMins(608) === 615, String(snapMins(608)));
+    check('a quarter is left alone', snapMins(615) === 615);
+  }
+
+  /* ---- which way the drag went ---- */
+
+  {
+    const down = sweep(9 * 60, 11 * 60);
+    check('dragging down is the range you drew',
+      down.start === 540 && down.mins === 120, `${down.start} +${down.mins}`);
+    const up = sweep(11 * 60, 9 * 60);
+    check('dragging up is the same range, not a negative one',
+      up.start === 540 && up.mins === 120, `${up.start} +${up.mins}`);
+  }
+
+  /* ---- a block always has a height ---- */
+
+  {
+    const flick = sweep(600, 600);
+    check('a range with no drag in it is still one quarter',
+      flick.start === 600 && flick.mins === 15, `${flick.mins}`);
+    check('...so a flick of the wrist cannot make a block with no height',
+      sweep(600, 604).mins === 15);
+    check('a few pixels either way still snaps to something real',
+      sweep(607, 613).mins === 15 && sweep(607, 613).start === 600);
+  }
+
+  /* ---- the ends of the day ---- */
+
+  {
+    check('a drag off the top of the grid starts at midnight',
+      sweep(-120, 90).start === 0);
+    check('a drag off the bottom stops at midnight',
+      sweep(23 * 60, 26 * 60).start + sweep(23 * 60, 26 * 60).mins === 24 * 60,
+      String(sweep(23 * 60, 26 * 60).mins));
+    check('a range at the very end of the day still has room to exist',
+      (() => { const r = sweep(24 * 60, 24 * 60); return r.start === 24 * 60 - 15 && r.mins === 15; })());
+    check('a grid that ends early clamps to its own end',
+      (() => { const r = sweep(22 * 60, 23 * 60, { dayEnd: 22 * 60 + 30 }); return r.start + r.mins === 22 * 60 + 30; })(),
+      'the week grid stops at the hour Settings gives it');
+  }
+
+  /* ---- typed times, once the prompt is open ---- */
+
+  {
+    check('an hour is an hour', spanBetween('09:00', '10:00') === 60);
+    check('quarter hours survive', spanBetween('09:15', '09:45') === 30);
+    check('midnight at the end is a real end', spanBetween('23:00', '24:00') === 60);
+    check('an end before the start falls back to an hour',
+      spanBetween('11:00', '09:00') === 60,
+      'better an hour than a block with a negative length');
+    check('the same time twice is not a zero-length block',
+      spanBetween('09:00', '09:00') === 60);
+    check('nonsense is an hour', spanBetween('', 'later') === 60);
+  }
+});
+</script>
+</body>
+</html>

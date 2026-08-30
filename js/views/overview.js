@@ -16,6 +16,7 @@ import {
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
+import { dragCreate, newBlockPrompt, snapMins, edgeScroll } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 
 export function renderOverview(root, { navigate, go }) {
@@ -184,6 +185,23 @@ function todayColumn(day, { navigate, go }) {
     class: 'day-scroll', onscroll: (e) => { if (trackScroll) dayScroll = e.target.scrollTop; }
   }, grid);
   col.append(scroller);
+
+  /* press and drag on the empty clock to block out time, the same gesture as
+     the week grid — only the geometry differs */
+  const at = (ev) => {
+    const r = lanes.getBoundingClientRect();
+    const mins = Math.max(0, Math.min(24 * 60 - 15, snapMins((ev.clientY - r.top) / hourH * 60)));
+    return { date: day, mins, col: lanes };
+  };
+  dragCreate(lanes, {
+    only: '.day-lanes', hit: at, hourH,
+    edge: (ev) => edgeScroll(scroller, ev),
+    onPick: (range) => newBlockPrompt(range, { onDone: navigate })
+  });
+  lanes.addEventListener('dblclick', (ev) => {
+    if (ev.target !== lanes) return;
+    newBlockPrompt({ date: day, start: fromMin(at(ev).mins), mins: 60 }, { onDone: navigate });
+  });
 
   return col;
 }
