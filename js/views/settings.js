@@ -4,6 +4,7 @@ import { h, clear, debounce } from '../util.js';
 import { state, commit, exportJson, importJson } from '../store.js';
 import { toast, confirmDialog } from '../ui.js';
 import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
+import { CHANGELOG, APP_VERSION } from '../changelog.js';
 import * as G from '../gcal.js';
 import * as C from '../cloud.js';
 
@@ -302,7 +303,33 @@ export function renderSettings(root, { navigate }) {
       }, 'Erase all data'))
   ]));
 
+  /* ---------- version history ----------
+     Last on the page on purpose: it answers "what am I running, and what
+     changed" and nothing else, and that is a question you go looking for. */
+  const [current, ...older] = CHANGELOG;
+  p.append(section(`Version ${APP_VERSION}`, [
+    release(current),
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 0' } },
+      'This is the version this browser has actually loaded — the offline shell is '
+      + 'cached whole, one deploy at a time. A new one takes over on the next reload.'),
+    older.length
+      ? h('details', { class: 'history' },
+        h('summary', {}, `Earlier versions (${older.length})`),
+        ...older.map(release))
+      : null
+  ]));
+
   root.append(p);
+}
+
+/** One deploy: what it was called, when it landed, and what changed. */
+function release(r) {
+  return h('div', { class: 'release' },
+    h('div', { class: 'release-h' },
+      h('span', { class: 'ver-tag' }, r.version),
+      h('h3', {}, r.title),
+      h('span', { class: 'eyebrow num', style: { marginLeft: 'auto' } }, r.date)),
+    h('ul', {}, ...r.notes.map((n) => h('li', {}, n))));
 }
 
 /* ---------- bits ---------- */

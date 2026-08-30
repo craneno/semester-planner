@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Version tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* Two things that have to agree with a file rather than with each other:
+   the changelog with the service worker's VERSION, and the worker's SHELL
+   with what the app actually imports. Both have been wrong before, and
+   neither shows up as an error — one deploys the wrong version number, the
+   other ships a module that only loads while you are online.
+
+   These read the files over HTTP, which means they read them the way the
+   browser does: with a service worker registered, a stale cache would answer
+   here too. Tick "Update on reload" in DevTools while developing. */
+import { suite } from './harness.js';
+import { CHANGELOG, APP_VERSION, CURRENT } from '../js/changelog.js';
+import { QUOTES, quoteForWeek } from '../js/quotes.js';
+
+const text = async (path) => {
+  const r = await fetch(path, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  return r.text();
+};
+
+suite('Version — the changelog, the shell, and the week’s line', async ({ check }) => {
+
+  const sw = await text('../sw.js');
+  const swVersion = (sw.match(/const VERSION = '([^']+)'/) || [])[1];
+
+  /* ---- what the browser is actually running ---- */
+
+  {
+    check('the worker names a version', !!swVersion, String(swVersion));
+    check('the changelog is that version',
+      swVersion === `planner-${APP_VERSION}`,
+      `sw.js says ${swVersion}, changelog says ${APP_VERSION}`);
+    check('the current release is the newest entry', CURRENT === CHANGELOG[0]);
+  }
+
+  /* ---- the changelog itself ---- */
+
+  {
+    const nums = CHANGELOG.map((r) => Number(r.version.replace(/^v/, '')));
+    check('every version is vN', CHANGELOG.every((r) => /^v\d+$/.test(r.version)));
+    check('newest first', nums.every((n, i) => i === 0 || n < nums[i - 1]), nums.join(','));
+    check('no version appears twice', new Set(nums).size === nums.length);
+    check('every release is dated',
+      CHANGELOG.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date)));
+    check('every release says what changed',
+      CHANGELOG.every((r) => r.notes.length && r.notes.every((n) => n.trim().length > 12)),
+      'an empty release note is worse than no list at all');
+    check('every release has a title', CHANGELOG.every((r) => r.title.trim().length > 3));
+  }
+
+  /* ---- the shell holds everything the app imports ---- */
+
+  {
+    const block = sw.slice(sw.indexOf('const SHELL'), sw.indexOf('];', sw.indexOf('const SHELL')));
+    const shell = new Set([...block.matchAll(/'(\.\/[^']+)'/g)].map((m) => m[1]));
+
+    // walk the import graph from the entry point index.html loads
+    const root = new URL('../', location.href);
+    const rel = (u) => u.href.slice(root.href.length);
+    const seen = new Set(['js/app.js']);
+    const queue = ['js/app.js'];
+    const missing = [];
+    while (queue.length) {
+      const file = queue.shift();
+      if (!shell.has('./' + file)) missing.push(file);
+      const src = await text('../' + file);
+      for (const m of src.matchAll(/from\s+'([^']+)'/g)) {
+        if (!m[1].startsWith('.')) continue;            // a CDN url is not ours to cache
+        const next = rel(new URL(m[1], new URL(file, root)));
+        if (!seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+
+    check('the app reaches more than a handful of modules', seen.size > 10, String(seen.size));
+    check('every module the app imports is in the shell', missing.length === 0,
+      `not cached: ${missing.join(', ')} — offline, these load from the network or not at all`);
+    check('the new modules are in it',
+      shell.has('./js/changelog.js') && shell.has('./js/quotes.js'));
+    check('the shell has no module the app cannot reach',
+      [...shell].filter((p) => p.endsWith('.js')).every((p) => seen.has(p.slice(2))),
+      [...shell].filter((p) => p.endsWith('.js') && !seen.has(p.slice(2))).join(', '));
+  }
+
+  /* ---- the line at the top of the week ---- */
+
+  {
+    check('there are quotes', QUOTES.length >= 8, String(QUOTES.length));
+    check('every one is attributed',
+      QUOTES.every((q) => q.text.trim().length > 8 && q.who.trim().length > 2));
+    check('none is so long it stops being a line',
+      QUOTES.every((q) => q.text.length < 160),
+      QUOTES.filter((q) => q.text.length >= 160).map((q) => q.who).join());
+
+    const mon = '2026-08-31', wed = '2026-09-02', sun = '2026-09-06';
+    check('the same line all week',
+      quoteForWeek(mon).text === quoteForWeek(wed).text
+      && quoteForWeek(wed).text === quoteForWeek(sun).text,
+      'a line that changes on every render is wallpaper');
+    check('a new one next week',
+      quoteForWeek('2026-09-07').text !== quoteForWeek(mon).text);
+    check('the same date always gives the same line',
+      quoteForWeek(mon).text === quoteForWeek(mon).text);
+    check('it works before 1970 rather than throwing',
+      !!quoteForWeek('1969-07-20'), 'the modulo has to survive a negative');
+    const weekly = Array.from({ length: QUOTES.length * 2 }, (_, i) => {
+      const d = new Date(2026, 8, 1 + i * 7);
+      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return quoteForWeek(ymd).text;
+    });
+    check('every quote comes up over a long enough stretch',
+      new Set(weekly).size === QUOTES.length,
+      `${new Set(weekly).size} of ${QUOTES.length} — the rotation must cover the pool, not orbit a corner of it`);
+    check('an empty pool is nothing, not a crash', quoteForWeek('2026-09-01', []) === null);
+  }
+});
+</script>
+</body>
+</html>

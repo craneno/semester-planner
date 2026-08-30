@@ -118,6 +118,45 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('a title is never empty', t('https://example.com/') === 'example.com');
   }
 
+  /* ---- google drive: an id is not a name ---- */
+
+  {
+    const s = await storeWith(withAreas());
+    const t = (u) => s.linkTitleFromUrl(u);
+
+    check('a drive file says what it is',
+      t('https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBd/view?usp=sharing') === 'Drive file',
+      t('https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBd/view?usp=sharing'));
+    check('so does a drive folder',
+      t('https://drive.google.com/drive/folders/1a2b3c4d5e6f') === 'Drive folder',
+      t('https://drive.google.com/drive/folders/1a2b3c4d5e6f'));
+    check('a doc is a doc',
+      t('https://docs.google.com/document/d/1AbCdEf/edit') === 'Google Doc');
+    check('a sheet is a sheet',
+      t('https://docs.google.com/spreadsheets/d/1AbCdEf/edit#gid=0') === 'Google Sheet');
+    check('slides are slides',
+      t('https://docs.google.com/presentation/d/1AbCdEf/edit') === 'Google Slides');
+    check('a form is a form',
+      t('https://docs.google.com/forms/d/e/1FAIpQL/viewform') === 'Google Form');
+    check('the file id never becomes the title',
+      !/1BxiMVs0XRA5nFMdKvBd/.test(t('https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBd/view')),
+      'an opaque id reads as a hash and is worse than saying nothing');
+    check('anything else on docs.google.com falls back to the usual guess',
+      t('https://docs.google.com/about/thing') === 'Thing — docs.google.com',
+      t('https://docs.google.com/about/thing'));
+    check('a drive link still files and stores like any other',
+      (() => {
+        const made = s.addLink('https://drive.google.com/file/d/1Bxi/view', { areaId: 'c1' });
+        return made && made.title === 'Drive file' && made.areaId === 'c1';
+      })());
+    check('and its title can be corrected, which is the whole point',
+      (() => {
+        const made = s.addLink('https://docs.google.com/document/d/1Zz/edit', { areaId: 'c1' });
+        s.updateLink(made.id, { title: 'Thermo formula sheet' });
+        return s.linkById(made.id).title === 'Thermo formula sheet';
+      })());
+  }
+
   /* ---- storing, editing, removing ---- */
 
   {

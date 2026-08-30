@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **13**, service worker **planner-v21**.
+Currently schema **14**, service worker **planner-v22**.
 
 ## Working on it
 
@@ -18,6 +18,11 @@ files *parse*, not that they work.
 
 **Bump `VERSION` in `sw.js` whenever a file in its `SHELL` list changes**, and
 add new modules to `SHELL`. Without it browsers keep serving the cached copy.
+
+**Add the release to `js/changelog.js` in the same commit.** It is what
+Settings shows, and its newest entry *is* the version — `version.test.html`
+fails when it and `sw.js` disagree, and when a module the app imports is
+missing from `SHELL`.
 
 ## When a change appears not to take effect
 
@@ -125,7 +130,7 @@ rejected rather than surfacing the constraint name.
 | | |
 |---|---|
 | `state.items` | tasks. Either **scheduled** (`plan {date,start,mins}`) or a **deadline** (`due`, `dueTime`, `estMins`) — never both. Read via `!!item.plan.start`. |
-| `state.areas` | courses/projects/etc. One `category` each, plus an `order` |
+| `state.areas` | courses/projects/etc. One `category` each, plus an `order` and `onChart` |
 | `state.cards` | notecards. `areaId: null` = unfiled |
 | `state.notes` | per-day focus text keyed by date — **not** the same as cards |
 | `state.links` | saved links, `areaId` naming the pile. Rides in the `meta` row |
@@ -162,6 +167,7 @@ device still on the old schema keeps pushing the old name.
 | 11 | the `ner` category folds into `project` (`MERGED_CATEGORY`) |
 | 12 | links; the Personal area is renamed General; seeds Job search |
 | 13 | the wishlist |
+| 14 | `onChart` on areas — which ones the semester chart draws |
 
 ## Routing and views
 
@@ -187,7 +193,21 @@ indented (`.area-chip`, 33px — glyph width plus the gap).
 
 **Overview is the day** — there is no Today page. Left column is a 24-hour
 clock opened at 8am (`--day-hour-h`, read from CSS rather than hard-coded);
-right column is focus, top three, open work, end-of-day note.
+right column is focus, top three, open work, end-of-day note. Its first line
+is the week's quote from `js/quotes.js`, chosen by week number so it does not
+change on every render; how heavy the week is moved to the sentence under it.
+
+**Semester is a chart, with the old list behind a switch.** Bands are the
+three categories, lanes are areas, and `area.onChart` (default true, absent
+reads as true) decides which appear — the chips above the chart, or the area
+editor. Geometry is kept in **whole days from the first day of term** and
+multiplied by `--day-w` at the last moment, which is what makes `chartRange`,
+`itemSpan`, `packLanes`, `monthBands` and `fitDayWidth` pure and testable.
+`--day-w` is written from JS rather than set in CSS because `packLanes`
+measures titles in those same pixels; if the two disagreed, bars would be
+stacked for a width the page does not use. A bar within a title's width of the
+end of term writes its title to its *left* and is anchored by `right` — hence
+`head` as well as `reserve` in the packing.
 
 ## Gotchas worth keeping
 
@@ -208,6 +228,11 @@ right column is focus, top three, open work, end-of-day note.
   is unreadable across origins, so the guess is meant to be corrected — and
   only `http`/`https` are stored, since a saved `javascript:` URL would run as
   the app the moment it was clicked.
+- A Google Drive URL has no name in it, only a 33-character id, which the
+  hash rule would throw away and leave the bare host. `linkTitleFromUrl` names
+  the *kind* instead — Google Doc, Drive file, Drive folder. Reading the real
+  name needs a Drive scope this app does not ask for, and asking for one would
+  re-prompt for the calendar consent it already has.
 - `parseRange()` runs before `parseWhen()` in quick add, or one half of "12-7"
   becomes a due time and the other is stranded in the title. Bare hours read as
   people say them (7–11 morning, 12 noon, 1–6 afternoon); a range after
@@ -229,7 +254,7 @@ right column is focus, top three, open work, end-of-day note.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 298 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 379 checks.
 
 | file | covers |
 |---|---|
@@ -240,8 +265,10 @@ Serve the repo, open `/tests/`. No runner, no dependencies. 298 checks.
 | `habits.test.html` | ticking, streaks, the 21-day countdown, meta-row sync |
 | `links.test.html` | what parses as a link, which pile it lands in, titles |
 | `wishlist.test.html` | one-line add, the status lifecycle, ETA urgency, totals |
+| `chart.test.html` | the term window, spans and clipping, lane packing, month bands |
 | `gcal.test.html` | deriving a schedule from recurring events |
 | `sync.test.html` | delete durability against a stand-in Supabase; error text |
+| `version.test.html` | changelog vs `sw.js`, `SHELL` vs the import graph, the quotes |
 
 Suites drive the real modules and clobber app state, so **both guards must
 stay**: refuse to run outside localhost, and restore `localStorage` afterwards
@@ -272,6 +299,9 @@ Sync ships whatever shape the object has; nothing else is needed.
 | category pages, one area's page, its link pile | `js/views/areas.js` |
 | today's clock, focus, end-of-day | `js/views/overview.js` |
 | the capture box, the unfiled queue, a note card | `js/capture.js` |
+| the semester chart | `js/views/semester.js` |
+| the week's quote | `js/quotes.js` |
+| patch notes, and what version this is | `js/changelog.js` |
 | toasts, modals, peek, drag, reorder | `js/ui.js` |
 | the task detail panel | `js/editor.js` |
 | Google Calendar | `js/gcal.js` |

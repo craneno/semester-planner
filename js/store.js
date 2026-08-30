@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -168,6 +168,9 @@ function migrate(raw) {
     category: areaCategory(a),
     location: a.location || '',
     archived: !!a.archived,
+    // absent means yes: every area an older device pushes belongs on the chart
+    // until someone says otherwise, and only a false ever has to travel
+    onChart: a.onChart !== false,
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
     grading: Array.isArray(a.grading) ? a.grading : []
   }));
@@ -327,6 +330,16 @@ export function areasInCategory(categoryId, { includeArchived = false } = {}) {
     .sort((x, y) => (x.order ?? 0) - (y.order ?? 0));
 }
 
+/**
+ * The areas the semester chart draws, in the order they appear on it: by
+ * category, then by the order they were dragged into. Not every area belongs
+ * on a chart — a pile of errands has no shape over fifteen weeks — so an area
+ * can sit this one out without being archived.
+ */
+export function chartAreas() {
+  return CATEGORY_IDS.flatMap((c) => areasInCategory(c).filter((a) => a.onChart !== false));
+}
+
 export const itemsForArea = (areaId) => state.items.filter((t) => t.areaId === areaId);
 
 /** Everything belonging to any area in this category. */
@@ -479,7 +492,7 @@ export function upsertArea(patch) {
     a = {
       id: uid('a'), name: 'New area', category: 'course', location: '',
       color: AREA_COLORS[state.areas.length % AREA_COLORS.length],
-      schedule: [], grading: [], archived: false,
+      schedule: [], grading: [], archived: false, onChart: true,
       order: state.areas.length,
       updatedAt: new Date().toISOString(), ...patch
     };
@@ -542,12 +555,38 @@ export function normalizeUrl(raw) {
 /** Path segments that name nothing: every site has them. */
 const EMPTY_SEGMENT = /^(?:index|home|default|main|page|view|watch|item|post|article|en|us)$/i;
 
+/* A file on Google Drive is addressed by an opaque id and nothing else, so
+   there is no name in the URL to find — only a 33-character key that the hash
+   rule below would throw away, leaving the bare host. Naming the *kind* of
+   thing is the honest guess: "Google Doc" is a far better starting point to
+   correct than "1BxiMVs0XRA — docs.google.com". Drive will not tell us the
+   real name either; that needs an API key and a scope this app does not ask
+   for. Rename it in the pile. */
+const GOOGLE_DOC_KIND = {
+  document: 'Google Doc', spreadsheets: 'Google Sheet', presentation: 'Google Slides',
+  forms: 'Google Form', drawings: 'Google Drawing'
+};
+
+function googleFileTitle(u) {
+  const host = u.hostname.replace(/^www\./i, '');
+  const segs = u.pathname.split('/').filter(Boolean);
+  if (host === 'docs.google.com') return GOOGLE_DOC_KIND[segs[0]] || null;
+  if (host === 'drive.google.com') {
+    if (segs.includes('folders')) return 'Drive folder';
+    if (segs.includes('d') || segs[0] === 'file' || segs[0] === 'open') return 'Drive file';
+    return null;
+  }
+  return null;
+}
+
 /** A readable name for a URL, from the URL alone. */
 export function linkTitleFromUrl(raw) {
   const href = normalizeUrl(raw);
   if (!href) return '';
   const u = new URL(href);
   const host = u.hostname.replace(/^www\./i, '');
+  const drive = googleFileTitle(u);
+  if (drive) return drive;
   const segs = u.pathname.split('/').filter(Boolean);
   for (let i = segs.length - 1; i >= 0; i--) {
     const name = prettySegment(segs[i]);

@@ -16,6 +16,7 @@ import {
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
+import { quoteForWeek } from '../quotes.js';
 import { pushItem } from '../gcal.js';
 
 export function renderOverview(root, { navigate, go }) {
@@ -29,17 +30,24 @@ export function renderOverview(root, { navigate, go }) {
   const soon = upcoming(14);
   const pct = Math.round(semesterProgress() * 100);
 
-  /* headline — a sentence, not a scoreboard */
+  /* The top of the page is the week's line, not a scoreboard. What the week
+     actually weighs goes underneath it, in one sentence, where it belongs. */
   const headline = load.count === 0
     ? 'Nothing scheduled this week yet.'
     : load.count <= 4 ? 'A light week ahead.'
       : load.count <= 9 ? 'A steady week ahead.' : 'A busy week ahead.';
+  const creed = quoteForWeek(day);
 
   pad.append(h('section', { style: { marginBottom: '22px' } },
     h('div', { class: 'eyebrow' }, `${state.semester.name} · Week ${weekNumber()} · ${pct}% elapsed`),
-    h('h1', { style: { margin: '6px 0 8px' } }, headline),
+    creed
+      ? h('blockquote', { class: 'creed' },
+        h('h1', {}, creed.text),
+        h('cite', { class: 'eyebrow' }, creed.who))
+      : h('h1', { style: { margin: '6px 0 8px' } }, headline),
     h('p', { style: { margin: 0, color: 'var(--ink-2)' } },
-      `${load.count} ${load.count === 1 ? 'task' : 'tasks'} · about ${fmtHours(load.mins)} of work`
+      (creed ? headline + ' ' : '')
+      + `${load.count} ${load.count === 1 ? 'task' : 'tasks'} · about ${fmtHours(load.mins)} of work`
       + (late.length ? ` · ${late.length} past due` : '')),
     h('div', { class: 'meter', style: { marginTop: '14px', maxWidth: '460px' } },
       h('span', { style: { width: pct + '%' } }))));

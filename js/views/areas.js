@@ -386,6 +386,15 @@ function editArea(area, categoryId, navigate) {
       h('div', { class: 'field' },
         h('label', {}, 'Color'),
         h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, swatches, custom)),
+      h('label', { style: { display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer' } },
+        h('input', {
+          type: 'checkbox', class: 'check', checked: draft.onChart !== false,
+          onchange: (e) => { draft.onChart = e.target.checked; }
+        }),
+        h('span', {},
+          h('div', { style: { fontSize: '13.5px' } }, 'Show on the semester chart'),
+          h('div', { style: { fontSize: '12.5px', color: 'var(--ink-3)' } },
+            'Off for work with no shape over a term — errands, say. The area stays everywhere else.'))),
       h('div', { class: 'field' },
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
           h('label', { style: { flex: 1 } }, 'Recurring meetings'),

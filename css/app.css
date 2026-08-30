@@ -894,3 +894,146 @@ body.rail-hidden .sidebar { display: none; }
   .habit-row { grid-template-columns: minmax(0, 1fr) repeat(7, 30px) 30px 46px; }
   .tick { width: 22px; height: 22px; }
 }
+
+
+/* ---------------- the week's line ----------------
+   The quote is the page's h1: it is what you read first, and the sentence
+   about how heavy the week is sits under it with the numbers. */
+
+.creed { margin: 6px 0 10px; padding-left: 14px; border-left: 2px solid var(--rule); }
+.creed h1 {
+  font-size: calc(20.5px * var(--scale)); line-height: 1.3;
+  font-weight: 550; max-width: 34em; text-wrap: balance;
+}
+.creed cite { display: block; margin-top: 7px; font-style: normal; color: var(--ink-3); }
+
+
+/* ---------------- semester chart ----------------
+   One horizontal scroller. The label column is sticky rather than a second
+   parallel stack, so rows cannot drift out of line with their own labels. */
+
+.gantt {
+  overflow-x: auto; overflow-y: hidden;
+  border: 1px solid var(--rule); border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.gantt-inner { width: max-content; min-width: 100%; }
+
+.gantt-row {
+  display: grid;
+  grid-template-columns: var(--label-w) calc(var(--day-w) * var(--term-days));
+  border-bottom: 1px solid var(--rule-soft);
+}
+.gantt-row:last-child { border-bottom: 0; }
+
+.gantt-label {
+  position: sticky; left: 0; z-index: 3;
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0; padding: 6px 12px;
+  background: var(--surface); border-right: 1px solid var(--rule);
+  color: var(--ink-2); font: inherit; font-size: calc(13px * var(--scale));
+  text-align: left;
+}
+.gantt-label.is-area { border-top: 0; border-left: 0; border-bottom: 0; cursor: pointer; }
+.gantt-label.is-area:hover { background: var(--surface-2); color: var(--ink); }
+.gantt-label .bar { width: 3px; height: 15px; border-radius: 2px; flex: none; }
+.gantt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.gantt-head { background: var(--surface-2); position: relative; z-index: 4; }
+.gantt-head .gantt-label { background: var(--surface-2); }
+.gantt-head .gantt-track { height: 26px; }
+.gantt-month {
+  position: absolute; top: 0; bottom: 0;
+  display: flex; align-items: center; padding-left: 6px;
+  border-left: 1px solid var(--rule);
+  font-family: var(--font-mono); font-size: calc(10px * var(--scale));
+  letter-spacing: .11em; text-transform: uppercase; color: var(--ink-3);
+}
+
+.gantt-body { position: relative; }
+.gantt-track { position: relative; min-height: 28px; }
+
+/* one overlay for the whole body, so the ruling cannot disagree row to row */
+.gantt-rules {
+  position: absolute; top: 0; bottom: 0; left: var(--label-w); right: 0;
+  pointer-events: none; z-index: 0;
+}
+.gantt-rule { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule-soft); }
+.gantt-rule.is-month { background: var(--rule); }
+.gantt-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .5; }
+
+.gantt-cat {
+  padding: 11px 12px 3px;
+  border-bottom: 1px solid var(--rule-soft);
+  background: var(--surface);
+}
+.gantt-cat .eyebrow { position: sticky; left: 12px; color: var(--ink-2); }
+
+.gantt-item {
+  position: absolute; z-index: 1;
+  display: flex; align-items: center; gap: 6px;
+  height: 16px; padding: 0; border: 0; background: transparent;
+  cursor: pointer; white-space: nowrap; color: var(--ink-2);
+  font: inherit; font-size: calc(11.5px * var(--scale)); line-height: 1;
+}
+.gantt-item:hover, .gantt-item:focus-visible { z-index: 2; color: var(--ink); }
+.gantt-shape { flex: none; height: 9px; min-width: 4px; border-radius: 3px; background: var(--c); }
+/* a deadline is a moment, so it is a point and not a one-day bar */
+.gantt-item.is-mile .gantt-shape {
+  width: 9px; height: 9px; border-radius: 1px; margin: 0 2px; transform: rotate(45deg);
+}
+/* a bar within a label's width of the end writes its title on the other side
+   of itself, anchored by its right edge, or the scroller cuts the words off */
+.gantt-item.flip { flex-direction: row-reverse; }
+.gantt-item.clip-l .gantt-shape { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.gantt-item.clip-r .gantt-shape { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.gantt-item.done { opacity: .42; }
+.gantt-item.done .gantt-tag { text-decoration: line-through; }
+.gantt-quiet {
+  position: absolute; left: 8px; top: 7px;
+  font-size: calc(11.5px * var(--scale)); color: var(--ink-3); font-style: italic;
+}
+
+.gantt-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 2px 0 10px; }
+.gantt-pick summary { cursor: pointer; color: var(--ink-2); font-size: calc(13px * var(--scale)); }
+.gantt-picker { display: flex; flex-direction: column; gap: 6px; margin: 9px 0 4px; }
+.gantt-pickrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gantt-pickrow .eyebrow { width: 72px; flex: none; }
+.gantt-donetoggle {
+  display: flex; align-items: center; gap: 7px; cursor: pointer;
+  color: var(--ink-2); font-size: calc(13px * var(--scale));
+}
+
+.gantt-foot {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 10px; color: var(--ink-3); font-size: calc(12px * var(--scale));
+}
+.gantt-key { display: flex; align-items: center; gap: 6px; }
+.gantt-key span + span { margin-left: 9px; }
+.key-bar { width: 16px; height: 8px; border-radius: 3px; background: var(--ink-3); }
+.key-mile { width: 8px; height: 8px; background: var(--ink-3); transform: rotate(45deg); }
+.key-now { width: 2px; height: 12px; background: var(--accent); }
+
+
+/* ---------------- version history ---------------- */
+
+.release { border-top: 1px solid var(--rule-soft); padding: 12px 0 4px; }
+.release:first-child { border-top: 0; padding-top: 0; }
+.release-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.release-h h3 { font-size: calc(14px * var(--scale)); }
+.release ul { margin: 7px 0 0; padding-left: 17px; }
+.release li {
+  margin-bottom: 5px; color: var(--ink-2);
+  font-size: calc(13.5px * var(--scale)); line-height: 1.45;
+}
+.release li::marker { color: var(--ink-3); }
+.ver-tag {
+  font-family: var(--font-mono); font-size: calc(11.5px * var(--scale));
+  color: var(--accent); background: var(--accent-soft);
+  padding: 1px 7px; border-radius: 4px;
+}
+details.history > summary {
+  cursor: pointer; color: var(--ink-2);
+  font-size: calc(13px * var(--scale)); margin-top: 4px;
+}
+details.history[open] > summary { margin-bottom: 10px; }

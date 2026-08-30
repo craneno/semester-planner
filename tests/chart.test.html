@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Semester chart tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* The chart's geometry is kept in whole days and turned into pixels only at
+   the last moment, which is what makes it testable at all — everything below
+   is arithmetic, and none of it needs a layout. */
+import { suite, sharedStoreWith, storeWith } from './harness.js';
+
+const base = (over = {}) => ({
+  version: 14,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [
+    { id: 'c1', name: 'Thermodynamics', category: 'course', order: 1 },
+    { id: 'c2', name: 'EE lab', category: 'course', order: 0 },
+    { id: 'p1', name: 'Rocket', category: 'project', order: 0 },
+    { id: 'x1', name: 'General', category: 'personal', order: 0 }
+  ],
+  items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {},
+  ...over
+});
+
+suite('Semester chart — days, lanes and months', async ({ check }) => {
+
+  // semester.js reaches the canonical store through ui.js and editor.js, so a
+  // fresh instance would leave the two looking at different state
+  const s = await sharedStoreWith(base());
+  const chart = await import('../js/views/semester.js');
+
+  const range = { start: '2026-09-01', end: '2026-12-01', days: 92 };
+  const item = (over) => ({ title: 'x', estMins: 60, subtasks: [], ...over });
+
+  /* ---- the window it draws ---- */
+
+  {
+    const r = chart.chartRange({ start: '2026-09-02', end: '2026-12-12' });
+    check('the term is inclusive of both ends', r.days === 102, String(r.days));
+    check('a term with no dates draws nothing',
+      chart.chartRange({ start: '', end: '' }) === null);
+    check('a term that ends before it starts draws nothing',
+      chart.chartRange({ start: '2026-12-12', end: '2026-09-02' }) === null,
+      'better an empty page than a chart running backwards');
+    check('one day is one day', chart.chartRange({ start: '2026-09-02', end: '2026-09-02' }).days === 1);
+  }
+
+  /* ---- where one item sits ---- */
+
+  {
+    const span = (t) => chart.itemSpan(item(t), range);
+
+    check('an item with no date is not on the chart', span({ plan: null, due: null }) === null);
+    check('a deadline is a moment',
+      (() => { const x = span({ due: '2026-09-08' }); return x.from === 7 && x.to === 7 && x.milestone; })());
+    check('planned work has a length',
+      (() => {
+        const x = span({ plan: { date: '2026-09-08', start: '10:00', mins: 90 }, due: '2026-09-15' });
+        return x.from === 7 && x.to === 14 && x.days === 8 && !x.milestone;
+      })());
+    check('planned with no deadline is one day of work',
+      (() => { const x = span({ plan: { date: '2026-09-08' } }); return x.days === 1 && !x.milestone; })());
+    check('a deadline before the work is drawn the right way round',
+      (() => {
+        const x = span({ plan: { date: '2026-09-15' }, due: '2026-09-08' });
+        return x.from === 7 && x.to === 14;
+      })(), 'a backwards bar would have a negative width');
+
+    check('work finished before term is off the chart', span({ due: '2026-08-01' }) === null);
+    check('work due after term is off the chart', span({ due: '2027-01-05' }) === null);
+    check('work that starts before term is clipped, not dropped',
+      (() => {
+        const x = span({ plan: { date: '2026-08-20' }, due: '2026-09-10' });
+        return x && x.from === 0 && x.clipStart && !x.clipEnd;
+      })());
+    check('...and so is work that runs past the end',
+      (() => {
+        const x = span({ plan: { date: '2026-11-20' }, due: '2026-12-20' });
+        return x && x.to === range.days - 1 && x.clipEnd;
+      })());
+    check('the first day of term is day zero', span({ due: '2026-09-01' }).from === 0);
+    check('the last day of term is the last day', span({ due: '2026-12-01' }).to === 91);
+  }
+
+  /* ---- stacking, so nothing sits on anything ---- */
+
+  {
+    const pack = (...spans) => chart.packLanes(spans);
+
+    check('bars that never meet share one lane',
+      (() => {
+        const p = pack({ from: 0, to: 4 }, { from: 10, to: 14 });
+        return p.lanes === 1 && p.rows.every((r) => r.lane === 0);
+      })());
+    check('bars that overlap do not',
+      (() => {
+        const p = pack({ from: 0, to: 10 }, { from: 5, to: 15 });
+        return p.lanes === 2 && p.rows[1].lane === 1;
+      })());
+    check('a third overlapping bar gets a third lane',
+      pack({ from: 0, to: 10 }, { from: 2, to: 12 }, { from: 4, to: 14 }).lanes === 3);
+    check('a lane is reused once it is free',
+      (() => {
+        const p = pack({ from: 0, to: 4 }, { from: 2, to: 8 }, { from: 20, to: 24 });
+        return p.lanes === 2 && p.rows[2].lane === 0;
+      })());
+    check('room is left for the label beside the bar',
+      (() => {
+        const p = pack({ from: 0, to: 2, reserve: 30 }, { from: 10, to: 12 });
+        return p.lanes === 2;
+      })(), 'the bars do not touch, but the first one’s title runs under the second');
+    check('a title written on the left of its bar needs the room on the left',
+      (() => {
+        const p = pack({ from: 0, to: 4 }, { from: 8, to: 12, head: 2 });
+        return p.lanes === 2;
+      })(), 'a bar near the end of term writes its title backwards over its neighbour');
+    check('...and gives back the room on its right',
+      (() => {
+        const p = pack({ from: 8, to: 12, head: 2, reserve: 12 }, { from: 14, to: 16 });
+        return p.lanes === 1;
+      })());
+    check('a head left of day zero still lands in the first free lane',
+      pack({ from: 1, to: 3, head: -6 }).rows[0].lane === 0,
+      'a term that starts inside a label’s width of day zero');
+    check('rows come back left to right',
+      pack({ from: 30, to: 32 }, { from: 1, to: 2 }).rows[0].from === 1);
+    check('nothing to draw is still one empty lane, not zero-height',
+      (() => { const p = pack(); return p.lanes === 1 && p.rows.length === 0; })());
+  }
+
+  /* ---- the ruler across the top ---- */
+
+  {
+    const bands = chart.monthBands(range);
+    check('every month the term crosses gets a band', bands.length === 4, String(bands.length));
+    check('the first band starts at day zero', bands[0].from === 0);
+    check('September is thirty days', bands[0].days === 30);
+    check('October is thirty-one', bands[1].days === 31 && bands[1].label === 'Oct');
+    check('a term ending on the 1st gives that month one day', bands[3].days === 1);
+    check('the bands tile the term exactly',
+      bands.reduce((n, b) => n + b.days, 0) === range.days);
+
+    const part = chart.monthBands({ start: '2026-09-15', end: '2026-10-05', days: 21 });
+    check('a term starting mid-month starts the band there',
+      part[0].days === 16 && part[0].from === 0, String(part[0].days));
+    check('...and the next band starts where the first one ends',
+      part[1].from === 16);
+  }
+
+  /* ---- fitting the term to the window ---- */
+
+  {
+    const w = (width, days) => chart.fitDayWidth(width, days, 168);
+    check('a term is sized to the space there is', w(1180, 102) === 9, String(w(1180, 102)));
+    check('a phone still gets a readable minimum', w(375, 102) === 4, String(w(375, 102)));
+    check('a short term does not get absurdly wide days', w(1600, 14) === 16, String(w(1600, 14)));
+    check('a day is never zero or negative', w(100, 400) >= 4);
+  }
+
+  /* ---- which areas are on it at all ---- */
+
+  {
+    check('every area is on the chart until told otherwise',
+      s.chartAreas().length === 4, String(s.chartAreas().length));
+    check('courses come before projects, which come before personal',
+      s.chartAreas().map((a) => a.name).join() === 'EE lab,Thermodynamics,Rocket,General',
+      s.chartAreas().map((a) => a.name).join());
+    check('...and inside a category, the order they were dragged into',
+      s.chartAreas()[0].name === 'EE lab');
+
+    s.commit(() => s.upsertArea({ id: 'x1', onChart: false }));
+    check('an area can sit the chart out',
+      !s.chartAreas().some((a) => a.id === 'x1') && s.chartAreas().length === 3);
+    check('...without being archived or leaving the sidebar',
+      s.areaById('x1').archived === false && s.areasInCategory('personal').length === 1);
+
+    s.commit(() => s.upsertArea({ id: 'x1', onChart: true }));
+    check('and it comes back', s.chartAreas().length === 4);
+
+    s.commit(() => s.upsertArea({ id: 'c2', archived: true }));
+    check('an archived area is off the chart too', s.chartAreas().length === 3);
+  }
+
+  /* ---- the flag survives a reload and a sync ---- */
+
+  {
+    // a fresh instance, not the shared one: import() caches, so a second
+    // sharedStoreWith would hand back the module already loaded above with the
+    // state it already has
+    const r = await storeWith(base({
+      areas: [
+        { id: 'a1', name: 'Kept off', category: 'course', order: 0, onChart: false },
+        { id: 'a2', name: 'Kept on', category: 'course', order: 1, onChart: true },
+        { id: 'a3', name: 'Never said', category: 'course', order: 2 }
+      ]
+    }));
+    check('off stays off across a reload', r.areaById('a1').onChart === false);
+    check('on stays on', r.areaById('a2').onChart === true);
+    check('an area that never said is on',
+      r.areaById('a3').onChart === true,
+      'absent must read as yes, or every area an older device pushes vanishes');
+
+    const row = r.snapshotRows().find((x) => x.kind === 'area' && x.id === 'a1');
+    check('the flag travels with the area row', row.data.onChart === false);
+    r.applyRow({ kind: 'area', id: 'a2', data: { ...r.areaById('a2'), onChart: false } });
+    check('and an inbound row can turn one off', r.areaById('a2').onChart === false);
+  }
+});
+</script>
+</body>
+</html>
