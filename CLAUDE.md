@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **14**, service worker **planner-v22**.
+Currently schema **14**, service worker **planner-v23**.
 
 ## Working on it
 
@@ -193,9 +193,7 @@ indented (`.area-chip`, 33px — glyph width plus the gap).
 
 **Overview is the day** — there is no Today page. Left column is a 24-hour
 clock opened at 8am (`--day-hour-h`, read from CSS rather than hard-coded);
-right column is focus, top three, open work, end-of-day note. Its first line
-is the week's quote from `js/quotes.js`, chosen by week number so it does not
-change on every render; how heavy the week is moved to the sentence under it.
+right column is focus, top three, open work, end-of-day note.
 
 **Semester is a chart, with the old list behind a switch.** Bands are the
 three categories, lanes are areas, and `area.onChart` (default true, absent
@@ -254,7 +252,7 @@ end of term writes its title to its *left* and is anchored by `right` — hence
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 379 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 370 checks.
 
 | file | covers |
 |---|---|
@@ -268,7 +266,7 @@ Serve the repo, open `/tests/`. No runner, no dependencies. 379 checks.
 | `chart.test.html` | the term window, spans and clipping, lane packing, month bands |
 | `gcal.test.html` | deriving a schedule from recurring events |
 | `sync.test.html` | delete durability against a stand-in Supabase; error text |
-| `version.test.html` | changelog vs `sw.js`, `SHELL` vs the import graph, the quotes |
+| `version.test.html` | changelog vs `sw.js`, `SHELL` vs the import graph |
 
 Suites drive the real modules and clobber app state, so **both guards must
 stay**: refuse to run outside localhost, and restore `localStorage` afterwards
@@ -300,7 +298,6 @@ Sync ships whatever shape the object has; nothing else is needed.
 | today's clock, focus, end-of-day | `js/views/overview.js` |
 | the capture box, the unfiled queue, a note card | `js/capture.js` |
 | the semester chart | `js/views/semester.js` |
-| the week's quote | `js/quotes.js` |
 | patch notes, and what version this is | `js/changelog.js` |
 | toasts, modals, peek, drag, reorder | `js/ui.js` |
 | the task detail panel | `js/editor.js` |

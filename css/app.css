@@ -896,18 +896,6 @@ body.rail-hidden .sidebar { display: none; }
 }
 
 
-/* ---------------- the week's line ----------------
-   The quote is the page's h1: it is what you read first, and the sentence
-   about how heavy the week is sits under it with the numbers. */
-
-.creed { margin: 6px 0 10px; padding-left: 14px; border-left: 2px solid var(--rule); }
-.creed h1 {
-  font-size: calc(20.5px * var(--scale)); line-height: 1.3;
-  font-weight: 550; max-width: 34em; text-wrap: balance;
-}
-.creed cite { display: block; margin-top: 7px; font-style: normal; color: var(--ink-3); }
-
-
 /* ---------------- semester chart ----------------
    One horizontal scroller. The label column is sticky rather than a second
    parallel stack, so rows cannot drift out of line with their own labels. */

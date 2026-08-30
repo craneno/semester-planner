@@ -18,7 +18,6 @@
    here too. Tick "Update on reload" in DevTools while developing. */
 import { suite } from './harness.js';
 import { CHANGELOG, APP_VERSION, CURRENT } from '../js/changelog.js';
-import { QUOTES, quoteForWeek } from '../js/quotes.js';
 
 const text = async (path) => {
   const r = await fetch(path, { cache: 'no-store' });
@@ -26,7 +25,7 @@ const text = async (path) => {
   return r.text();
 };
 
-suite('Version — the changelog, the shell, and the week’s line', async ({ check }) => {
+suite('Version — the changelog and the shell', async ({ check }) => {
 
   const sw = await text('../sw.js');
   const swVersion = (sw.match(/const VERSION = '([^']+)'/) || [])[1];
@@ -82,44 +81,12 @@ suite('Version — the changelog, the shell, and the week’s line', async ({ ch
     check('the app reaches more than a handful of modules', seen.size > 10, String(seen.size));
     check('every module the app imports is in the shell', missing.length === 0,
       `not cached: ${missing.join(', ')} — offline, these load from the network or not at all`);
-    check('the new modules are in it',
-      shell.has('./js/changelog.js') && shell.has('./js/quotes.js'));
+    check('the changelog module is in it', shell.has('./js/changelog.js'));
     check('the shell has no module the app cannot reach',
       [...shell].filter((p) => p.endsWith('.js')).every((p) => seen.has(p.slice(2))),
       [...shell].filter((p) => p.endsWith('.js') && !seen.has(p.slice(2))).join(', '));
   }
 
-  /* ---- the line at the top of the week ---- */
-
-  {
-    check('there are quotes', QUOTES.length >= 8, String(QUOTES.length));
-    check('every one is attributed',
-      QUOTES.every((q) => q.text.trim().length > 8 && q.who.trim().length > 2));
-    check('none is so long it stops being a line',
-      QUOTES.every((q) => q.text.length < 160),
-      QUOTES.filter((q) => q.text.length >= 160).map((q) => q.who).join());
-
-    const mon = '2026-08-31', wed = '2026-09-02', sun = '2026-09-06';
-    check('the same line all week',
-      quoteForWeek(mon).text === quoteForWeek(wed).text
-      && quoteForWeek(wed).text === quoteForWeek(sun).text,
-      'a line that changes on every render is wallpaper');
-    check('a new one next week',
-      quoteForWeek('2026-09-07').text !== quoteForWeek(mon).text);
-    check('the same date always gives the same line',
-      quoteForWeek(mon).text === quoteForWeek(mon).text);
-    check('it works before 1970 rather than throwing',
-      !!quoteForWeek('1969-07-20'), 'the modulo has to survive a negative');
-    const weekly = Array.from({ length: QUOTES.length * 2 }, (_, i) => {
-      const d = new Date(2026, 8, 1 + i * 7);
-      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      return quoteForWeek(ymd).text;
-    });
-    check('every quote comes up over a long enough stretch',
-      new Set(weekly).size === QUOTES.length,
-      `${new Set(weekly).size} of ${QUOTES.length} — the rotation must cover the pool, not orbit a corner of it`);
-    check('an empty pool is nothing, not a crash', quoteForWeek('2026-09-01', []) === null);
-  }
 });
 </script>
 </body>

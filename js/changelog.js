@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v23', date: '2026-08-29',
+    title: 'The week’s quote taken back out',
+    notes: [
+      'Overview opens on the sentence about the week again. The quote is gone — a line you did not choose, in the largest type on the page, every time you open it.'
+    ]
+  },
+  {
     version: 'v22', date: '2026-08-29',
     title: 'The semester as a chart',
     notes: [
@@ -16,7 +23,6 @@ export const CHANGELOG = [
       'An area can sit the chart out without being archived: the chips above the chart, or the checkbox in the area editor.',
       'The list with its filters and search is still there, behind the Chart / List switch.',
       'Google Drive links are named by what they are — Google Doc, Drive file, Drive folder — instead of by the file id, which read as a hash and got thrown away.',
-      'Overview opens with a line worth reading rather than a weather report. One quote a week.',
       'This list, at the bottom of Settings.'
     ]
   },
