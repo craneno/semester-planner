@@ -422,6 +422,10 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 }
 .focus-line::placeholder { color: var(--ink-3); font-weight: 400; }
 .focus-line:focus { border-color: var(--accent); box-shadow: none; }
+/* the same field at the end of the day, quieter: tonight it is a note, and
+   only in the morning is it the headline */
+.focus-line.sm { font-size: calc(15px * var(--scale)); font-weight: 500; letter-spacing: 0; }
+.carried { margin-top: 7px; color: var(--ink-3); }
 .top3 { display: flex; flex-direction: column; gap: 2px; }
 .top3 .row { grid-template-columns: 22px minmax(0,1fr) auto; border: 0; }
 

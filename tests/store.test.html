@@ -233,6 +233,88 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       s.areasInCategory('course').map((a) => a.name).join() === 'Thermo,Orgo');
   }
 
+  /* ---- the end of one day is the start of the next ---- */
+
+  {
+    const withNotes = (notes) => ({
+      version: 15, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
+      areas: [], items: [], cards: [], notes
+    });
+
+    {
+      const s = await storeWith(withNotes({
+        '2026-09-09': { focus: '', text: 'slow day', tomorrow: 'Finish the nozzle CAD', top3: [] }
+      }));
+      const got = s.carryForward('2026-09-10');
+      check('last night’s line becomes today’s focus',
+        s.note('2026-09-10').focus === 'Finish the nozzle CAD', s.note('2026-09-10').focus);
+      check('...and says where it came from',
+        s.note('2026-09-10').carriedFrom === '2026-09-09' && got.date === '2026-09-09');
+      check('the line is spent, so it does not arrive twice',
+        s.note('2026-09-09').tomorrowUsed === true);
+      check('carrying again does nothing',
+        s.carryForward('2026-09-11') === null && s.note('2026-09-11').focus === '');
+    }
+
+    {
+      const s = await storeWith(withNotes({
+        '2026-09-09': { focus: '', text: '', tomorrow: 'Nozzle CAD', top3: [] },
+        '2026-09-10': { focus: 'Something I chose myself', text: '', top3: [] }
+      }));
+      s.carryForward('2026-09-10');
+      check('a focus you set yourself is not overwritten',
+        s.note('2026-09-10').focus === 'Something I chose myself');
+      check('...but last night’s line is still spent',
+        s.note('2026-09-09').tomorrowUsed === true,
+        'left unspent it would arrive a day late, which is worse than not arriving');
+    }
+
+    {
+      const s = await storeWith(withNotes({
+        '2026-09-11': { focus: '', text: '', tomorrow: 'Email the TA', top3: [] }   // a Friday
+      }));
+      check('a Friday night reaches Monday morning',
+        s.carryForward('2026-09-14')?.text === 'Email the TA');
+      const old = await storeWith(withNotes({
+        '2026-09-01': { focus: '', text: '', tomorrow: 'Ancient history', top3: [] }
+      }));
+      check('but a line from a fortnight ago does not',
+        old.carryForward('2026-09-20') === null,
+        'a week is long enough to still mean it');
+    }
+
+    {
+      const s = await storeWith(withNotes({}));
+      check('nothing to carry is not a write',
+        s.pendingTomorrow('2026-09-10') === null && s.carryForward('2026-09-10') === null);
+      check('...and leaves no empty note behind',
+        Object.keys(s.state.notes).length === 0,
+        'a write on every render would sync a row a day for nothing');
+    }
+
+    {
+      const s = await storeWith(withNotes({
+        '2026-09-09': { focus: '', text: '', tomorrow: 'Only a line for tomorrow', top3: [] }
+      }));
+      const row = s.snapshotRows().find((r) => r.kind === 'note' && r.id === '2026-09-09');
+      check('a note holding only tomorrow’s line still syncs',
+        !!row && row.data.tomorrow === 'Only a line for tomorrow',
+        'dropped as empty, the carry-forward would never reach another device');
+      s.carryForward('2026-09-10');
+      const spent = s.snapshotRows().find((r) => r.kind === 'note' && r.id === '2026-09-09');
+      check('...and so does the fact that it was spent', spent.data.tomorrowUsed === true);
+    }
+
+    {
+      const s = await storeWith(withNotes({}));
+      check('an old note with no tomorrow field is not a crash',
+        (s.state.notes['2026-09-09'] = { focus: '', text: 'from schema 14', top3: [] },
+        s.carryForward('2026-09-10') === null));
+      check('note() gives a new day the shape the box expects',
+        s.note('2026-09-12').tomorrow === '');
+    }
+  }
+
   /* ---- deleting an area leaves its work behind ---- */
 
   {

@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -928,8 +928,48 @@ export function cardToItem(id, { as = 'task', areaId } = {}) {
 }
 
 export function note(date) {
-  if (!state.notes[date]) state.notes[date] = { focus: '', text: '', top3: [] };
+  if (!state.notes[date]) state.notes[date] = { focus: '', text: '', tomorrow: '', top3: [] };
   return state.notes[date];
+}
+
+/* ---- the end of one day is the start of the next ----
+   The end-of-day box used to be write-only: keyed to its date, saved, synced,
+   and never read again by anything. A line about what tomorrow needs, written
+   at eleven at night and never shown to you again, is a prompt whose answer
+   goes nowhere. So it becomes tomorrow's focus. */
+
+/** How far back to look for a line nobody has spent yet — a Friday night
+ *  should still reach Monday morning. */
+const CARRY_DAYS = 7;
+
+/** The most recent unspent line for tomorrow, or null. */
+export function pendingTomorrow(day = today()) {
+  for (let i = 1; i <= CARRY_DAYS; i++) {
+    const date = addDays(day, -i);
+    const n = state.notes[date];
+    if (n && n.tomorrow && !n.tomorrowUsed) return { date, text: n.tomorrow };
+  }
+  return null;
+}
+
+/**
+ * Make last night's line today's focus. Returns what it carried, or null.
+ *
+ * The line is spent either way, even when today already has a focus: one you
+ * set yourself beats last night's guess, and a line left unspent would arrive
+ * a day late, which is worse than not arriving. `carriedFrom` records where
+ * the focus came from so the page can say so — and so clearing it sticks,
+ * since nothing unspent is left to put back.
+ */
+export function carryForward(day = today()) {
+  const found = pendingTomorrow(day);
+  if (!found) return null;
+  state.notes[found.date].tomorrowUsed = true;
+  const n = note(day);
+  if (n.focus) return null;
+  n.focus = found.text;
+  n.carriedFrom = found.date;
+  return found;
 }
 
 /* ---------------- quick add parser ----------------
@@ -1141,7 +1181,9 @@ export function parseQuickAdd(input) {
 
 export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'weekStart', 'dayStart', 'dayEnd'];
 
-const emptyNote = (n) => !n || (!n.focus && !n.text && !(n.top3 || []).length);
+// a note holding only a line for tomorrow is not empty: dropping it here
+// would keep the carry-forward from ever reaching another device
+const emptyNote = (n) => !n || (!n.focus && !n.text && !n.tomorrow && !(n.top3 || []).length);
 
 /** Every syncable row in the current state. */
 export function snapshotRows() {

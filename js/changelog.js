@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v24', date: '2026-08-29',
+    title: 'The end of one day starts the next',
+    notes: [
+      'End of day now asks two things: what moved, and what tomorrow needs. The second one is a single line, and in the morning it is already sitting in today’s focus, marked with the night it came from.',
+      'It was write-only before — the note was saved and synced and never read back by anything, so a line about tomorrow went nowhere.',
+      'A Friday night reaches Monday morning; a line older than a week does not. One you set yourself is never overwritten.'
+    ]
+  },
+  {
     version: 'v23', date: '2026-08-29',
     title: 'The week’s quote taken back out',
     notes: [

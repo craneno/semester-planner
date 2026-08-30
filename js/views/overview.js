@@ -10,8 +10,8 @@ import {
 } from '../util.js';
 import {
   state, commit, toggleItem, upcoming, overdue, workloadFor, semesterProgress,
-  weekNumber, categoryLoad, note, areaColor, areaName, classesOn, eventsOn,
-  itemsDueOn, itemsPlannedOn
+  weekNumber, categoryLoad, note, carryForward, pendingTomorrow, areaColor,
+  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -28,6 +28,11 @@ export function renderOverview(root, { navigate, go }) {
   const late = overdue();
   const soon = upcoming(14);
   const pct = Math.round(semesterProgress() * 100);
+
+  // Last night's line becomes today's focus, before anything reads the note.
+  // Checked first so an ordinary render writes nothing, and tagged so app.js
+  // does not re-render the page it is in the middle of building.
+  if (pendingTomorrow(day)) commit(() => carryForward(day), { source: 'carry' });
 
   /* headline — a sentence, not a scoreboard */
   const headline = load.count === 0
@@ -197,6 +202,13 @@ function decisionColumn(day, { navigate, go, soon }) {
     oninput: debounce((e) => commit(() => { n.focus = e.target.value; }), 400)
   }));
 
+  // only while it is still last night's line, so editing it stops the credit
+  const source = n.carriedFrom ? state.notes[n.carriedFrom] : null;
+  if (source && n.focus && n.focus === source.tomorrow) {
+    focus.append(h('div', { class: 'eyebrow carried' },
+      `Carried from ${fmtDate(n.carriedFrom)}`));
+  }
+
   const planned = itemsPlannedOn(day);
   const due = itemsDueOn(day).filter((t) => !planned.includes(t));
   const candidates = [...planned, ...due];
@@ -240,15 +252,28 @@ function decisionColumn(day, { navigate, go, soon }) {
       h('button', { class: 'btn ghost sm', onclick: () => go('semester') }, 'All →')),
     byCat));
 
-  /* end of day */
+  /* End of day. The second box is the one that goes somewhere: whatever is in
+     it is tomorrow's focus line, so it is asked for separately rather than
+     left to be dug out of the paragraph above it. */
   col.append(h('section', { class: 'card' },
     h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'End of day')),
     h('div', { class: 'card-b' },
       h('textarea', {
-        placeholder: 'What moved, what stalled, what tomorrow needs.',
-        style: { minHeight: '90px' },
+        placeholder: 'What moved, what stalled.',
+        style: { minHeight: '78px' },
         oninput: debounce((e) => commit(() => { n.text = e.target.value; }), 500)
-      }, n.text || ''))));
+      }, n.text || ''),
+      h('div', { class: 'eyebrow', style: { margin: '14px 0 4px' } }, 'Tomorrow needs'),
+      h('input', {
+        class: 'focus-line sm', value: n.tomorrow || '',
+        placeholder: 'One line — it becomes tomorrow’s focus',
+        'aria-label': 'What tomorrow needs',
+        oninput: debounce((e) => commit(() => {
+          n.tomorrow = e.target.value;
+          // edited after it was spent: mean it again, and it carries again
+          if (n.tomorrowUsed) delete n.tomorrowUsed;
+        }), 400)
+      }))));
 
   return col;
 }

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **14**, service worker **planner-v23**.
+Currently schema **15**, service worker **planner-v24**.
 
 ## Working on it
 
@@ -132,7 +132,7 @@ rejected rather than surfacing the constraint name.
 | `state.items` | tasks. Either **scheduled** (`plan {date,start,mins}`) or a **deadline** (`due`, `dueTime`, `estMins`) — never both. Read via `!!item.plan.start`. |
 | `state.areas` | courses/projects/etc. One `category` each, plus an `order` and `onChart` |
 | `state.cards` | notecards. `areaId: null` = unfiled |
-| `state.notes` | per-day focus text keyed by date — **not** the same as cards |
+| `state.notes` | per-day `focus`, `text`, `tomorrow` and `top3`, keyed by date — **not** the same as cards |
 | `state.links` | saved links, `areaId` naming the pile. Rides in the `meta` row |
 | `state.wishlist` | things wanted and the parcels they become — one object, `status` moves along `WISH_STATUSES`. Rides in `meta` |
 | `state.habits` / `habitLog` | habits and `date -> [habitId]` |
@@ -168,6 +168,7 @@ device still on the old schema keeps pushing the old name.
 | 12 | links; the Personal area is renamed General; seeds Job search |
 | 13 | the wishlist |
 | 14 | `onChart` on areas — which ones the semester chart draws |
+| 15 | `tomorrow` on a day's note, and the focus it becomes the next morning |
 
 ## Routing and views
 
@@ -194,6 +195,16 @@ indented (`.area-chip`, 33px — glyph width plus the gap).
 **Overview is the day** — there is no Today page. Left column is a 24-hour
 clock opened at 8am (`--day-hour-h`, read from CSS rather than hard-coded);
 right column is focus, top three, open work, end-of-day note.
+
+**The end-of-day note is the only thing that crosses a day.** `tomorrow` is
+carried into the next morning's `focus` by `carryForward()`, called from the
+render *before* anything reads the note and only when `pendingTomorrow()` says
+there is something — an unconditional `commit()` there would write and sync a
+row on every visit. It is tagged `{ source: 'carry' }` so `app.js` does not
+re-render the page mid-build. The line is spent (`tomorrowUsed`) even when the
+day already has a focus, or it would arrive a day late; `carriedFrom` records
+where a focus came from. `emptyNote()` counts `tomorrow`, or a note holding
+only that line would be dropped from the sync and never reach another device.
 
 **Semester is a chart, with the old list behind a switch.** Bands are the
 three categories, lanes are areas, and `area.onChart` (default true, absent
@@ -252,7 +263,7 @@ end of term writes its title to its *left* and is anchored by `right` — hence
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 370 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 384 checks.
 
 | file | covers |
 |---|---|
