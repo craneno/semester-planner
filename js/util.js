@@ -52,7 +52,26 @@ export function parseYmd(s) {
   return new Date(y, m - 1, d);
 }
 
-export function today() { return ymd(new Date()); }
+/**
+ * The hour a planner day begins. Not midnight.
+ *
+ * Work finished at half past one, a habit ticked on the way to bed and a
+ * journal entry written about the day just gone all belong to the day you were
+ * awake for, not to the one the clock started thirty minutes ago. Everything
+ * that asks what day it is goes through `today()`, so this is the only place
+ * the boundary is decided.
+ */
+export const DAY_RESET_HOUR = 3;
+
+/**
+ * The day the planner is on — the calendar date wound back to the last reset.
+ * Takes a clock so it can be tested at an hour other than the one it is now.
+ */
+export function today(now = new Date()) {
+  const d = new Date(now);
+  d.setHours(d.getHours() - DAY_RESET_HOUR);
+  return ymd(d);
+}
 
 export function addDays(s, n) {
   const d = parseYmd(s) || new Date();

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **18**, service worker **planner-v29**.
+Schema **18**, service worker **planner-v30**.
 
 ## Working with me
 
@@ -29,12 +29,11 @@ version's JS against another's CSS.
 navigation does not reload — `#/overview` when already there keeps the same
 module instances, so `location.reload()`. `http.server` sends no
 `Cache-Control` and Chrome invents freshness, so serve `no-store` on a fresh
-port (a new origin is a clean cache). In production a tab keeps the cache it
-started with; since v14 the app reloads once when a new worker takes over.
-**Never verify with a cache-busting query string** — `sw.js` matches with
-`ignoreSearch: true` and `fetch(cache:'reload')` still goes through the worker,
-so both only *look* like network reads. The truth is DevTools → **Bypass for
-network**, `await caches.keys()`, or `curl` from outside.
+port (a new origin is a clean cache). **Never verify with a cache-busting query
+string** — `sw.js` matches with `ignoreSearch: true` and `fetch(cache:'reload')`
+still goes through the worker, so both only *look* like network reads. The truth
+is DevTools → **Bypass for network**, `await caches.keys()`, or `curl` from
+outside.
 
 ## State
 
@@ -87,8 +86,7 @@ or link with no area lands in General via `defaultAreaId()`. Each *seed* is
 pinned to the version that introduced it — `if (from < 5)`, never
 `< SCHEMA_VERSION`, or the next bump resurrects something deliberately deleted.
 A *rename* is the opposite — `MERGED_CATEGORY` is unpinned, in `areaCategory()`
-— because a dead category id must be translated every time it is read. What each
-version did is in `migrate()` and `js/changelog.js`.
+— because a dead category id must be translated every time it is read.
 
 ## Routing and views
 
@@ -114,11 +112,16 @@ focus, or it would arrive a day late. **A journal entry lives in the day it was
 written**, as `notes[date].journal[areaId]`, so a term of writing syncs as small
 rows rather than one row resent whole, and `emptyNote()` counts it. The
 **freewrite** is the opposite shape: one string on the area, no history.
+**The day begins at 3am**, decided in one place — `DAY_RESET_HOUR` and
+`today(now)` in `js/util.js`, which everything asking the date goes through — so
+an entry written at 1am files under the day it is about. `sweepDone()` deletes
+work ticked *before* that reset; `navigate()` runs it behind an Undo toast, and
+`settings.sweepDone` turns it off.
 
 **Semester is a chart, the old list behind a switch.** Bands are the three
 categories, lanes are areas, `area.onChart` (absent reads as true) picks which
-appear. Geometry is **whole days from the first day of term**, times `--day-w`
-at the last moment — which is what makes `chartRange`, `itemSpan`, `bandSpan`,
+appear. Geometry is **whole days from the first day of term**, times `--day-w` at
+the last moment — which is what makes `chartRange`, `itemSpan`, `bandSpan`,
 `packLanes`, `monthBands` and `fitDayWidth` pure and testable. `--day-w` comes
 from JS because `packLanes` measures titles in those same pixels; a bar within
 a title's width of the end of term writes its title *left*, hence `head` as well
@@ -133,9 +136,9 @@ a deliverable, not in five labelled fields.
 
 - `restoreDayScroll()` runs **synchronously after append**: `scrollTop` does
   nothing before layout, and rAF never fires in a background tab — exactly when
-  a restored session renders. `ui.js` keeps **one modal at a time**; a second
+  a restored session renders. `ui.js` keeps **one modal at a time** — a second
   `modal()` closes the first. A drag grip must `preventDefault()` on
-  `pointerdown`, or the drag reads as a text selection.
+  `pointerdown`, or it reads as a text selection.
 - Both sweeps — `dragCreate()` in `js/timegrid.js`, `dragSpan()` in
   `views/semester.js` — fire only on the **empty grid itself**, never on a block
   in it, never on touch (the gesture scrolls); `pointercancel` and Escape must
@@ -164,7 +167,7 @@ a deliverable, not in five labelled fields.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies, 524 checks, and
+Serve the repo, open `/tests/`. No runner, no dependencies, 552 checks, and
 `tests/` is excluded from the deploy. One suite per file, each named for what it
 covers and headed by a comment saying why; `tests/index.html` runs them all.
 
@@ -174,26 +177,23 @@ waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once at import, so `migrate()` needs a fresh instance —
 `storeWith(raw)`, which **verifies** its seed rather than timing it: `import()`
 is async, a leftover `save()` lands between the write and the module that reads
-it, and sleeping past the debounce only narrows that window (the runner's twelve
-iframes throttle timers, and it reopens). A fresh instance has its own `state`,
-so a suite that pokes state *and* calls `gcal.js`/`cloud.js` must use
-`sharedStoreWith()` — once per page, since `import()` caches. To add a field to
-a task: the literal in `upsertItem()`, a fallback in `migrate()` so saved data
-still loads, a row in `js/editor.js`. Sync ships whatever shape it has.
+it, and sleeping past the debounce only narrows that window. A fresh instance has
+its own `state`, so a suite that pokes state *and* calls `gcal.js`/`cloud.js`
+must use `sharedStoreWith()` — once per page, since `import()` caches. To add a
+field to a task: the literal in `upsertItem()`, a fallback in `migrate()`, a row
+in `js/editor.js`. Sync ships whatever shape it has.
 
 ## Where things live
 
 | I want to change… | Edit |
 |---|---|
-| shell, router, sidebar, quick add, the next-up line | `js/app.js` |
-| state, schema, migrations, parser | `js/store.js` |
+| shell, router, sidebar, quick add, next-up · state, schema, migrations, parser, the day boundary | `js/app.js` · `js/store.js`, `js/util.js` |
 | a screen · category pages, an area's page, its links and freewrite | `js/views/<screen>.js` · `views/areas.js` |
 | the capture box, the unfiled queue, a note card · the task panel | `js/capture.js` · `js/editor.js` |
 | sweeping, moving or resizing a block · a band on the chart | `js/timegrid.js` · `views/semester.js`, `js/sprint.js` |
 | toasts, modals, peek, reorder · patch notes and the version | `js/ui.js` · `js/changelog.js` |
-| Google Calendar / Supabase sync | `js/gcal.js`, `js/cloud.js`, `supabase/*.sql` |
-| colours, spacing, grids · themes and fonts | `css/app.css` · `js/appearance.js` |
+| Google Calendar / Supabase sync · colours, themes, fonts | `js/gcal.js`, `js/cloud.js`, `supabase/*.sql` · `css/app.css`, `js/appearance.js` |
 
-Calendar days are `'YYYY-MM-DD'` in **local** time; times `'HH:MM'` 24h;
-timestamps ISO — see `js/util.js`. Build DOM with `h()`, not template strings.
-No framework, no JSX, no TypeScript. Match the surrounding style.
+Calendar days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
+(`js/util.js`). Build DOM with `h()`, not template strings. No framework, no JSX,
+no TypeScript. Match the surrounding style.

@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v30', date: '2026-08-30',
+    title: 'The day now ends at 3am',
+    notes: [
+      'The planner’s day begins at 3am, not midnight. At 1am it is still showing yesterday — so a journal entry written after midnight files under the day you are writing about, a habit ticked on the way to bed credits the day you were awake for, and nothing is overdue an hour early.',
+      'Finished tasks are deleted at that reset. Tick one at 2pm and it stays all day; at 3am, or the next time you open the app after 3am, it goes — with an Undo on the toast that says how many went.',
+      'The first reset after this update clears everything you had already ticked off on an earlier day. Settings → Appearance has a switch to turn the whole thing off first.',
+      'A swept task with a block on your Google Calendar leaves the event behind, exactly as deleting one by hand always has.'
+    ]
+  },
+  {
     version: 'v29', date: '2026-08-30',
     title: 'Take hold of a block',
     notes: [

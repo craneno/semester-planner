@@ -503,6 +503,130 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       'the topbar reads a null as "no scheduled events today"');
   }
 
+  /* ---- the day begins at 3am, not midnight ---- */
+
+  {
+    const { today, DAY_RESET_HOUR } = await import('../js/util.js');
+    const at = (iso) => today(new Date(iso));
+
+    check('the reset is 3am', DAY_RESET_HOUR === 3);
+    check('the middle of the afternoon is that day',
+      at('2026-09-09T14:00:00') === '2026-09-09');
+    check('half past midnight still belongs to the day before',
+      at('2026-09-10T00:30:00') === '2026-09-09',
+      'writing about your day at half past midnight is writing about that day');
+    check('...and so does ten to three',
+      at('2026-09-10T02:50:00') === '2026-09-09');
+    check('three o’clock is the new day', at('2026-09-10T03:00:00') === '2026-09-10');
+    check('and so is one minute past', at('2026-09-10T03:01:00') === '2026-09-10');
+    check('the last minute of the old day is 2:59',
+      at('2026-09-10T02:59:00') === '2026-09-09');
+    check('a night crossing a month still lands in the old month',
+      at('2026-10-01T01:00:00') === '2026-09-30');
+    check('...and one crossing a year, in the old year',
+      at('2027-01-01T02:00:00') === '2026-12-31');
+    check('today() with no clock is still just today',
+      typeof today() === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(today()));
+  }
+
+  /* ---- finished work is swept at the reset ---- */
+
+  {
+    const day = '2026-09-10';
+    const doneAt = (d, h) => `${d}T${String(h).padStart(2, '0')}:00:00`;
+    const fixture = (over = {}) => ({
+      version: 18,
+      semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+      areas: [{ id: 'c1', name: 'Thermo', category: 'course', order: 0 }],
+      items: [
+        { id: 'open', title: 'Still to do', areaId: 'c1' },
+        { id: 'today', title: 'Ticked this afternoon', areaId: 'c1', done: true, doneAt: doneAt(day, 14) },
+        { id: 'lastnight', title: 'Ticked after midnight', areaId: 'c1', done: true, doneAt: doneAt('2026-09-11', 1) },
+        { id: 'yesterday', title: 'Ticked yesterday', areaId: 'c1', done: true, doneAt: doneAt('2026-09-09', 20) },
+        { id: 'ancient', title: 'Done, never stamped', areaId: 'c1', done: true }
+      ],
+      cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {},
+      ...over
+    });
+
+    const s = await storeWith(fixture());
+    const left = () => s.state.items.map((t) => t.id).sort().join(',');
+
+    check('nothing unfinished is ever swept',
+      s.doneBefore(day).every((t) => t.done));
+    check('a task ticked earlier today survives its own day',
+      !s.doneBefore(day).some((t) => t.id === 'today'),
+      'nothing may vanish while you are looking at it');
+    check('one ticked at 1am belongs to the day that was ending, not the new one',
+      !s.doneBefore(day).some((t) => t.id === 'lastnight'),
+      'at 1am on the 11th the planner is still on the 10th, and the 10th is not over');
+    check('...and goes at the reset that ends it',
+      s.doneBefore('2026-09-11').some((t) => t.id === 'lastnight'),
+      'ticked before the reset, gone at the reset — the same rule as the afternoon');
+    check('one ticked yesterday goes', s.doneBefore(day).some((t) => t.id === 'yesterday'));
+    check('one done before doneAt existed goes too',
+      s.doneBefore(day).some((t) => t.id === 'ancient'),
+      'no stamp means older than any day this could be asked about');
+
+    const gone = s.sweepDone(day);
+    check('the sweep returns what it took',
+      gone.map((t) => t.id).sort().join(',') === 'ancient,yesterday');
+    check('...and leaves the rest', left() === 'lastnight,open,today');
+    check('sweeping twice takes nothing the second time',
+      s.sweepDone(day).length === 0 && left() === 'lastnight,open,today');
+
+    // an undo puts a task back, and putting it back re-renders, and a render
+    // sweeps — so the caller names what it has already spared
+    s.state.items.push(...gone);
+    const spared = new Set(gone.map((t) => t.id));
+    check('a spared id is not offered again', s.doneBefore(day, spared).length === 0);
+    check('...and survives the next sweep',
+      s.sweepDone(day, spared).length === 0 && left() === 'ancient,lastnight,open,today,yesterday');
+    check('one nobody spared still goes',
+      s.sweepDone(day, new Set(['ancient'])).map((t) => t.id).join(',') === 'yesterday');
+  }
+
+  {
+    const s = await storeWith({
+      version: 18,
+      areas: [], items: [{ id: 't1', title: 'Done', done: true, doneAt: '2026-09-01T10:00:00' }],
+      settings: { sweepDone: false }
+    });
+    check('the switch really stops it', s.doneBefore('2026-09-30').length === 0);
+    check('...and nothing is deleted', s.sweepDone('2026-09-30').length === 0 && s.state.items.length === 1);
+    check('the switch travels between devices',
+      s.snapshotRows().find((r) => r.kind === 'meta').data.settings.sweepDone === false);
+
+    const on = await storeWith({ version: 18, areas: [], items: [] });
+    check('and it is on unless turned off', on.state.settings.sweepDone === true);
+  }
+
+  {
+    // a swept task named in a day's top three has to leave it as well, or
+    // emptyNote() keeps counting a note that renders as nothing
+    const s = await storeWith({
+      version: 18,
+      areas: [],
+      items: [
+        { id: 'a', title: 'Gone', done: true, doneAt: '2026-09-01T10:00:00' },
+        { id: 'b', title: 'Kept' }
+      ],
+      notes: { '2026-09-01': { focus: '', text: '', tomorrow: '', top3: ['a', 'b'], journal: {} } }
+    });
+    s.sweepDone('2026-09-02');
+    check('a swept task is taken out of the top three',
+      s.state.notes['2026-09-01'].top3.join() === 'b');
+
+    const s2 = await storeWith({
+      version: 18, areas: [],
+      items: [{ id: 'a', title: 'Gone', done: true, doneAt: '2026-09-01T10:00:00' }],
+      notes: { '2026-09-01': { focus: '', text: '', tomorrow: '', top3: ['a'], journal: {} } }
+    });
+    s2.sweepDone('2026-09-02');
+    check('...and a note left holding nothing stops syncing',
+      !s2.snapshotRows().some((r) => r.kind === 'note' && r.id === '2026-09-01'));
+  }
+
   /* ---- deleting an area leaves its work behind ---- */
 
   {

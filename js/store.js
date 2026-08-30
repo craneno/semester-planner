@@ -89,6 +89,7 @@ const DEFAULTS = () => {
       fonts: { heading: '', body: '', mono: '' },
       scale: 1,
       hour12: true,
+      sweepDone: true,  // delete finished work at the day reset
       weekStart: 0,     // Sunday
       dayStart: 7,      // week grid first hour
       dayEnd: 23,
@@ -552,6 +553,51 @@ export function upsertItem(patch) {
 export function deleteItem(id) {
   const i = state.items.findIndex((t) => t.id === id);
   if (i >= 0) state.items.splice(i, 1);
+}
+
+/* ---------------- sweeping finished work ----------------
+   A list you never clear stops being a list of what to do. At the day reset
+   everything ticked on a day that has now ended is deleted, so the morning
+   starts with only what is left.
+
+   Judged by the *planner* day `doneAt` falls in, not by the calendar date, or
+   a task ticked at half past midnight would be swept three hours later having
+   been finished the same evening. A task done since the reset always survives
+   the day it was done in — nothing vanishes while you are looking at it. */
+
+/** Whether a task is old enough to sweep — its own `doneAt` decides. */
+const sweepable = (t, day) => {
+  if (!t.done) return false;
+  // no stamp at all: it was ticked long before doneAt existed, so it is older
+  // than any day this could be asked about
+  if (!t.doneAt) return true;
+  return today(new Date(t.doneAt)) < day;
+};
+
+/** What the next sweep would take, minus any ids in `spare`. Lets a caller
+    skip committing for nothing, and lets an undone sweep stay undone. */
+export const doneBefore = (day = today(), spare = null) =>
+  (state.settings.sweepDone === false ? []
+    : state.items.filter((t) => sweepable(t, day) && !spare?.has(t.id)));
+
+/**
+ * Delete every task finished before `day`, and return what went — the caller
+ * offers it back as an undo.
+ *
+ * A day's top three names tasks by id, so a swept one has to be taken out of
+ * it as well; left in, `emptyNote()` would keep counting a note that renders
+ * as nothing and sync it for ever. Those references are not restored by an
+ * undo, which is a smaller loss than a note that cannot die.
+ */
+export function sweepDone(day = today(), spare = null) {
+  const gone = doneBefore(day, spare);
+  if (!gone.length) return gone;
+  const ids = new Set(gone.map((t) => t.id));
+  state.items = state.items.filter((t) => !ids.has(t.id));
+  for (const n of Object.values(state.notes)) {
+    if ((n.top3 || []).some((id) => ids.has(id))) n.top3 = n.top3.filter((id) => !ids.has(id));
+  }
+  return gone;
 }
 
 export function toggleItem(id, force) {
@@ -1356,7 +1402,7 @@ export function parseQuickAdd(input) {
    Device-specific settings — Google tokens, Supabase credentials, sync
    cursors — are deliberately NOT synced: they belong to the device. */
 
-export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'weekStart', 'dayStart', 'dayEnd'];
+export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'sweepDone', 'weekStart', 'dayStart', 'dayEnd'];
 
 // a note holding only a line for tomorrow, or only a journal entry, is not
 // empty: dropped here, neither would ever reach another device

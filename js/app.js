@@ -1,8 +1,8 @@
 // app.js — shell, router, quick add.
 
-import { h, $, clear, fmtDate, fmtTime, debounce } from './util.js';
+import { h, $, clear, fmtDate, fmtTime, today, debounce } from './util.js';
 import {
-  state, commit, subscribe, parseQuickAdd, upsertItem, nowNext,
+  state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
   reorderAreas, parseLinkAdd, addLink
 } from './store.js';
@@ -66,6 +66,7 @@ export function go(key) {
 const isCurrent = (kind, id) => current.kind === kind && current.id === id;
 
 export function navigate() {
+  sweep();
   current = route();
   paintChrome();
   const host = $('#view');
@@ -213,6 +214,35 @@ function paintChrome() {
   paintSync();
 }
 
+/* ---------------- the day reset ----------------
+   Everything ticked on a day that has ended is deleted, and the morning starts
+   with what is left. Run before the view is built rather than from inside one,
+   so no screen renders a task that is about to disappear from under it.
+
+   Checked rather than committed: `doneBefore()` is a filter, and committing on
+   every navigation would stamp and sync rows on a day when nothing was
+   finished at all. */
+
+/* An undone sweep has to stay undone: putting a task back is a commit, a
+   commit re-renders, and a render sweeps — so without this the task would
+   vanish again on the way back. Ids only, for this session, emptied at the
+   reset that ends the day they were spared from. */
+const spared = new Set();
+
+function sweep() {
+  if (!doneBefore(today(), spared).length) return;
+  let gone = [];
+  // not a source app.js re-renders for — navigate() is already on its way
+  commit(() => { gone = sweepDone(today(), spared); }, { source: 'sweep' });
+  toast(`Cleared ${gone.length} finished ${gone.length === 1 ? 'task' : 'tasks'}`, {
+    action: 'Undo',
+    onAction: () => commit(() => {
+      for (const t of gone) spared.add(t.id);
+      state.items.push(...gone);
+    }, { source: 'editor' })
+  });
+}
+
 /* ---------------- what's on now ----------------
    The one thing the topbar says about today, on every screen: what you are in
    the middle of, or what is coming. Small, and never a count of anything. */
@@ -235,8 +265,18 @@ function paintNextUp() {
 }
 
 /** A clock the page has no other reason to keep: "Now" stops being true on its
- *  own, with nothing committed and no render to hang the repaint off. */
-setInterval(() => { try { paintNextUp(); } catch { /* pre-boot */ } }, 30_000);
+ *  own, with nothing committed and no render to hang the repaint off — and so
+ *  does the day itself, on a tab left open past 3am. */
+let shownDay = today();
+setInterval(() => {
+  try {
+    paintNextUp();
+    if (today() === shownDay) return;
+    shownDay = today();
+    spared.clear();    // yesterday's reprieve does not carry into today
+    navigate();        // sweeps, then redraws the new day
+  } catch { /* pre-boot */ }
+}, 30_000);
 
 function paintStrip(sel, status, labels) {
   const strip = $(sel);

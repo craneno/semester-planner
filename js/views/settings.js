@@ -1,6 +1,6 @@
 // views/settings.js — semester, Google Calendar, appearance, data.
 
-import { h, clear, debounce } from '../util.js';
+import { h, clear, debounce, fmtTime, fromMin, DAY_RESET_HOUR } from '../util.js';
 import { state, commit, exportJson, importJson } from '../store.js';
 import { toast, confirmDialog } from '../ui.js';
 import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
@@ -252,6 +252,13 @@ export function renderSettings(root, { navigate }) {
     h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
       field('Day grid starts', hourSelect('dayStart')),
       field('Day grid ends', hourSelect('dayEnd'))),
+    /* The one setting here that deletes something, so it says both what and
+       when — "at the reset" means nothing without the hour beside it. */
+    toggle(
+      `Clear finished work at the ${fmtTime(fromMin(DAY_RESET_HOUR * 60), s.hour12)} day reset`,
+      'Anything ticked before the reset is deleted. Today’s stays until tomorrow.',
+      s.sweepDone !== false,
+      (v) => { commit(() => { s.sweepDone = v; }); navigate(); }),
     h('button', {
       class: 'btn ghost', style: { marginTop: '10px' },
       onclick: () => {
