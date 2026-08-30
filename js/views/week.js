@@ -4,7 +4,7 @@ import {
   h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel
 } from '../util.js';
 import {
-  state, commit, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor, weekNumber
+  state, commit, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -37,7 +37,6 @@ export function renderWeek(root, { navigate } = {}) {
     h('button', { class: 'btn sm', onclick: () => { anchor = today(); navigate(); } }, 'Today'),
     h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, 7); navigate(); }, 'aria-label': 'Next week' }, '›'),
     h('h2', { style: { marginLeft: '6px' } }, span),
-    h('span', { class: 'eyebrow' }, `Week ${weekNumber(days[0])}`),
     h('div', { style: { flex: 1 } }),
     h('span', { class: 'eyebrow num', title: 'Planned work this week' },
       `${load.count} tasks · ${fmtHours(load.mins)}`),

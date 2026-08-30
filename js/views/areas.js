@@ -179,7 +179,35 @@ export function renderArea(root, { navigate, go }, areaId) {
   }
 
   pad.append(linkSection(a, navigate));
+  pad.append(freewriteSection(a));
   root.append(pad);
+  fitBoxes(pad);
+}
+
+/* ---------------- the freewrite ----------------
+   One box per area, below everything else: somewhere to think in sentences
+   about work that is otherwise only ever a list of rows. No prompt, no dates,
+   no history — the journal is where writing is kept a day at a time, and this
+   is the page's margin.
+
+   It saves as you type all the same. "Nothing special" means no button to
+   press and nothing to name, not a box that throws your thinking away when
+   you click Week. */
+
+function freewriteSection(area) {
+  const save = debounce((text) => commit(() => upsertArea({ id: area.id, freewrite: text })), 500);
+  const box = h('textarea', {
+    class: 'journal-box freewrite-box', rows: '1',
+    'aria-label': `Freewrite for ${area.name}`,
+    oninput: (e) => { autosize(e.target); save(e.target.value); }
+  }, area.freewrite || '');
+
+  return h('section', { class: 'card journal freewrite' },
+    h('div', { class: 'card-h' },
+      h('span', { class: 'eyebrow' }, 'Freewrite'),
+      h('div', { style: { flex: 1 } }),
+      h('span', { class: 'eyebrow', style: { color: 'var(--ink-3)' } }, 'saves itself')),
+    h('div', { class: 'card-b' }, box));
 }
 
 /* ---------------- the daily journal ----------------
@@ -188,16 +216,16 @@ export function renderArea(root, { navigate, go }, areaId) {
    Today is open; everything before it is a day at a time behind a dropdown,
    still editable, because a thought finished the next morning is normal. */
 
-function journalSection(area) {
-  const day = today();
-  const past = journalDates(area.id).filter((d) => d !== day);
-
-  /* Re-fit whenever a box's width changes rather than only when it is typed
-     in: a narrower window wraps the same words onto more lines, and the box
-     hides its overflow, so a height measured at one width silently cuts text
-     off at another. It also covers a box that had no width at all when it was
-     drawn, which is the only way to measure one wrongly. Made per render, so
-     it is dropped with the boxes it watches. */
+/**
+ * Grow every writing box on the page to fit what is in it, and keep doing it.
+ *
+ * Re-fits on width rather than only on typing: a narrower window wraps the
+ * same words onto more lines, and a box that hides its overflow would cut
+ * text off silently. It also covers a box that had no width at all when it was
+ * drawn, which is the only way to measure one badly wrong. Made per render, so
+ * it is dropped with the boxes it watches.
+ */
+function fitBoxes(root) {
   const seen = new WeakMap();
   const fitter = new ResizeObserver((entries) => {
     for (const e of entries) {
@@ -208,11 +236,13 @@ function journalSection(area) {
       autosize(e.target);
     }
   });
-  const box = (date) => {
-    const el = entryBox(area, date);
-    fitter.observe(el);
-    return el;
-  };
+  for (const el of root.querySelectorAll('.journal-box')) fitter.observe(el);
+}
+
+function journalSection(area) {
+  const day = today();
+  const past = journalDates(area.id).filter((d) => d !== day);
+  const box = (date) => entryBox(area, date);
 
   const card = h('section', { class: 'card journal' },
     h('div', { class: 'card-h' },

@@ -1,10 +1,10 @@
 // store.js — single source of truth. Local-first, localStorage-backed.
 
-import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './util.js';
+import { uid, today, addDays, toMin, fromMin, diffDays } from './util.js';
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -50,6 +50,13 @@ const LEGACY_TYPE = {
    life. Declared up here because migrate() runs at import and needs it. */
 export const WISH_STATUSES = ['wanted', 'ordered', 'shipped', 'delivered'];
 
+/* Two ways to block out a stretch of the term on the chart. A focus is the
+   theme of a few weeks and carries nothing but its name; a sprint is a work
+   package and carries the deliverables that say when it is finished. The
+   difference is deliberate: making every band demand deliverables would mean
+   inventing them, and an invented deliverable is worse than none. */
+export const SPRINT_KINDS = ['focus', 'sprint'];
+
 export const AREA_COLORS = [
   '#3C6E8F', '#7A5C9E', '#2F7D62', '#B4713C', '#9E4A5C',
   '#4B6BA8', '#7E7A2E', '#5A6572', '#A0522D', '#3F7A7A'
@@ -70,6 +77,7 @@ const DEFAULTS = () => {
     cards: [],          // captured notes, unfiled until given an areaId
     links: [],          // saved links, filed to an area — the "come back to this" pile
     wishlist: [],       // things wanted, and the deliveries they turn into
+    sprints: [],        // focuses and sprints — stretches of term drawn on the chart
     habits: [],         // daily habits, ticked per day
     habitLog: {},       // 'YYYY-MM-DD' -> [habitId] ticked that day
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
@@ -81,7 +89,7 @@ const DEFAULTS = () => {
       fonts: { heading: '', body: '', mono: '' },
       scale: 1,
       hour12: true,
-      weekStart: 1,     // Monday
+      weekStart: 0,     // Sunday
       dayStart: 7,      // week grid first hour
       dayEnd: 23,
       gcal: {
@@ -148,6 +156,26 @@ function migrate(raw) {
     createdAt: w.createdAt || new Date().toISOString(),
     updatedAt: w.updatedAt || w.createdAt || new Date().toISOString()
   }));
+  s.sprints = (Array.isArray(raw.sprints) ? raw.sprints : []).map((p) => {
+    let start = p.start || p.end || null;
+    let end = p.end || p.start || null;
+    if (start && end && start > end) [start, end] = [end, start];
+    return start && end ? {
+      id: p.id || uid('s'),
+      areaId: p.areaId || null,
+      kind: SPRINT_KINDS.includes(p.kind) ? p.kind : 'focus',
+      title: String(p.title || '').trim() || 'Untitled',
+      start, end,
+      // a focus keeps whatever it was given rather than having it thrown
+      // away: switching a band back to a sprint should find its list intact
+      deliverables: (Array.isArray(p.deliverables) ? p.deliverables : []).map((d) => ({
+        id: d.id || uid('d'), text: String(d.text || '').trim(), done: !!d.done
+      })).filter((d) => d.text),
+      notes: p.notes || '',
+      createdAt: p.createdAt || new Date().toISOString(),
+      updatedAt: p.updatedAt || p.createdAt || new Date().toISOString()
+    } : null;
+  }).filter(Boolean);
   s.habits = (Array.isArray(raw.habits) ? raw.habits : []).map((x, i) => ({
     id: x.id || uid('h'),
     name: x.name || 'Untitled habit',
@@ -174,6 +202,9 @@ function migrate(raw) {
     // absent means no, which is the quiet default: an area nobody asked to
     // journal in does not grow a writing box on its page
     journal: !!a.journal,
+    // the scratch pad every area gets. A string, never null, so a box can be
+    // bound to it without a guard at every read
+    freewrite: typeof a.freewrite === 'string' ? a.freewrite : '',
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
     grading: Array.isArray(a.grading) ? a.grading : []
   }));
@@ -216,6 +247,11 @@ function migrate(raw) {
     const j = s.areas.find((a) => a.category === 'personal' && a.name.toLowerCase() === 'journal');
     if (j) j.journal = true;
   }
+  // v18: the week begins on Sunday. Pinned like a seed rather than left to the
+  // default, or an install that has already saved its settings would keep
+  // Monday for ever — and pinned rather than forced, so Settings can still
+  // put it back and the next bump will not overrule that.
+  if (from < 18) s.settings.weekStart = 0;
 
   // the habit page is useless empty, so give it the ones it was built for.
   // Pinned per version like the area seeds: a habit deleted on purpose must
@@ -419,18 +455,6 @@ export function workloadFor(dates) {
   return { mins, count };
 }
 
-export function semesterProgress() {
-  const { start, end } = state.semester;
-  const total = diffDays(start, end) || 1;
-  const gone = diffDays(start, today());
-  return Math.max(0, Math.min(1, gone / total));
-}
-
-export function weekNumber(date = today()) {
-  const s = startOfWeek(state.semester.start, state.settings.weekStart);
-  return Math.floor(diffDays(s, date) / 7) + 1;
-}
-
 /** Recurring class meetings that land on a given date. */
 export function classesOn(date) {
   const d = new Date(date + 'T00:00:00');
@@ -456,6 +480,49 @@ export function eventsOn(date) {
   return state.events
     .filter((e) => e.date === date)
     .sort((a, b) => (a.allDay ? -1 : 0) - (b.allDay ? -1 : 0) || toMin(a.start) - toMin(b.start));
+}
+
+/* ---------------- what is on today ----------------
+   The day as one ordered list, whatever each thing came from: a class that
+   recurs, an event Google holds, a block of work planned here. The topbar
+   reads it, and so could anything else that wants to know what is next. */
+
+/** Minutes since midnight, now. Passed in everywhere below so the callers are testable. */
+export const minsNow = (d = new Date()) => d.getHours() * 60 + d.getMinutes();
+
+/** Everything with a time on it today, earliest first. All-day things have no
+ *  place on a "what's next" line, so they are left out. */
+export function dayTimeline(date = today()) {
+  const out = [];
+  for (const c of classesOn(date)) {
+    out.push({ kind: 'class', title: c.title, start: c.start, end: c.end });
+  }
+  for (const e of eventsOn(date)) {
+    if (e.allDay || !e.start) continue;
+    out.push({ kind: 'event', title: e.title, start: e.start, end: e.end || fromMin(toMin(e.start) + 60) });
+  }
+  for (const t of itemsPlannedOn(date)) {
+    if (!t.plan.start || t.done) continue;
+    out.push({
+      kind: 'plan', title: t.title, id: t.id,
+      start: t.plan.start, end: fromMin(Math.min(24 * 60, toMin(t.plan.start) + (t.plan.mins || 60)))
+    });
+  }
+  return out.sort((a, b) => toMin(a.start) - toMin(b.start));
+}
+
+/**
+ * What is happening right now, or failing that what is next — null if the day
+ * holds nothing else. Something in progress wins over something later: at
+ * 9:30 in a 9–10 lecture the useful answer is the lecture, not the next thing
+ * after it.
+ */
+export function nowNext(date = today(), mins = minsNow()) {
+  const list = dayTimeline(date);
+  const live = list.find((e) => toMin(e.start) <= mins && mins < toMin(e.end));
+  if (live) return { ...live, live: true };
+  const next = list.find((e) => toMin(e.start) > mins);
+  return next ? { ...next, live: false } : null;
 }
 
 /* ---------------- mutations ---------------- */
@@ -502,7 +569,7 @@ export function upsertArea(patch) {
     a = {
       id: uid('a'), name: 'New area', category: 'course', location: '',
       color: AREA_COLORS[state.areas.length % AREA_COLORS.length],
-      schedule: [], grading: [], archived: false, onChart: true, journal: false,
+      schedule: [], grading: [], archived: false, onChart: true, journal: false, freewrite: '',
       order: state.areas.length,
       updatedAt: new Date().toISOString(), ...patch
     };
@@ -531,6 +598,77 @@ export function deleteArea(id) {
   if (i >= 0) state.areas.splice(i, 1);
   for (const t of state.items) if (t.areaId === id) t.areaId = null;
   for (const l of state.links) if (l.areaId === id) l.areaId = null;
+  // a band is drawn in its area's lane and nowhere else, so an orphan is not
+  // an orphan — it is a thing with no way back onto the screen
+  state.sprints = state.sprints.filter((p) => p.areaId !== id);
+}
+
+/* ---------------- focuses and sprints ----------------
+   A stretch of the term, swept out on the chart. Both kinds are the same
+   object; `kind` decides whether the deliverables are asked for and drawn.
+
+   They ride in the meta row for sync, like habits and links: the planner_rows
+   CHECK constraint only knows the kinds it was created with, and a new one
+   would mean an ALTER run by hand before another device could see any of
+   this. */
+
+export const sprintById = (id) => state.sprints.find((p) => p.id === id) || null;
+
+export const sprintsForArea = (areaId) =>
+  state.sprints.filter((p) => p.areaId === areaId)
+    .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+
+/** Deliverables ticked off, 0–1. A focus has none, and reports nothing. */
+export function sprintProgress(p) {
+  const list = p.deliverables || [];
+  if (!list.length) return null;
+  return list.filter((d) => d.done).length / list.length;
+}
+
+export function upsertSprint(patch) {
+  const now = new Date().toISOString();
+  let p = patch.id ? sprintById(patch.id) : null;
+  if (p) Object.assign(p, patch, { updatedAt: now });
+  else {
+    p = {
+      id: uid('s'), areaId: null, kind: 'focus', title: 'Untitled',
+      start: today(), end: today(), deliverables: [], notes: '',
+      createdAt: now, updatedAt: now, ...patch
+    };
+    state.sprints.push(p);
+  }
+  if (p.start > p.end) { const x = p.start; p.start = p.end; p.end = x; }
+  if (!SPRINT_KINDS.includes(p.kind)) p.kind = 'focus';
+  return p;
+}
+
+export function deleteSprint(id) {
+  const i = state.sprints.findIndex((p) => p.id === id);
+  if (i >= 0) state.sprints.splice(i, 1);
+}
+
+export function addDeliverable(sprintId, text) {
+  const p = sprintById(sprintId);
+  if (!p || !String(text).trim()) return null;
+  const d = { id: uid('d'), text: String(text).trim(), done: false };
+  p.deliverables.push(d);
+  p.updatedAt = new Date().toISOString();
+  return d;
+}
+
+export function updateDeliverable(sprintId, id, patch) {
+  const d = sprintById(sprintId)?.deliverables.find((x) => x.id === id);
+  if (!d) return null;
+  Object.assign(d, patch);
+  sprintById(sprintId).updatedAt = new Date().toISOString();
+  return d;
+}
+
+export function deleteDeliverable(sprintId, id) {
+  const p = sprintById(sprintId);
+  if (!p) return;
+  p.deliverables = p.deliverables.filter((d) => d.id !== id);
+  p.updatedAt = new Date().toISOString();
 }
 
 /* ---------------- links ----------------
@@ -1247,7 +1385,8 @@ export function snapshotRows() {
     data: {
       semester: state.semester, settings,
       habits: state.habits, habitLog: state.habitLog,
-      links: state.links, wishlist: state.wishlist
+      links: state.links, wishlist: state.wishlist,
+      sprints: state.sprints
     }
   });
   return rows;
@@ -1284,6 +1423,7 @@ export function applyRow({ kind, id, data, deleted }) {
       // and must not wipe the pile just by pushing its meta row
       if (Array.isArray(data.links)) state.links = data.links;
       if (Array.isArray(data.wishlist)) state.wishlist = data.wishlist;
+      if (Array.isArray(data.sprints)) state.sprints = data.sprints;
       return true;
     default: return false;
   }

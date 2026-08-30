@@ -1,8 +1,8 @@
 // app.js — shell, router, quick add.
 
-import { h, $, clear, fmtDate, debounce } from './util.js';
+import { h, $, clear, fmtDate, fmtTime, debounce } from './util.js';
 import {
-  state, commit, subscribe, parseQuickAdd, upsertItem, semesterProgress, weekNumber,
+  state, commit, subscribe, parseQuickAdd, upsertItem, nowNext,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
   reorderAreas, parseLinkAdd, addLink
 } from './store.js';
@@ -194,11 +194,7 @@ function paintChrome() {
     current: isCurrent('view', 'settings'), onclick: () => go('settings')
   })));
 
-  // brand
-  const meta = $('#sem-meta');
-  clear(meta).append(
-    h('span', { class: 'eyebrow num' }, `Week ${weekNumber()}`),
-    h('span', { class: 'eyebrow num' }, `${Math.round(semesterProgress() * 100)}%`));
+  paintNextUp();
 
   // mobile tabs — plain views and categories side by side
   const tabs = $('#tabbar');
@@ -216,6 +212,31 @@ function paintChrome() {
   $('#view-title').textContent = pageTitle();
   paintSync();
 }
+
+/* ---------------- what's on now ----------------
+   The one thing the topbar says about today, on every screen: what you are in
+   the middle of, or what is coming. Small, and never a count of anything. */
+
+function paintNextUp() {
+  const host = $('#nextup');
+  if (!host) return;
+  const up = nowNext();
+  clear(host);
+  if (!up) {
+    host.classList.remove('is-live');
+    host.append(h('span', { class: 'nextup-t' }, 'No scheduled events today'));
+    return;
+  }
+  host.classList.toggle('is-live', up.live);
+  host.append(
+    h('span', { class: 'eyebrow' }, up.live ? 'Now' : 'Next'),
+    h('span', { class: 'nextup-t', title: up.title }, up.title),
+    h('span', { class: 'eyebrow num' }, fmtTime(up.start, state.settings.hour12)));
+}
+
+/** A clock the page has no other reason to keep: "Now" stops being true on its
+ *  own, with nothing committed and no render to hang the repaint off. */
+setInterval(() => { try { paintNextUp(); } catch { /* pre-boot */ } }, 30_000);
 
 function paintStrip(sel, status, labels) {
   const strip = $(sel);
@@ -336,6 +357,9 @@ function boot() {
 
   // re-render on any state change that came from outside this view
   subscribe((meta) => {
+    // cheap, and almost anything committed can change what is on next —
+    // including a block planned from a panel that must not repaint the view
+    paintNextUp();
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
       || meta?.source === 'editor') navigate();
   });

@@ -15,14 +15,15 @@
 
 import {
   h, clear, fmtDate, ymd, monthKey, monthLabel, fmtDuration, diffDays, addDays,
-  parseYmd, startOfWeek, today, MONTHS
+  parseYmd, startOfWeek, today, clamp, MONTHS
 } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, ITEM_TYPES, progress, chartAreas,
-  areasInCategory, areaColor, AREA_CATEGORIES
+  areasInCategory, areaColor, AREA_CATEGORIES, sprintsForArea, sprintProgress
 } from '../store.js';
 import { areaTag, dueChip, priorityTag, meta } from '../ui.js';
 import { openItem } from '../editor.js';
+import { openSprint } from '../sprint.js';
 import { pushItem } from '../gcal.js';
 
 const filters = { area: '', type: '', status: 'open', q: '' };
@@ -119,6 +120,26 @@ export function itemSpan(t, range) {
   const a = Math.max(0, diffDays(range.start, from));
   const b = Math.min(range.days - 1, diffDays(range.start, to));
   return { from: a, to: b, days: b - a + 1, milestone: !plan, clipStart, clipEnd };
+}
+
+/**
+ * Where a focus or a sprint sits, in days from the first day of term.
+ *
+ * Same clipping as an item: a band that began before the term still shows,
+ * with the cut end squared off, because "this started before you got here" is
+ * worth drawing. One entirely outside the term is left out.
+ */
+export function bandSpan(p, range) {
+  if (!p.start || !p.end) return null;
+  const from = p.start < p.end ? p.start : p.end;
+  const to = p.start < p.end ? p.end : p.start;
+  if (to < range.start || from > range.end) return null;
+  const a = Math.max(0, diffDays(range.start, from));
+  const b = Math.min(range.days - 1, diffDays(range.start, to));
+  return {
+    from: a, to: b, days: b - a + 1,
+    clipStart: from < range.start, clipEnd: to > range.end
+  };
 }
 
 /**
@@ -249,7 +270,7 @@ function renderChart(pad, { navigate, go, width }) {
     for (const a of mine) {
       const packed = packLanes(byArea.get(a.id));
       drawn += packed.rows.length;
-      body.append(areaLane(a, packed, go, range));
+      body.append(areaLane(a, packed, { go, navigate }, range, dayW));
     }
   }
 
@@ -264,7 +285,11 @@ function renderChart(pad, { navigate, go, width }) {
     h('span', { class: 'gantt-key' },
       h('span', { class: 'key-bar' }), 'planned work',
       h('span', { class: 'key-mile' }), 'deadline',
+      h('span', { class: 'key-focus' }), 'focus',
+      h('span', { class: 'key-sprint' }), 'sprint',
       h('span', { class: 'key-now' }), 'today'),
+    h('span', { class: 'eyebrow', style: { marginLeft: '12px' } },
+      'drag across a lane to block one out'),
     h('div', { style: { flex: 1 } }),
     h('span', { class: 'eyebrow num', title: 'A chart only shows what has a date on it' },
       [`${drawn} drawn`,
@@ -305,11 +330,47 @@ function chartControls(navigate, onCount) {
       h('span', {}, 'Show finished')));
 }
 
-function areaLane(area, packed, go, range) {
+function areaLane(area, packed, { go, navigate }, range, dayW) {
+  // bands first, at the top of the lane, with the work stacked underneath:
+  // a focus is the frame the items sit inside, and reading it the other way
+  // round means finding the frame at the bottom of a tall lane
+  const bands = packLanes(
+    sprintsForArea(area.id).map((p) => ({ p, ...bandSpan(p, range) })).filter((s) => s.days)
+  );
+  const bandLanes = bands.rows.length ? bands.lanes : 0;
+  const offset = bandLanes * LANE_H;
+
   const track = h('div', {
-    class: 'gantt-track',
-    style: { height: `${packed.lanes * LANE_H + 8}px` }
+    class: 'gantt-track is-lane',
+    style: { height: `${(bandLanes + packed.lanes) * LANE_H + 8}px` }
   });
+
+  for (const s of bands.rows) {
+    const p = s.p;
+    const pct = sprintProgress(p);
+    const done = pct !== null ? p.deliverables.filter((d) => d.done).length : 0;
+    track.append(h('button', {
+      class: `gantt-span is-${p.kind}`
+        + (s.clipStart ? ' clip-l' : '') + (s.clipEnd ? ' clip-r' : ''),
+      style: {
+        left: `calc(var(--day-w) * ${s.from})`,
+        width: `calc(var(--day-w) * ${s.days})`,
+        top: `${4 + s.lane * LANE_H}px`,
+        '--c': area.color
+      },
+      title: `${p.kind === 'sprint' ? 'Sprint' : 'Focus'} · ${p.title}\n`
+        + `${fmtDate(p.start)} → ${fmtDate(p.end)}`
+        + (pct === null ? '' : `\n${done}/${p.deliverables.length} delivered`),
+      onclick: () => openSprint(p.id, { onDone: navigate })
+    },
+    pct !== null
+      ? h('span', { class: 'gantt-fill', style: { width: `${Math.round(pct * 100)}%` } })
+      : null,
+    h('span', { class: 'gantt-span-t' }, p.title),
+    pct !== null
+      ? h('span', { class: 'gantt-span-n num' }, `${done}/${p.deliverables.length}`)
+      : null));
+  }
 
   for (const s of packed.rows) {
     const t = s.t;
@@ -321,7 +382,7 @@ function areaLane(area, packed, go, range) {
         + (s.clipStart ? ' clip-l' : '') + (s.clipEnd ? ' clip-r' : ''),
       style: {
         [s.flip ? 'right' : 'left']: `calc(var(--day-w) * ${s.flip ? range.days - 1 - s.to : s.from})`,
-        top: `${4 + s.lane * LANE_H}px`,
+        top: `${4 + offset + s.lane * LANE_H}px`,
         '--c': areaColor(t.areaId)
       },
       title: describeSpan(t, s),
@@ -334,7 +395,11 @@ function areaLane(area, packed, go, range) {
     h('span', { class: 'gantt-tag' }, s.label)));
   }
 
-  if (!packed.rows.length) track.append(h('span', { class: 'gantt-quiet' }, 'nothing dated'));
+  if (!packed.rows.length && !bands.rows.length) {
+    track.append(h('span', { class: 'gantt-quiet' }, 'nothing dated — drag to block out a focus'));
+  }
+
+  dragSpan(track, { area, range, dayW, navigate });
 
   return h('div', { class: 'gantt-row' },
     h('button', {
@@ -344,6 +409,77 @@ function areaLane(area, packed, go, range) {
     h('span', { class: 'bar', style: { background: area.color } }),
     h('span', { class: 'gantt-name' }, area.name)),
     track);
+}
+
+/**
+ * Sweep out a stretch of weeks in one area's lane — the calendar's drag, laid
+ * on its side. Whole days: a focus that started at half past two is not a
+ * thing, and the chart could not draw the difference anyway.
+ *
+ * The press must land on the lane itself. Anything drawn in it — a bar, a band
+ * already there — belongs to whatever opens when it is clicked. Touch is left
+ * alone, as on the calendar: the same gesture scrolls a chart that is usually
+ * wider than the screen.
+ */
+function dragSpan(track, { area, range, dayW, navigate }) {
+  track.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || ev.pointerType === 'touch') return;
+    if (ev.target !== track) return;
+
+    // taken once, at the press: the lane does not move under the pointer, and
+    // a rect re-read mid-drag would jump if anything above it reflowed
+    const rect = track.getBoundingClientRect();
+    const dayAt = (e) => clamp(Math.floor((e.clientX - rect.left) / dayW), 0, range.days - 1);
+    const anchor = dayAt(ev);
+    const startX = ev.clientX;
+    let ghost = null, started = false, pend = null;
+
+    const paint = (e) => {
+      const a = Math.min(anchor, dayAt(e));
+      const b = Math.max(anchor, dayAt(e));
+      pend = { start: addDays(range.start, a), end: addDays(range.start, b) };
+      if (!ghost) {
+        ghost = h('div', { class: 'gantt-ghost', style: { '--c': area.color } }, h('span', {}));
+        track.append(ghost);
+      }
+      ghost.style.left = `calc(var(--day-w) * ${a})`;
+      ghost.style.width = `calc(var(--day-w) * ${b - a + 1})`;
+      ghost.firstChild.textContent = `${b - a + 1}d`;
+    };
+
+    const move = (e) => {
+      if (!started) {
+        if (Math.abs(e.clientX - startX) < 4) return;
+        started = true;
+        track.setPointerCapture?.(e.pointerId);
+        document.body.classList.add('is-sweeping', 'is-sweeping-x');
+      }
+      e.preventDefault();          // or the drag reads as a text selection
+      paint(e);
+    };
+
+    /** @param {boolean} fire — a cancelled gesture is not a finished one. */
+    const finish = (fire) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', onKey);
+      document.body.classList.remove('is-sweeping', 'is-sweeping-x');
+      ghost?.remove();
+      ghost = null;
+      if (fire && started && pend) {
+        openSprint({ areaId: area.id, ...pend }, { onDone: navigate });
+      }
+    };
+    const up = () => finish(true);
+    const cancel = () => finish(false);
+    const onKey = (e) => { if (e.key === 'Escape') cancel(); };
+
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', onKey);
+  });
 }
 
 function describeSpan(t, s) {

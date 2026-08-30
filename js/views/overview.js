@@ -9,8 +9,8 @@ import {
   toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce
 } from '../util.js';
 import {
-  state, commit, toggleItem, upcoming, overdue, workloadFor, semesterProgress,
-  weekNumber, categoryLoad, note, carryForward, pendingTomorrow, areaColor,
+  state, commit, toggleItem, upcoming, overdue, workloadFor,
+  categoryLoad, note, carryForward, pendingTomorrow, areaColor,
   areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
@@ -28,7 +28,6 @@ export function renderOverview(root, { navigate, go }) {
   const load = workloadFor(days);
   const late = overdue();
   const soon = upcoming(14);
-  const pct = Math.round(semesterProgress() * 100);
 
   // Last night's line becomes today's focus, before anything reads the note.
   // Checked first so an ordinary render writes nothing, and tagged so app.js
@@ -42,13 +41,11 @@ export function renderOverview(root, { navigate, go }) {
       : load.count <= 9 ? 'A steady week ahead.' : 'A busy week ahead.';
 
   pad.append(h('section', { style: { marginBottom: '22px' } },
-    h('div', { class: 'eyebrow' }, `${state.semester.name} · Week ${weekNumber()} · ${pct}% elapsed`),
+    h('div', { class: 'eyebrow' }, state.semester.name),
     h('h1', { style: { margin: '6px 0 8px' } }, headline),
     h('p', { style: { margin: 0, color: 'var(--ink-2)' } },
       `${load.count} ${load.count === 1 ? 'task' : 'tasks'} · about ${fmtHours(load.mins)} of work`
-      + (late.length ? ` · ${late.length} past due` : '')),
-    h('div', { class: 'meter', style: { marginTop: '14px', maxWidth: '460px' } },
-      h('span', { style: { width: pct + '%' } }))));
+      + (late.length ? ` · ${late.length} past due` : ''))));
 
   pad.append(captureStrip(navigate));
   pad.append(unfiledQueue(navigate, go));

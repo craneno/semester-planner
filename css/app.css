@@ -122,7 +122,6 @@ a { color: var(--accent); }
   font-family: var(--font-heading); font-weight: 600; font-size: calc(15px * var(--scale));
   letter-spacing: -.01em; display: block; width: 100%; border: 0; background: transparent; padding: 0;
 }
-.brand .sem-meta { margin-top: 3px; display: flex; gap: 8px; align-items: center; }
 
 .rail { flex: 1; overflow-y: auto; padding: 0 8px; }
 .nav-item {
@@ -182,6 +181,17 @@ a { color: var(--accent); }
 .quickadd:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .quickadd input { flex: 1; border: 0; outline: 0; background: transparent; font-size: calc(13.5px * var(--scale)); }
 .quickadd .hint { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); white-space: nowrap; }
+
+/* what is on now, or next — the one thing every screen says about today */
+.nextup {
+  flex: none; min-width: 0; max-width: 300px;
+  display: flex; align-items: baseline; gap: 7px;
+  color: var(--ink-3); font-size: calc(12px * var(--scale));
+}
+.nextup .eyebrow { flex: none; }
+.nextup.is-live .eyebrow { color: var(--accent); }
+.nextup-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.nextup.is-live .nextup-t { color: var(--ink); }
 
 .view { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 /* the week view manages its own scrolling so the tray stays reachable while dragging */
@@ -411,6 +421,8 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 }
 /* the pointer is drawing, so nothing under it should look like text */
 body.is-sweeping, body.is-sweeping * { cursor: ns-resize; user-select: none; }
+/* the chart's sweep runs the other way — same gesture, laid on its side */
+body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 
 .time-range { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .time-range input { width: auto; min-width: 116px; }
@@ -519,6 +531,9 @@ body.is-sweeping, body.is-sweeping * { cursor: ns-resize; user-select: none; }
   .main { padding-bottom: calc(52px + env(safe-area-inset-bottom)); }
   .topbar { padding: 10px 12px; gap: 8px; }
   .topbar h1 { font-size: calc(17px * var(--scale)); }
+  /* the bar is already title plus quick add on a phone; the day itself is one
+     tap away on Overview, drawn at full size */
+  .nextup { display: none; }
   .pad { padding: 14px 12px 28px; }
   .peek { width: 100vw; border-left: 0; top: auto; height: 92dvh; border-radius: var(--r-lg) var(--r-lg) 0 0; transform: translateY(101%); }
   .peek.open { transform: none; }
@@ -776,6 +791,21 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .journal-day .eyebrow { color: var(--ink-3); margin-bottom: 4px; }
 .journal-day .journal-box { min-height: 0; font-size: calc(14px * var(--scale)); }
 
+/* the freewrite: the same box, shorter, at the bottom of every area page */
+.freewrite { margin-top: 18px; }
+.freewrite-box { min-height: 120px; }
+
+/* ---------------- focuses and sprints ---------------- */
+
+.sprint-form { display: flex; flex-direction: column; gap: 14px; }
+.deliv-blurb { margin: 2px 0 0; color: var(--ink-3); font-size: calc(12.5px * var(--scale)); }
+.deliv { display: flex; flex-direction: column; gap: 6px; }
+.deliv .group-h { margin-bottom: 2px; }
+.deliv-row { display: flex; align-items: center; gap: 9px; }
+.deliv-row.done .deliv-text { color: var(--ink-3); text-decoration: line-through; }
+.deliv-text { flex: 1; min-width: 0; }
+.deliv-add { border-style: dashed; }
+
 
 /* ---------------- links ---------------- */
 
@@ -1004,6 +1034,47 @@ body.rail-hidden .sidebar { display: none; }
   font: inherit; font-size: calc(11.5px * var(--scale)); line-height: 1;
 }
 .gantt-item:hover, .gantt-item:focus-visible { z-index: 2; color: var(--ink); }
+
+/* a focus or a sprint: a stretch of weeks, drawn as ground for the work to
+   sit on rather than as another bar competing with it */
+.gantt-span {
+  position: absolute; z-index: 1; overflow: hidden;
+  display: flex; align-items: center; gap: 6px;
+  height: 15px; padding: 0 6px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: var(--ink-2); cursor: pointer; text-align: left;
+  font: inherit; font-size: calc(11px * var(--scale)); line-height: 1;
+}
+.gantt-span:hover, .gantt-span:focus-visible {
+  z-index: 2; color: var(--ink);
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+}
+/* a focus has no deliverables, so it is drawn as an outline and nothing else;
+   a sprint is solid, and fills as its list is ticked off */
+.gantt-span.is-focus { border-style: dashed; }
+.gantt-span.is-sprint { border-width: 1px; }
+.gantt-fill {
+  position: absolute; inset: 0 auto 0 0; z-index: 0;
+  background: color-mix(in srgb, var(--c) 26%, transparent);
+}
+.gantt-span-t {
+  position: relative; z-index: 1;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gantt-span-n { position: relative; z-index: 1; flex: none; color: var(--ink-3); }
+.gantt-span.clip-l { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; }
+.gantt-span.clip-r { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+
+.gantt-track.is-lane { cursor: crosshair; }
+.gantt-ghost {
+  position: absolute; top: 3px; height: 17px; z-index: 5;
+  display: flex; align-items: center; padding: 0 5px;
+  border: 1px dashed var(--c); border-radius: 4px;
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  color: var(--ink-2); pointer-events: none;
+  font-family: var(--font-mono); font-size: calc(10px * var(--scale));
+}
 .gantt-shape { flex: none; height: 9px; min-width: 4px; border-radius: 3px; background: var(--c); }
 /* a deadline is a moment, so it is a point and not a one-day bar */
 .gantt-item.is-mile .gantt-shape {
@@ -1040,6 +1111,8 @@ body.rail-hidden .sidebar { display: none; }
 .key-bar { width: 16px; height: 8px; border-radius: 3px; background: var(--ink-3); }
 .key-mile { width: 8px; height: 8px; background: var(--ink-3); transform: rotate(45deg); }
 .key-now { width: 2px; height: 12px; background: var(--accent); }
+.key-focus { width: 18px; height: 9px; border: 1px dashed var(--ink-3); border-radius: 3px; }
+.key-sprint { width: 18px; height: 9px; border: 1px solid var(--ink-3); border-radius: 3px; background: var(--rule-soft); }
 
 
 /* ---------------- version history ---------------- */

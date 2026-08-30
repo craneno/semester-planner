@@ -15,7 +15,7 @@ import { suite, sharedStoreWith, storeWith } from './harness.js';
 const base = (over = {}) => ({
   // the current schema, so no version's seeds land in a fixture that is
   // counting areas
-  version: 16,
+  version: 18,
   semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
   areas: [
     { id: 'c1', name: 'Thermodynamics', category: 'course', order: 1 },
@@ -85,6 +85,29 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
       })());
     check('the first day of term is day zero', span({ due: '2026-09-01' }).from === 0);
     check('the last day of term is the last day', span({ due: '2026-12-01' }).to === 91);
+  }
+
+  /* ---- where a focus or a sprint sits ---- */
+
+  {
+    const bs = (p) => chart.bandSpan(p, range);
+
+    check('a band covers every day it names, both ends included',
+      (() => { const x = bs({ start: '2026-09-08', end: '2026-09-21' }); return x.from === 7 && x.to === 20 && x.days === 14; })());
+    check('a one-day band is one day',
+      bs({ start: '2026-09-08', end: '2026-09-08' }).days === 1);
+    check('a band with no dates is not drawn', bs({ start: '', end: '' }) === null);
+    check('one that ran out before term started is not drawn',
+      bs({ start: '2026-07-01', end: '2026-08-01' }) === null);
+    check('one that begins after term ends is not drawn',
+      bs({ start: '2027-01-05', end: '2027-01-20' }) === null);
+    check('one that began before term is clipped, not dropped',
+      (() => { const x = bs({ start: '2026-08-20', end: '2026-09-10' }); return x.from === 0 && x.clipStart && !x.clipEnd; })(),
+      'work that started before you got here still has weeks inside the term');
+    check('one that runs past the end is clipped there',
+      (() => { const x = bs({ start: '2026-11-20', end: '2027-02-01' }); return x.to === range.days - 1 && x.clipEnd; })());
+    check('a band handed its dates backwards still draws forwards',
+      (() => { const x = bs({ start: '2026-09-21', end: '2026-09-08' }); return x.from === 7 && x.to === 20; })());
   }
 
   /* ---- stacking, so nothing sits on anything ---- */

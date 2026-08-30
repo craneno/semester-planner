@@ -9,6 +9,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v28', date: '2026-08-30',
+    title: 'Focuses, sprints, and what is on now',
+    notes: [
+      'Drag sideways across an area’s lane on the semester chart to block out a stretch of weeks. A focus is the theme of those weeks; a sprint is a work package, and carries the deliverables that say when it is finished — ticking them fills the bar.',
+      'Every area page ends in a freewrite box. No prompt, no dates, nothing to press: it saves itself and syncs like everything else.',
+      'The top right of every screen says what is on now, or what is next, or that there is nothing today.',
+      'The week starts on Sunday. Settings can still put it back.',
+      'The week number and the percent-of-term elapsed are gone from the sidebar, Overview and the week bar. They measured the calendar, not you.'
+    ]
+  },
+  {
     version: 'v27', date: '2026-08-29',
     title: 'Something to write in',
     notes: [

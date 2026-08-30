@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Focus and sprint tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* A band on the chart is the same object either way; `kind` decides whether it
+   is asked for deliverables. What is worth testing is not the drawing — that
+   lives in chart.test.html — but that a band survives a reload, that it reaches
+   another device without a new Postgres row kind, and that the deliverables it
+   carries cannot rot into half-objects. */
+import { suite, storeWith } from './harness.js';
+
+const base = (over = {}) => ({
+  version: 18,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [
+    { id: 'p1', name: 'Rocket', category: 'project', order: 0 },
+    { id: 'c1', name: 'Thermo', category: 'course', order: 0 }
+  ],
+  items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {},
+  ...over
+});
+
+const band = (over = {}) => ({
+  id: 's1', areaId: 'p1', kind: 'focus', title: 'Nozzle',
+  start: '2026-09-07', end: '2026-09-20', ...over
+});
+
+suite('Focuses and sprints — bands on the chart', async ({ check }) => {
+
+  /* ---- what survives a reload ---- */
+
+  {
+    const s = await storeWith(base({
+      sprints: [
+        band(),
+        band({ id: 's2', kind: 'sprint', title: 'Hot fire', start: '2026-10-01', end: '2026-10-14' }),
+        band({ id: 's3', title: 'Backwards', start: '2026-11-20', end: '2026-11-02' }),
+        band({ id: 's4', kind: 'wat', title: 'Odd kind' }),
+        band({ id: 's5', title: 'No dates', start: null, end: null }),
+        band({ id: 's6', title: 'One date only', start: '2026-09-09', end: null })
+      ]
+    }));
+    const by = (id) => s.state.sprints.find((p) => p.id === id);
+
+    check('a band comes back with its dates', by('s1').start === '2026-09-07' && by('s1').end === '2026-09-20');
+    check('both kinds survive', by('s1').kind === 'focus' && by('s2').kind === 'sprint');
+    check('a band drawn backwards is turned round',
+      by('s3').start === '2026-11-02' && by('s3').end === '2026-11-20',
+      'a negative span would draw off the left of the chart');
+    check('a kind nobody has heard of is a focus',
+      by('s4').kind === 'focus',
+      'the quiet one: a band that suddenly demanded deliverables would be worse');
+    check('a band with no dates at all is dropped',
+      !by('s5'), 'it could never be drawn, and nothing could ever find it again');
+    check('one date is enough — it becomes a single day',
+      by('s6') && by('s6').start === '2026-09-09' && by('s6').end === '2026-09-09');
+    check('an install that never had any gets an empty list',
+      (await storeWith(base())).state.sprints.length === 0);
+  }
+
+  /* ---- deliverables ---- */
+
+  {
+    const s = await storeWith(base({
+      sprints: [band({
+        kind: 'sprint',
+        deliverables: [
+          { id: 'd1', text: 'Three hot fires logged by Oct 12', done: true },
+          { id: 'd2', text: 'Data reduced', done: false },
+          { text: '   ' },
+          { text: 'No id yet' }
+        ]
+      })]
+    }));
+    const p = s.sprintById('s1');
+
+    check('deliverables come back in order',
+      p.deliverables.map((d) => d.text)[0] === 'Three hot fires logged by Oct 12');
+    check('a blank one is dropped', !p.deliverables.some((d) => !d.text.trim()));
+    check('one with no id is given one', p.deliverables[2].id && p.deliverables[2].text === 'No id yet');
+    check('done survives', p.deliverables[0].done === true && p.deliverables[1].done === false);
+    check('progress is what is ticked over what there is',
+      Math.abs(s.sprintProgress(p) - 1 / 3) < 1e-9, String(s.sprintProgress(p)));
+  }
+
+  {
+    const s = await storeWith(base({ sprints: [band({ kind: 'sprint' })] }));
+    check('a sprint with no list reports no progress',
+      s.sprintProgress(s.sprintById('s1')) === null,
+      'zero would draw an empty bar and read as failure');
+    check('a focus reports none either',
+      s.sprintProgress(s.upsertSprint({ areaId: 'p1', start: '2026-09-01', end: '2026-09-08' })) === null);
+
+    s.commit(() => s.addDeliverable('s1', '  Nozzle drawing released  '));
+    check('a deliverable is added trimmed',
+      s.sprintById('s1').deliverables[0].text === 'Nozzle drawing released');
+    check('a blank one is refused', s.addDeliverable('s1', '   ') === null
+      && s.sprintById('s1').deliverables.length === 1);
+
+    const d = s.sprintById('s1').deliverables[0];
+    s.commit(() => s.updateDeliverable('s1', d.id, { done: true }));
+    check('ticking one counts', s.sprintProgress(s.sprintById('s1')) === 1);
+    s.commit(() => s.deleteDeliverable('s1', d.id));
+    check('and removing it leaves nothing to count',
+      s.sprintById('s1').deliverables.length === 0 && s.sprintProgress(s.sprintById('s1')) === null);
+  }
+
+  /* ---- creating, moving, deleting ---- */
+
+  {
+    const s = await storeWith(base());
+    let made;
+    s.commit(() => { made = s.upsertSprint({ areaId: 'p1', title: 'Midterms', start: '2026-10-05', end: '2026-10-16' }); });
+    check('a new band gets an id', !!made.id && s.sprintById(made.id) === made);
+    check('...and is a focus unless it is asked to be a sprint', made.kind === 'focus');
+    check('...and remembers when it was made', !!made.createdAt);
+
+    s.commit(() => s.upsertSprint({ id: made.id, kind: 'sprint', title: 'Midterms week' }));
+    check('an edit lands on the same band', s.state.sprints.length === 1);
+    check('...and keeps the dates it was not asked about',
+      s.sprintById(made.id).start === '2026-10-05');
+    check('changing it stamps a new time', s.sprintById(made.id).updatedAt >= made.createdAt);
+
+    s.commit(() => s.upsertSprint({ id: made.id, start: '2026-11-01', end: '2026-10-01' }));
+    check('dragging the end before the start turns it round, it does not vanish',
+      s.sprintById(made.id).start === '2026-10-01' && s.sprintById(made.id).end === '2026-11-01');
+
+    s.commit(() => s.deleteSprint(made.id));
+    check('a deleted band is gone', s.sprintById(made.id) === null && s.state.sprints.length === 0);
+  }
+
+  {
+    const s = await storeWith(base({
+      sprints: [
+        band({ id: 's1', start: '2026-10-01', end: '2026-10-10' }),
+        band({ id: 's2', start: '2026-09-01', end: '2026-09-10' }),
+        band({ id: 's3', areaId: 'c1', start: '2026-09-05', end: '2026-09-08' })
+      ]
+    }));
+    check('an area sees only its own bands',
+      s.sprintsForArea('p1').map((p) => p.id).join() === 's2,s1',
+      'earliest first, so a lane reads left to right');
+    check('and another area sees only its own',
+      s.sprintsForArea('c1').map((p) => p.id).join() === 's3');
+
+    s.commit(() => s.deleteArea('p1'));
+    check('deleting an area takes its bands with it',
+      s.state.sprints.map((p) => p.id).join() === 's3',
+      'a band is drawn in its area lane and nowhere else — an orphan is unreachable');
+  }
+
+  /* ---- reaching another device ---- */
+
+  {
+    const s = await storeWith(base({ sprints: [band({ kind: 'sprint' })] }));
+    const rows = s.snapshotRows();
+
+    check('bands are not a row kind of their own',
+      !rows.some((r) => r.kind === 'sprint'),
+      'a new kind needs the Supabase CHECK constraint widened by hand');
+    const meta = rows.find((r) => r.kind === 'meta');
+    check('they ride in meta, like habits and links',
+      Array.isArray(meta.data.sprints) && meta.data.sprints[0].id === 's1');
+    check('no device credential rides with them',
+      meta.data.settings.gcal === undefined && meta.data.settings.cloud === undefined
+      && meta.data.settings.cursor === undefined);
+
+    s.applyRow({ kind: 'meta', id: 'meta', data: { sprints: [band({ id: 'sX', title: 'From the phone' })] } });
+    check('an inbound meta row replaces them', s.state.sprints.map((p) => p.id).join() === 'sX');
+
+    s.applyRow({ kind: 'meta', id: 'meta', data: { habits: [] } });
+    check('a meta row that mentions no bands leaves them alone',
+      s.state.sprints.length === 1,
+      'a device on an older schema sends none, and absent must not read as empty');
+
+    s.applyRow({ kind: 'meta', id: 'meta', data: { sprints: [] } });
+    check('but one that says none really means none', s.state.sprints.length === 0);
+  }
+});
+</script>
+</body>
+</html>

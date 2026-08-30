@@ -411,6 +411,98 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     }
   }
 
+  /* ---- the week begins on Sunday (schema 18) ---- */
+
+  {
+    const s = await storeWith(v4());
+    check('an old install is moved to Sunday', s.state.settings.weekStart === 0);
+
+    const fresh = await storeWith({ version: 18, areas: [], items: [] });
+    check('and one that never had the setting starts there',
+      fresh.state.settings.weekStart === 0);
+
+    const chosen = await storeWith({
+      version: 18, areas: [], items: [], settings: { weekStart: 1 }
+    });
+    check('someone who has since chosen Monday keeps it',
+      chosen.state.settings.weekStart === 1,
+      'the flip is pinned to 18 like a seed, not forced at every load');
+  }
+
+  /* ---- the freewrite box every area page ends in ---- */
+
+  {
+    const s = await storeWith(v4({ areas: [{ id: 'a1', name: 'Rocket', kind: 'research' }] }));
+    check('an area starts with an empty one', s.areaById('a1').freewrite === '');
+    check('...a string, never missing', typeof s.areaById('a1').freewrite === 'string');
+
+    s.commit(() => s.upsertArea({ id: 'a1', freewrite: 'Think about the nozzle.' }));
+    check('what is written stays written', s.areaById('a1').freewrite === 'Think about the nozzle.');
+    check('...and travels with the area row',
+      s.snapshotRows().find((r) => r.kind === 'area' && r.id === 'a1').data.freewrite
+        === 'Think about the nozzle.',
+      'no new row kind: it is a field on the area, not a thing of its own');
+
+    const back = await storeWith({
+      version: 18,
+      areas: [{ id: 'a1', name: 'Rocket', category: 'project', order: 0, freewrite: 'Kept.' }],
+      items: []
+    });
+    check('and survives a reload', back.areaById('a1').freewrite === 'Kept.');
+  }
+
+  /* ---- what is on today, for the line in the topbar ---- */
+
+  {
+    const day = '2026-09-09';                       // a Wednesday in term
+    const s = await storeWith({
+      version: 18,
+      semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+      areas: [{
+        id: 'c1', name: 'Thermo', category: 'course', order: 0,
+        schedule: [{ days: [3], start: '09:00', end: '10:15' }]
+      }],
+      items: [
+        { id: 't1', title: 'Write up lab', areaId: 'c1', plan: { date: day, start: '13:00', mins: 90 } },
+        { id: 't2', title: 'Read chapter 4', areaId: 'c1', plan: { date: day, start: null, mins: 60 } },
+        { id: 't3', title: 'Already done', areaId: 'c1', done: true, plan: { date: day, start: '15:00', mins: 30 } }
+      ],
+      events: [
+        { id: 'e1', title: 'Advisor', date: day, start: '11:00', end: '11:30' },
+        { id: 'e2', title: 'Reading week', date: day, allDay: true }
+      ],
+      notes: {}
+    });
+
+    const line = s.dayTimeline(day);
+    check('the day is one list, whatever each thing came from',
+      line.map((e) => e.title).join(' | ') === 'Thermo | Advisor | Write up lab',
+      line.map((e) => e.title).join(' | '));
+    check('...in time order', line.map((e) => e.start).join() === '09:00,11:00,13:00');
+    check('an all-day thing is not on it',
+      !line.some((e) => e.title === 'Reading week'),
+      'it has no time, so it can never be what is next');
+    check('nor is a planned block with no time on it',
+      !line.some((e) => e.title === 'Read chapter 4'));
+    check('nor is work already finished',
+      !line.some((e) => e.title === 'Already done'));
+
+    const at = (mins) => s.nowNext(day, mins);
+    check('before the first thing, the first thing is next',
+      at(8 * 60).title === 'Thermo' && at(8 * 60).live === false);
+    check('during a class, the class is what is on',
+      at(9 * 60 + 30).title === 'Thermo' && at(9 * 60 + 30).live === true,
+      'at half past nine the useful answer is the lecture, not the thing after it');
+    check('the moment it ends, the next thing takes over',
+      at(10 * 60 + 15).title === 'Advisor' && at(10 * 60 + 15).live === false);
+    check('a planned block counts as much as an appointment',
+      at(13 * 60 + 30).title === 'Write up lab' && at(13 * 60 + 30).live === true);
+    check('after the last thing there is nothing next', at(23 * 60) === null);
+    check('a day with nothing on it says so',
+      s.nowNext('2026-09-12', 9 * 60) === null,
+      'the topbar reads a null as "no scheduled events today"');
+  }
+
   /* ---- deleting an area leaves its work behind ---- */
 
   {
