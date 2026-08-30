@@ -132,14 +132,42 @@ suite('Capture — notecards and filing', async ({ check }) => {
       'seeds must be pinned to their own version, not SCHEMA_VERSION');
   }
   {
-    // 6 to current runs 8's seed and 12's, and neither 5's nor a second copy
-    // of anything: each seed is pinned to the version that introduced it
+    // 6 to current runs the seeds of 8, 12 and 16, and neither 5's nor a
+    // second copy of anything: each is pinned to the version that added it
     const s = await storeWith({ version: 6, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
     check('upgrading from 6 runs every later seed, in order',
-      s.state.areas.map((a) => a.name).join() === 'Thermo,General,Job search',
+      s.state.areas.map((a) => a.name).join() === 'Thermo,General,Job search,Journal',
       s.state.areas.map((a) => a.name).join());
     check('...and not one from a version already passed',
       !s.state.areas.some((a) => a.name === 'Rocket'));
+  }
+  {
+    const s = await storeWith({
+      version: 15,
+      areas: [{ id: 'x1', name: 'General', category: 'personal', order: 0 }], items: []
+    });
+    check('a Journal is seeded under Personal on 16',
+      s.areasInCategory('personal').map((a) => a.name).join() === 'General,Journal',
+      s.areasInCategory('personal').map((a) => a.name).join());
+    check('...as an area like any other, so work and notes can be filed in it',
+      s.state.areas.find((a) => a.name === 'Journal').category === 'personal');
+  }
+  {
+    const s = await storeWith({
+      version: 16,
+      areas: [{ id: 'x1', name: 'General', category: 'personal', order: 0 }], items: []
+    });
+    check('a Journal deleted on purpose does not come back',
+      !s.state.areas.some((a) => a.name === 'Journal'),
+      'pinned to 16, so the next bump must not resurrect it');
+  }
+  {
+    const s = await storeWith({
+      version: 15,
+      areas: [{ id: 'j1', name: 'journal', category: 'personal', order: 0 }], items: []
+    });
+    check('one you already made yourself is not doubled',
+      s.state.areas.length === 1, s.state.areas.map((a) => a.name).join());
   }
   {
     const current = (await storeWith(null)).SCHEMA_VERSION;

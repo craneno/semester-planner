@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -206,6 +206,7 @@ function migrate(raw) {
     if (general && !s.areas.some((a) => a.name.toLowerCase() === 'general')) general.name = 'General';
     seedNamed('Job search', 'personal');
   }
+  if (from < 16) seedNamed('Journal', 'personal');
 
   // the habit page is useless empty, so give it the ones it was built for.
   // Pinned per version like the area seeds: a habit deleted on purpose must

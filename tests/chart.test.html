@@ -13,7 +13,9 @@
 import { suite, sharedStoreWith, storeWith } from './harness.js';
 
 const base = (over = {}) => ({
-  version: 14,
+  // the current schema, so no version's seeds land in a fixture that is
+  // counting areas
+  version: 16,
   semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
   areas: [
     { id: 'c1', name: 'Thermodynamics', category: 'course', order: 1 },

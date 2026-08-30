@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v26', date: '2026-08-29',
+    title: 'A Journal under Personal',
+    notes: [
+      'A Journal area, beside General and Job search. Captured notes filed there show on its page, and links and work can go there like anywhere else.',
+      'Seeded once, on this version only — delete it and it stays deleted.'
+    ]
+  },
+  {
     version: 'v25', date: '2026-08-29',
     title: 'Draw on the calendar',
     notes: [

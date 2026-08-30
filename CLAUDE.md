@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **15**, service worker **planner-v25**.
+Currently schema **16**, service worker **planner-v26**.
 
 ## Working on it
 
@@ -169,6 +169,7 @@ device still on the old schema keeps pushing the old name.
 | 13 | the wishlist |
 | 14 | `onChart` on areas — which ones the semester chart draws |
 | 15 | `tomorrow` on a day's note, and the focus it becomes the next morning |
+| 16 | seeds Journal under Personal |
 
 ## Routing and views
 
@@ -268,7 +269,7 @@ end of term writes its title to its *left* and is anchored by `right` — hence
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 403 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 407 checks.
 
 | file | covers |
 |---|---|
