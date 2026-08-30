@@ -2,11 +2,12 @@
 // and the drill-down into one area's full list. Both shapes live here because
 // they render the same rows from the same data; only the scope differs.
 
-import { h, clear, fmtTime, DOW } from '../util.js';
+import { h, clear, fmtTime, fmtDate, today, debounce, DOW } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, deleteArea, areasInCategory, itemsForArea,
   nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress,
-  linksForArea, updateLink, deleteLink, addLink, cardsForArea
+  linksForArea, updateLink, deleteLink, addLink, cardsForArea,
+  journalEntry, setJournalEntry, journalDates
 } from '../store.js';
 import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta, reorderable } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -151,7 +152,9 @@ export function renderArea(root, { navigate, go }, areaId) {
       ? h('button', { class: 'btn', onclick: () => openSyllabusImport(navigate, a.id) }, 'Syllabus')
       : null));
 
-  if (!mine.length && !links.length && !cards.length) {
+  if (a.journal) pad.append(journalSection(a));
+
+  if (!mine.length && !links.length && !cards.length && !a.journal) {
     pad.append(h('div', { class: 'empty' },
       h('h3', {}, 'Nothing here yet'),
       h('p', { style: { margin: '4px 0 0', color: 'var(--ink-2)' } },
@@ -177,6 +180,81 @@ export function renderArea(root, { navigate, go }, areaId) {
 
   pad.append(linkSection(a, navigate));
   root.append(pad);
+}
+
+/* ---------------- the daily journal ----------------
+   A page to write on. There is no prompt above the box on purpose: a journal
+   that asks a question is a form, and you answer a form instead of writing.
+   Today is open; everything before it is a day at a time behind a dropdown,
+   still editable, because a thought finished the next morning is normal. */
+
+function journalSection(area) {
+  const day = today();
+  const past = journalDates(area.id).filter((d) => d !== day);
+
+  /* Re-fit whenever a box's width changes rather than only when it is typed
+     in: a narrower window wraps the same words onto more lines, and the box
+     hides its overflow, so a height measured at one width silently cuts text
+     off at another. It also covers a box that had no width at all when it was
+     drawn, which is the only way to measure one wrongly. Made per render, so
+     it is dropped with the boxes it watches. */
+  const seen = new WeakMap();
+  const fitter = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const w = e.contentRect.width;
+      // width only: reacting to our own height change would never settle
+      if (!w || seen.get(e.target) === w) continue;
+      seen.set(e.target, w);
+      autosize(e.target);
+    }
+  });
+  const box = (date) => {
+    const el = entryBox(area, date);
+    fitter.observe(el);
+    return el;
+  };
+
+  const card = h('section', { class: 'card journal' },
+    h('div', { class: 'card-h' },
+      h('span', { class: 'eyebrow' }, 'Today'),
+      h('span', { class: 'journal-date' }, fmtDate(day, { weekday: true }))),
+    h('div', { class: 'card-b' }, box(day)));
+
+  if (past.length) {
+    const list = h('div', { class: 'journal-past' },
+      ...past.map((d) => h('div', { class: 'journal-day' },
+        h('div', { class: 'eyebrow' }, fmtDate(d, { weekday: true })),
+        box(d))));
+    card.append(h('details', { class: 'history journal-history' },
+      h('summary', {}, `Earlier entries (${past.length})`),
+      list));
+  }
+  return card;
+}
+
+function entryBox(area, date) {
+  // one debounce per box, not one shared: two days written in quick
+  // succession would otherwise land as one save of whichever typed last
+  const save = debounce((text) => commit(() => setJournalEntry(area.id, date, text)), 500);
+  return h('textarea', {
+    class: 'journal-box', rows: '1',
+    'aria-label': `Journal entry for ${fmtDate(date, { weekday: true })}`,
+    oninput: (e) => { autosize(e.target); save(e.target.value); }
+  }, journalEntry(area.id, date));
+}
+
+/**
+ * Grow with what is written in it; the floor is a min-height in the CSS.
+ *
+ * Never size from a box with no width. A textarea measured before it has one
+ * wraps every word onto its own line and reports a height in the tens of
+ * thousands of pixels — leaving the box short is recoverable, leaving it
+ * thirty thousand pixels tall is not.
+ */
+function autosize(el) {
+  if (!el.clientWidth) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
 }
 
 /* ---------------- links ----------------
@@ -395,6 +473,15 @@ function editArea(area, categoryId, navigate) {
           h('div', { style: { fontSize: '13.5px' } }, 'Show on the semester chart'),
           h('div', { style: { fontSize: '12.5px', color: 'var(--ink-3)' } },
             'Off for work with no shape over a term — errands, say. The area stays everywhere else.'))),
+      h('label', { style: { display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer' } },
+        h('input', {
+          type: 'checkbox', class: 'check', checked: !!draft.journal,
+          onchange: (e) => { draft.journal = e.target.checked; }
+        }),
+        h('span', {},
+          h('div', { style: { fontSize: '13.5px' } }, 'Keep a daily journal here'),
+          h('div', { style: { fontSize: '12.5px', color: 'var(--ink-3)' } },
+            'A box at the top of this page to write in, one entry a day, with the earlier ones behind a dropdown.'))),
       h('div', { class: 'field' },
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
           h('label', { style: { flex: 1 } }, 'Recurring meetings'),

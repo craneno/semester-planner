@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Currently schema **16**, service worker **planner-v26**.
+Currently schema **17**, service worker **planner-v27**.
 
 ## Working on it
 
@@ -130,9 +130,9 @@ rejected rather than surfacing the constraint name.
 | | |
 |---|---|
 | `state.items` | tasks. Either **scheduled** (`plan {date,start,mins}`) or a **deadline** (`due`, `dueTime`, `estMins`) — never both. Read via `!!item.plan.start`. |
-| `state.areas` | courses/projects/etc. One `category` each, plus an `order` and `onChart` |
+| `state.areas` | courses/projects/etc. One `category` each, plus an `order`, `onChart` and `journal` |
 | `state.cards` | notecards. `areaId: null` = unfiled |
-| `state.notes` | per-day `focus`, `text`, `tomorrow` and `top3`, keyed by date — **not** the same as cards |
+| `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3` and `journal` (`areaId -> entry`), keyed by date — **not** the same as cards |
 | `state.links` | saved links, `areaId` naming the pile. Rides in the `meta` row |
 | `state.wishlist` | things wanted and the parcels they become — one object, `status` moves along `WISH_STATUSES`. Rides in `meta` |
 | `state.habits` / `habitLog` | habits and `date -> [habitId]` |
@@ -170,6 +170,7 @@ device still on the old schema keeps pushing the old name.
 | 14 | `onChart` on areas — which ones the semester chart draws |
 | 15 | `tomorrow` on a day's note, and the focus it becomes the next morning |
 | 16 | seeds Journal under Personal |
+| 17 | `journal` on areas, and the day's entry inside the day's note |
 
 ## Routing and views
 
@@ -196,6 +197,16 @@ indented (`.area-chip`, 33px — glyph width plus the gap).
 **Overview is the day** — there is no Today page. Left column is a 24-hour
 clock opened at 8am (`--day-hour-h`, read from CSS rather than hard-coded);
 right column is focus, top three, open work, end-of-day note.
+
+**A journal entry lives in the day it was written**, as `notes[date].journal[areaId]`,
+not in a pile of its own. A note row is already one per date, so a year of
+writing syncs as a year of small rows instead of one row resent whole every
+time a sentence moves — the opposite of the reason habits and links ride in
+`meta`, where the whole point is that there is only ever one of them.
+`emptyNote()` counts it, or an entry on a day with nothing else on it would
+never leave the device. Any area can keep one (`area.journal`); the seeded
+Journal is marked in the schema-17 migration rather than found by its name, so
+renaming it keeps the box.
 
 **The end-of-day note is the only thing that crosses a day.** `tomorrow` is
 carried into the next morning's `focus` by `carryForward()`, called from the
@@ -269,7 +280,7 @@ end of term writes its title to its *left* and is anchored by `right` — hence
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies. 407 checks.
+Serve the repo, open `/tests/`. No runner, no dependencies. 424 checks.
 
 | file | covers |
 |---|---|

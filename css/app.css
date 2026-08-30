@@ -755,6 +755,28 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .pin-glyph { width: 8px; flex: none; color: var(--ink-3); font-size: 11px; line-height: 1; }
 
 
+/* ---------------- the daily journal ----------------
+   A page, not a form: no prompt, no label above the box, and a floor deep
+   enough that starting to write does not feel like filling in a field. */
+
+.journal .card-h { align-items: baseline; gap: 10px; }
+.journal-date { color: var(--ink-2); font-size: calc(13px * var(--scale)); }
+.journal-box {
+  width: 100%; display: block; resize: vertical;
+  min-height: 190px; padding: 2px 0;
+  border: 0; background: transparent; color: var(--ink);
+  font-family: var(--font-body); font-size: calc(14.5px * var(--scale));
+  line-height: 1.62; overflow: hidden;
+}
+.journal-box:focus { outline: none; }
+.journal-history { padding: 0 15px 12px; }
+.journal-past { display: flex; flex-direction: column; }
+.journal-day { padding: 11px 0 4px; border-top: 1px solid var(--rule-soft); }
+.journal-day:first-child { border-top: 0; }
+.journal-day .eyebrow { color: var(--ink-3); margin-bottom: 4px; }
+.journal-day .journal-box { min-height: 0; font-size: calc(14px * var(--scale)); }
+
+
 /* ---------------- links ---------------- */
 
 .link-row { grid-template-columns: minmax(0, 1fr) auto auto auto; cursor: default; }

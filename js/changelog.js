@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v27', date: '2026-08-29',
+    title: 'Something to write in',
+    notes: [
+      'The Journal page opens on a box for today, with no prompt above it — a journal that asks a question is a form.',
+      'Earlier days sit behind a dropdown, one entry each, still editable.',
+      'Any area can keep one: the switch is in the area editor. A lab notebook for a project works the same way.',
+      'Entries ride in the day they were written, so they sync a day at a time rather than as one block that grows all term.'
+    ]
+  },
+  {
     version: 'v26', date: '2026-08-29',
     title: 'A Journal under Personal',
     notes: [

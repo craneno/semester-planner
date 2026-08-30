@@ -315,6 +315,102 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     }
   }
 
+  /* ---- a daily journal ---- */
+
+  {
+    const withJournal = (over = {}) => ({
+      version: 17, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
+      areas: [
+        { id: 'j1', name: 'Journal', category: 'personal', order: 0, journal: true },
+        { id: 'p1', name: 'Rocket', category: 'project', order: 1 }
+      ],
+      items: [], cards: [], notes: {}, ...over
+    });
+
+    {
+      const s = await storeWith(withJournal());
+      check('an area with no entries has nothing to show',
+        s.journalEntry('j1', '2026-09-10') === '' && s.journalDates('j1').length === 0);
+
+      s.setJournalEntry('j1', '2026-09-10', 'Nozzle came out warped.');
+      check('what was written comes back', s.journalEntry('j1', '2026-09-10') === 'Nozzle came out warped.');
+      check('...on the day it was written for',
+        s.journalDates('j1').join() === '2026-09-10');
+      check('the entry lives in that day’s note, not a pile of its own',
+        s.state.notes['2026-09-10'].journal.j1 === 'Nozzle came out warped.',
+        'a note row is already one per date, so a year of writing stays a year of small rows');
+      check('the rest of the day is untouched',
+        s.state.notes['2026-09-10'].focus === '' && s.state.notes['2026-09-10'].text === '');
+    }
+
+    {
+      const s = await storeWith(withJournal());
+      s.setJournalEntry('j1', '2026-09-08', 'Monday');
+      s.setJournalEntry('j1', '2026-09-12', 'Friday');
+      s.setJournalEntry('j1', '2026-09-10', 'Wednesday');
+      check('earlier entries come back newest first',
+        s.journalDates('j1').join() === '2026-09-12,2026-09-10,2026-09-08',
+        s.journalDates('j1').join());
+
+      s.setJournalEntry('p1', '2026-09-10', 'Static fire prep');
+      check('two areas can write on the same day without meeting',
+        s.journalEntry('j1', '2026-09-10') === 'Wednesday'
+        && s.journalEntry('p1', '2026-09-10') === 'Static fire prep');
+      check('...and each only lists its own days',
+        s.journalDates('p1').join() === '2026-09-10');
+    }
+
+    {
+      const s = await storeWith(withJournal());
+      s.setJournalEntry('j1', '2026-09-10', 'Written then thought better of');
+      s.setJournalEntry('j1', '2026-09-10', '   ');
+      check('an emptied entry stops being an entry',
+        s.journalEntry('j1', '2026-09-10') === '' && s.journalDates('j1').length === 0,
+        'a blank day should not sit in the dropdown forever');
+      check('...and leaves no empty note behind to sync',
+        !s.snapshotRows().some((r) => r.kind === 'note' && r.id === '2026-09-10'));
+    }
+
+    {
+      const s = await storeWith(withJournal());
+      s.setJournalEntry('j1', '2026-09-10', 'Only a journal entry today.');
+      const row = s.snapshotRows().find((r) => r.kind === 'note' && r.id === '2026-09-10');
+      check('a day with only an entry on it still syncs',
+        !!row && row.data.journal.j1 === 'Only a journal entry today.',
+        'dropped as empty, a journal would never reach another device');
+      check('it needs no new row kind',
+        !s.snapshotRows().some((r) => r.kind === 'journal'),
+        'a new kind would need the Supabase CHECK constraint widened');
+
+      s.applyRow({
+        kind: 'note', id: '2026-09-11',
+        data: { focus: '', text: '', top3: [], journal: { j1: 'From the phone' } }
+      });
+      check('an inbound day brings its entry with it',
+        s.journalEntry('j1', '2026-09-11') === 'From the phone');
+    }
+
+    {
+      const s = await storeWith({
+        version: 16,
+        areas: [{ id: 'j1', name: 'Journal', category: 'personal', order: 0 }], items: []
+      });
+      check('the seeded Journal is marked as one on 17', s.areaById('j1').journal === true);
+      check('...and the mark travels with the area row',
+        s.snapshotRows().find((r) => r.kind === 'area' && r.id === 'j1').data.journal === true);
+
+      const other = await storeWith({
+        version: 16,
+        areas: [{ id: 'p1', name: 'Rocket', category: 'project', order: 0 }], items: []
+      });
+      check('nothing else grows a writing box uninvited',
+        other.areaById('p1').journal === false);
+      check('but any area can be given one',
+        (other.commit(() => other.upsertArea({ id: 'p1', journal: true })),
+        other.journalAreas().map((a) => a.name).join() === 'Rocket'));
+    }
+  }
+
   /* ---- deleting an area leaves its work behind ---- */
 
   {

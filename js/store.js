@@ -4,7 +4,7 @@ import { uid, today, addDays, toMin, fromMin, startOfWeek, diffDays } from './ut
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -171,6 +171,9 @@ function migrate(raw) {
     // absent means yes: every area an older device pushes belongs on the chart
     // until someone says otherwise, and only a false ever has to travel
     onChart: a.onChart !== false,
+    // absent means no, which is the quiet default: an area nobody asked to
+    // journal in does not grow a writing box on its page
+    journal: !!a.journal,
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
     grading: Array.isArray(a.grading) ? a.grading : []
   }));
@@ -207,6 +210,12 @@ function migrate(raw) {
     seedNamed('Job search', 'personal');
   }
   if (from < 16) seedNamed('Journal', 'personal');
+  // v17: the Journal seeded a version ago is a place to write, not just a
+  // place to file. Marked rather than named, so renaming it keeps the box.
+  if (from < 17) {
+    const j = s.areas.find((a) => a.category === 'personal' && a.name.toLowerCase() === 'journal');
+    if (j) j.journal = true;
+  }
 
   // the habit page is useless empty, so give it the ones it was built for.
   // Pinned per version like the area seeds: a habit deleted on purpose must
@@ -493,7 +502,7 @@ export function upsertArea(patch) {
     a = {
       id: uid('a'), name: 'New area', category: 'course', location: '',
       color: AREA_COLORS[state.areas.length % AREA_COLORS.length],
-      schedule: [], grading: [], archived: false, onChart: true,
+      schedule: [], grading: [], archived: false, onChart: true, journal: false,
       order: state.areas.length,
       updatedAt: new Date().toISOString(), ...patch
     };
@@ -929,8 +938,37 @@ export function cardToItem(id, { as = 'task', areaId } = {}) {
 }
 
 export function note(date) {
-  if (!state.notes[date]) state.notes[date] = { focus: '', text: '', tomorrow: '', top3: [] };
+  if (!state.notes[date]) state.notes[date] = { focus: '', text: '', tomorrow: '', top3: [], journal: {} };
   return state.notes[date];
+}
+
+/* ---------------- a daily journal ----------------
+   Any area can keep one; the seeded Journal does by default. Entries live in
+   the day's note rather than in a pile of their own, because a note row is
+   already one per date: a year of writing stays a year of small rows that
+   sync as they change, instead of one row that has to be sent whole every
+   time a sentence moves. */
+
+export const journalAreas = () => state.areas.filter((a) => a.journal && !a.archived);
+
+export const journalEntry = (areaId, date) => (state.notes[date]?.journal || {})[areaId] || '';
+
+/** Write today's entry. An emptied one is removed rather than kept blank. */
+export function setJournalEntry(areaId, date, text) {
+  const n = note(date);
+  if (!n.journal) n.journal = {};
+  const body = String(text ?? '');
+  if (body.trim()) n.journal[areaId] = body;
+  else delete n.journal[areaId];
+  return n.journal[areaId] || '';
+}
+
+/** Every day this area has been written in, newest first. */
+export function journalDates(areaId) {
+  return Object.entries(state.notes)
+    .filter(([, n]) => n && n.journal && n.journal[areaId])
+    .map(([date]) => date)
+    .sort((x, y) => (x < y ? 1 : -1));
 }
 
 /* ---- the end of one day is the start of the next ----
@@ -1182,9 +1220,13 @@ export function parseQuickAdd(input) {
 
 export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'weekStart', 'dayStart', 'dayEnd'];
 
-// a note holding only a line for tomorrow is not empty: dropping it here
-// would keep the carry-forward from ever reaching another device
-const emptyNote = (n) => !n || (!n.focus && !n.text && !n.tomorrow && !(n.top3 || []).length);
+// a note holding only a line for tomorrow, or only a journal entry, is not
+// empty: dropped here, neither would ever reach another device
+const emptyNote = (n) => !n || (
+  !n.focus && !n.text && !n.tomorrow
+  && !(n.top3 || []).length
+  && !Object.keys(n.journal || {}).length
+);
 
 /** Every syncable row in the current state. */
 export function snapshotRows() {
