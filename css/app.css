@@ -403,7 +403,27 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); }
 .blk.plan.done { opacity: .5; }
 .blk.dragging { opacity: .85; box-shadow: var(--shadow-2); transform: scale(1.015); z-index: 20; }
-.blk .grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; }
+
+/* Only your own planned work can be picked up. The resize zones are the top
+   and bottom edges themselves rather than a drawn handle — the same three
+   targets every calendar has, and nothing to aim at. They keep a third of the
+   block for the middle, matching grabMode(), so a quarter-hour block can still
+   be moved. */
+.blk.plan { cursor: grab; }
+.blk.plan.dragging { cursor: grabbing; }
+.blk.plan::before, .blk.plan::after {
+  content: ""; position: absolute; left: 0; right: 0;
+  height: min(8px, 33%); cursor: ns-resize;
+}
+.blk.plan::before { top: 0; }
+.blk.plan::after { bottom: 0; }
+/* a hairline on hover, so the edges are findable without being furniture */
+.blk.plan:hover::before, .blk.plan:hover::after {
+  background: linear-gradient(var(--c), var(--c)) center / 22px 2px no-repeat;
+  opacity: .5; border-radius: 2px;
+}
+/* the pointer is carrying something; nothing under it should look like text */
+body.is-moving, body.is-moving * { cursor: grabbing; user-select: none; }
 
 .nowline { position: absolute; left: 0; right: 0; height: 0; border-top: 1px solid var(--danger); z-index: 6; pointer-events: none; }
 .nowline::before { content: ""; position: absolute; left: -3px; top: -3.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
@@ -1035,40 +1055,49 @@ body.rail-hidden .sidebar { display: none; }
 }
 .gantt-item:hover, .gantt-item:focus-visible { z-index: 2; color: var(--ink); }
 
-/* a focus or a sprint: a stretch of weeks, drawn as ground for the work to
-   sit on rather than as another bar competing with it */
+/* A focus or a sprint: a stretch of weeks, drawn as ground for the work to sit
+   on rather than as another bar competing with it. Same shape as a task bar —
+   a rectangle plus a label — so the label can step outside when the rectangle
+   is too narrow to hold it. */
 .gantt-span {
-  position: absolute; z-index: 1; overflow: hidden;
+  position: absolute; z-index: 1;
   display: flex; align-items: center; gap: 6px;
-  height: 15px; padding: 0 6px; border-radius: 4px;
-  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
-  background: color-mix(in srgb, var(--c) 12%, transparent);
-  color: var(--ink-2); cursor: pointer; text-align: left;
-  font: inherit; font-size: calc(11px * var(--scale)); line-height: 1;
+  height: 19px; padding: 0; border: 0; background: transparent;
+  color: var(--ink-2); cursor: pointer; text-align: left; white-space: nowrap;
+  font: inherit; font-size: calc(11.5px * var(--scale)); line-height: 1;
 }
-.gantt-span:hover, .gantt-span:focus-visible {
-  z-index: 2; color: var(--ink);
-  background: color-mix(in srgb, var(--c) 22%, transparent);
+.gantt-band {
+  position: relative; flex: none; overflow: hidden;
+  display: flex; align-items: center; gap: 6px;
+  height: 100%; min-width: 3px; padding: 0 6px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--c) 78%, transparent);
+  background: color-mix(in srgb, var(--c) 20%, transparent);
 }
-/* a focus has no deliverables, so it is drawn as an outline and nothing else;
-   a sprint is solid, and fills as its list is ticked off */
-.gantt-span.is-focus { border-style: dashed; }
-.gantt-span.is-sprint { border-width: 1px; }
+.gantt-span:hover, .gantt-span:focus-visible { z-index: 3; color: var(--ink); }
+.gantt-span:hover .gantt-band, .gantt-span:focus-visible .gantt-band {
+  background: color-mix(in srgb, var(--c) 32%, transparent);
+}
+/* a focus has no deliverables, so it is an outline and nothing else; a sprint
+   is solid, and fills as its list is ticked off */
+.gantt-span.is-focus .gantt-band { border-style: dashed; }
 .gantt-fill {
   position: absolute; inset: 0 auto 0 0; z-index: 0;
-  background: color-mix(in srgb, var(--c) 26%, transparent);
+  background: color-mix(in srgb, var(--c) 40%, transparent);
 }
 .gantt-span-t {
   position: relative; z-index: 1;
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
-.gantt-span-n { position: relative; z-index: 1; flex: none; color: var(--ink-3); }
-.gantt-span.clip-l { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; }
-.gantt-span.clip-r { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
+.gantt-span-n { position: relative; z-index: 1; flex: none; color: var(--ink-2); }
+/* written beside the band, because the band is too narrow to hold it */
+.gantt-span:not(.inside) .gantt-tag { color: var(--ink-2); }
+.gantt-span.flip { flex-direction: row-reverse; }
+.gantt-span.clip-l .gantt-band { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; }
+.gantt-span.clip-r .gantt-band { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right: 0; }
 
 .gantt-track.is-lane { cursor: crosshair; }
 .gantt-ghost {
-  position: absolute; top: 3px; height: 17px; z-index: 5;
+  position: absolute; top: 4px; height: 19px; z-index: 5;
   display: flex; align-items: center; padding: 0 5px;
   border: 1px dashed var(--c); border-radius: 4px;
   background: color-mix(in srgb, var(--c) 16%, transparent);

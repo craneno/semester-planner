@@ -110,6 +110,63 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
       (() => { const x = bs({ start: '2026-09-21', end: '2026-09-08' }); return x.from === 7 && x.to === 20; })());
   }
 
+  /* ---- where a band's name is written ---- */
+
+  {
+    const band = (over) => ({ kind: 'focus', title: 'Nozzle characterisation', deliverables: [], ...over });
+    const rows = (list, dayW) => chart.bandRows(list, range, dayW).rows;
+
+    check('a band wide enough holds its own name',
+      rows([band({ start: '2026-09-08', end: '2026-11-01' })], 16)[0].inside === true);
+    check('a band too narrow writes it alongside',
+      rows([band({ start: '2026-09-08', end: '2026-09-21' })], 4)[0].inside === false,
+      'this is the "CH…" the chart used to show');
+    check('the same band is readable once the days are wider',
+      rows([band({ start: '2026-09-08', end: '2026-09-21' })], 16)[0].inside === true);
+    check('a long name outgrows a band that a short one fitted',
+      rows([band({ title: 'Characterise the nozzle end to end', start: '2026-09-08', end: '2026-09-21' })], 16)[0].inside === false);
+
+    check("a sprint's count is part of the name it has to fit",
+      (() => {
+        const s = band({ kind: 'sprint', start: '2026-09-08', end: '2026-09-21', deliverables: [{ done: true }, { done: false }] });
+        const r = rows([s], 16)[0];
+        return r.count === '1/2' && r.label.endsWith('· 1/2');
+      })());
+    check('a focus has no count to fit', rows([band({ start: '2026-09-08', end: '2026-10-01' })], 16)[0].count === '');
+    check('a very long name is cut before it is measured',
+      rows([band({ title: 'x'.repeat(80), start: '2026-09-08', end: '2026-09-21' })], 8)[0].name.length === 40);
+
+    check('a narrow band near the end of term writes its name to the left',
+      (() => { const r = rows([band({ start: '2026-11-25', end: '2026-11-30' })], 8)[0]; return !r.inside && r.flip; })(),
+      'written to the right it would be cut off by the end of the scroller');
+    check('...and one in the middle writes it to the right',
+      rows([band({ start: '2026-09-20', end: '2026-09-25' })], 8)[0].flip === false);
+    check('a wide band near the end does not flip, having nothing outside it',
+      rows([band({ start: '2026-10-01', end: '2026-11-30' })], 16)[0].flip === false);
+
+    check('the room a name needs reaches the packing',
+      (() => {
+        // two short bands a fortnight apart: the bars do not overlap, but the
+        // first one's name, written alongside, runs straight into the second
+        const r = rows([
+          band({ title: 'Nozzle characterisation', start: '2026-09-08', end: '2026-09-11' }),
+          band({ title: 'Hot fire', start: '2026-09-22', end: '2026-09-25' })
+        ], 4);
+        return r[0].lane !== r[1].lane;
+      })(),
+      'stacked as though only the bars mattered, the two names would overlap');
+    check('...and two that need no room share a lane',
+      (() => {
+        const r = rows([
+          band({ title: 'A', start: '2026-09-08', end: '2026-09-30' }),
+          band({ title: 'B', start: '2026-10-05', end: '2026-10-25' })
+        ], 16);
+        return r[0].lane === 0 && r[1].lane === 0;
+      })());
+    check('a band outside the term is not packed at all',
+      rows([band({ start: '2027-02-01', end: '2027-02-10' })], 8).length === 0);
+  }
+
   /* ---- stacking, so nothing sits on anything ---- */
 
   {

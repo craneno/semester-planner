@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v29', date: '2026-08-30',
+    title: 'Take hold of a block',
+    notes: [
+      'Drag a planned block by its middle to move it — to another time, and in the Week view to another day. Drag it by its top or bottom edge to change when it starts or ends, the way a calendar does.',
+      'Overview’s clock could not do any of this before; the Week view could only move a block, and only resize it from a handle drawn on it.',
+      'Classes and Google events stay put: one comes from an area’s recurring schedule, the other is a read-only mirror, so dragging either would edit something the grid is not showing.',
+      'A band on the semester chart now writes its name beside itself when it is too narrow to hold it — the rule task bars already followed. Bands are taller and stronger too, and no longer read “CH…”.'
+    ]
+  },
+  {
     version: 'v28', date: '2026-08-30',
     title: 'Focuses, sprints, and what is on now',
     notes: [

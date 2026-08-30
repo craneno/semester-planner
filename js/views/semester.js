@@ -72,6 +72,7 @@ function modeBtn(key, label, navigate) {
    below is pure, which is the only reason any of it can be tested. */
 
 const LANE_H = 20;          // one packed row of bars
+const BAND_H = 24;          // one packed row of focuses and sprints, which are read first
 const LABEL_CHAR = 6.4;     // rough px per character, for reserving label room
 const MAX_LABEL = 40;
 
@@ -140,6 +141,35 @@ export function bandSpan(p, range) {
     from: a, to: b, days: b - a + 1,
     clipStart: from < range.start, clipEnd: to > range.end
   };
+}
+
+/**
+ * The bands in one area's lane, packed and ready to draw.
+ *
+ * A band writes its name inside itself when it is wide enough and beside
+ * itself when it is not — the rule task bars have always followed, and the
+ * reason a fortnight-long sprint used to read "CH…" while a task next to it
+ * read in full. Which side it is written on has to reach the packing, or two
+ * bands whose names overlap would be stacked as though they did not.
+ */
+export function bandRows(sprints, range, dayW) {
+  return packLanes(sprints.map((p) => {
+    const s = bandSpan(p, range);
+    if (!s) return null;
+    const pct = sprintProgress(p);
+    const done = pct === null ? 0 : p.deliverables.filter((d) => d.done).length;
+    const name = p.title.length > MAX_LABEL ? p.title.slice(0, MAX_LABEL - 1) + '…' : p.title;
+    const count = pct === null ? '' : `${done}/${p.deliverables.length}`;
+    const label = count ? `${name} · ${count}` : name;
+    const need = Math.ceil((label.length * LABEL_CHAR + 16) / dayW);
+    const inside = s.days >= need;
+    const flip = !inside && range.days - s.to < need;
+    return {
+      p, ...s, name, count, label, inside, flip, pct, done,
+      head: (!inside && flip) ? s.from - need : s.from,
+      reserve: (!inside && !flip) ? s.to + need : s.to
+    };
+  }).filter(Boolean));
 }
 
 /**
@@ -334,42 +364,39 @@ function areaLane(area, packed, { go, navigate }, range, dayW) {
   // bands first, at the top of the lane, with the work stacked underneath:
   // a focus is the frame the items sit inside, and reading it the other way
   // round means finding the frame at the bottom of a tall lane
-  const bands = packLanes(
-    sprintsForArea(area.id).map((p) => ({ p, ...bandSpan(p, range) })).filter((s) => s.days)
-  );
+  const bands = bandRows(sprintsForArea(area.id), range, dayW);
   const bandLanes = bands.rows.length ? bands.lanes : 0;
-  const offset = bandLanes * LANE_H;
+  const offset = bandLanes * BAND_H;
 
   const track = h('div', {
     class: 'gantt-track is-lane',
-    style: { height: `${(bandLanes + packed.lanes) * LANE_H + 8}px` }
+    style: { height: `${offset + packed.lanes * LANE_H + 8}px` }
   });
 
   for (const s of bands.rows) {
     const p = s.p;
-    const pct = sprintProgress(p);
-    const done = pct !== null ? p.deliverables.filter((d) => d.done).length : 0;
     track.append(h('button', {
       class: `gantt-span is-${p.kind}`
+        + (s.inside ? ' inside' : '') + (s.flip ? ' flip' : '')
         + (s.clipStart ? ' clip-l' : '') + (s.clipEnd ? ' clip-r' : ''),
       style: {
-        left: `calc(var(--day-w) * ${s.from})`,
-        width: `calc(var(--day-w) * ${s.days})`,
-        top: `${4 + s.lane * LANE_H}px`,
+        [s.flip ? 'right' : 'left']:
+          `calc(var(--day-w) * ${s.flip ? range.days - 1 - s.to : s.from})`,
+        top: `${4 + s.lane * BAND_H}px`,
         '--c': area.color
       },
       title: `${p.kind === 'sprint' ? 'Sprint' : 'Focus'} · ${p.title}\n`
         + `${fmtDate(p.start)} → ${fmtDate(p.end)}`
-        + (pct === null ? '' : `\n${done}/${p.deliverables.length} delivered`),
+        + (s.pct === null ? '' : `\n${s.done}/${p.deliverables.length} delivered`),
       onclick: () => openSprint(p.id, { onDone: navigate })
     },
-    pct !== null
-      ? h('span', { class: 'gantt-fill', style: { width: `${Math.round(pct * 100)}%` } })
-      : null,
-    h('span', { class: 'gantt-span-t' }, p.title),
-    pct !== null
-      ? h('span', { class: 'gantt-span-n num' }, `${done}/${p.deliverables.length}`)
-      : null));
+    h('span', { class: 'gantt-band', style: { width: `calc(var(--day-w) * ${s.days})` } },
+      s.pct !== null
+        ? h('span', { class: 'gantt-fill', style: { width: `${Math.round(s.pct * 100)}%` } })
+        : null,
+      s.inside ? h('span', { class: 'gantt-span-t' }, s.name) : null,
+      s.inside && s.count ? h('span', { class: 'gantt-span-n num' }, s.count) : null),
+    s.inside ? null : h('span', { class: 'gantt-tag' }, s.label)));
   }
 
   for (const s of packed.rows) {

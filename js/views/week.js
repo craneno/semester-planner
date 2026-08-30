@@ -8,7 +8,7 @@ import {
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
-import { dragCreate, newBlockPrompt } from '../timegrid.js';
+import { dragCreate, dragBlock, newBlockPrompt } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 
 let anchor = today();          // any date inside the shown week
@@ -152,8 +152,7 @@ export function renderWeek(root, { navigate } = {}) {
         title: `${t.title} · ${fmtDuration(mins)}${t.due ? ` · due ${fmtDate(t.due)}` : ''}`
       },
       h('div', { class: 't' }, fmtTime(t.plan.start, hour12) + ' · ' + fmtDuration(mins)),
-      h('div', { class: 'n' }, t.title),
-      h('div', { class: 'grip' }));
+      h('div', { class: 'n' }, t.title));
       wireBlock(el, t, body, days, dayStart, hourH, navigate);
       col.append(el);
     }
@@ -253,48 +252,20 @@ function hit(ev, body, days, dayStart, hourH) {
   return { date: days[idx], mins, col: cols[idx] };
 }
 
+/**
+ * The middle carries a block to another time — or another day, since this
+ * grid's hit test names one. The top and bottom edges stretch it. All three
+ * are `dragBlock`, shared with Overview's clock; only the geometry differs.
+ */
 function wireBlock(el, item, body, days, dayStart, hourH, navigate) {
-  const grip = el.querySelector('.grip');
-  let mode = null, ghost = null;
-
-  draggable(el, {
-    onStart: (ev) => {
-      mode = ev.target === grip ? 'resize' : 'move';
-      el.classList.add('dragging');
-    },
-    onMove: (ev) => {
-      edgeScroll(ev, body);
-      const { date, mins, col } = hit(ev, body, days, dayStart, hourH);
-      if (!ghost) { ghost = h('div', { class: 'drop-ghost' }); }
-      if (mode === 'move') {
-        const dur = item.plan.mins || 60;
-        ghost.style.top = ((mins - dayStart * 60) / 60 * hourH) + 'px';
-        ghost.style.height = (dur / 60 * hourH - 2) + 'px';
-        col.append(ghost);
-        el.dataset.pendDate = date;
-        el.dataset.pendMins = mins;
-      } else {
-        const startM = toMin(item.plan.start);
-        const dur = Math.max(15, snap(mins - startM));
-        ghost.style.top = ((startM - dayStart * 60) / 60 * hourH) + 'px';
-        ghost.style.height = (dur / 60 * hourH - 2) + 'px';
-        el.parentElement.append(ghost);
-        el.dataset.pendDur = dur;
-      }
-    },
-    onEnd: () => {
-      el.classList.remove('dragging');
-      ghost?.remove(); ghost = null;
-      if (mode === 'move' && el.dataset.pendDate) {
-        const date = el.dataset.pendDate, start = fromMin(+el.dataset.pendMins);
-        commit(() => { item.plan = { ...item.plan, date, start }; item.updatedAt = new Date().toISOString(); });
-        pushItem(item.id).catch(() => {});
-      } else if (mode === 'resize' && el.dataset.pendDur) {
-        const mins = +el.dataset.pendDur;
-        commit(() => { item.plan = { ...item.plan, mins }; item.updatedAt = new Date().toISOString(); });
-        pushItem(item.id).catch(() => {});
-      }
-      mode = null;
+  const mins = item.plan.mins || item.estMins || 60;
+  dragBlock(el, { date: item.plan.date, start: item.plan.start, mins }, {
+    hit: (ev) => hit(ev, body, days, dayStart, hourH),
+    hourH, origin: dayStart * 60,
+    edge: (ev) => edgeScroll(ev, body),
+    onDrop: (plan) => {
+      commit(() => { item.plan = { ...item.plan, ...plan }; item.updatedAt = new Date().toISOString(); });
+      pushItem(item.id).catch(() => {});
       navigate();
     },
     onClick: () => openItem(item.id)

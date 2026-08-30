@@ -16,7 +16,7 @@ import {
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
-import { dragCreate, newBlockPrompt, snapMins, edgeScroll } from '../timegrid.js';
+import { dragCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 
 export function renderOverview(root, { navigate, go }) {
@@ -156,13 +156,21 @@ function todayColumn(day, { navigate, go }) {
       onclick: () => e.link && window.open(e.link, '_blank', 'noopener')
     }));
   }
+  /* Planned work is the only thing here that can be taken hold of: a class
+     comes from an area's recurring schedule and a Google event is a mirror, so
+     dragging either would be editing something this grid is not showing. The
+     click is wired through the gesture rather than as an onclick, or the click
+     the browser fires after a drag would open the panel every time. */
+  const plans = [];
   for (const t of itemsPlannedOn(day).filter((x) => x.plan.start)) {
     const mins = t.plan.mins || t.estMins || 60;
-    lanes.append(block({
+    const el = block({
       start: toMin(t.plan.start), mins, cls: 'plan', color: areaColor(t.areaId),
       title: t.title, sub: `${areaName(t.areaId)} · ${fmtDuration(mins)}`,
-      done: t.done, onclick: () => openItem(t.id)
-    }));
+      done: t.done
+    });
+    lanes.append(el);
+    plans.push([el, t, mins]);
   }
 
   if (day === today()) {
@@ -195,6 +203,20 @@ function todayColumn(day, { navigate, go }) {
     edge: (ev) => edgeScroll(scroller, ev),
     onPick: (range) => newBlockPrompt(range, { onDone: navigate })
   });
+
+  // and take hold of one that is already there: middle moves, edges stretch
+  for (const [el, t, mins] of plans) {
+    dragBlock(el, { date: day, start: t.plan.start, mins }, {
+      hit: at, hourH,
+      edge: (ev) => edgeScroll(scroller, ev),
+      onDrop: (plan) => {
+        commit(() => { t.plan = { ...t.plan, ...plan }; t.updatedAt = new Date().toISOString(); });
+        pushItem(t.id).catch(() => {});
+        navigate();
+      },
+      onClick: () => openItem(t.id)
+    });
+  }
   lanes.addEventListener('dblclick', (ev) => {
     if (ev.target !== lanes) return;
     newBlockPrompt({ date: day, start: fromMin(at(ev).mins), mins: 60 }, { onDone: navigate });

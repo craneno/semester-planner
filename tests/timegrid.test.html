@@ -22,7 +22,10 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     areas: [{ id: 'c1', name: 'Thermo', category: 'course', order: 0 }],
     items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {}
   });
-  const { sweep, spanBetween, snapMins, SNAP } = await import('../js/timegrid.js');
+  const {
+    sweep, spanBetween, snapMins, SNAP,
+    grabMode, moveBlock, resizeTop, resizeBottom, EDGE
+  } = await import('../js/timegrid.js');
 
   /* ---- quarter hours ---- */
 
@@ -83,6 +86,80 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     check('the same time twice is not a zero-length block',
       spanBetween('09:00', '09:00') === 60);
     check('nonsense is an hour', spanBetween('', 'later') === 60);
+  }
+
+  /* ---- which part of a block the pointer has hold of ---- */
+
+  {
+    const tall = { top: 100, bottom: 200, height: 100 };
+    check('the top edge resizes', grabMode(tall, 103) === 'top');
+    check('the bottom edge resizes', grabMode(tall, 197) === 'bottom');
+    check('the middle moves', grabMode(tall, 150) === 'move');
+    check('one pixel inside the edge is still the edge',
+      grabMode(tall, 100 + EDGE - 1) === 'top' && grabMode(tall, 200 - EDGE + 1) === 'bottom');
+    check('one pixel past it is the middle',
+      grabMode(tall, 100 + EDGE) === 'move' && grabMode(tall, 200 - EDGE) === 'move');
+
+    // a quarter-hour block is about 13px tall on the day clock
+    const short = { top: 0, bottom: 13, height: 13 };
+    check('a short block keeps a middle to be moved by',
+      grabMode(short, 6) === 'move',
+      'two full edges would leave a quarter-hour block impossible to move');
+    check('...and still has edges', grabMode(short, 1) === 'top' && grabMode(short, 12) === 'bottom');
+    const tiny = { top: 0, bottom: 2, height: 2 };
+    check('a block too small for any of it is all middle',
+      grabMode(tiny, 1) === 'move',
+      'better a block that only moves than one that cannot be caught at all');
+  }
+
+  /* ---- carrying a block to another time ---- */
+
+  {
+    check('a block moves to where it is put',
+      (() => { const r = moveBlock(10 * 60, 90); return r.start === 600 && r.mins === 90; })());
+    check('...keeping its length', moveBlock(7 * 60 + 7, 45).mins === 45);
+    check('...and snapping to the quarter', moveBlock(607, 60).start === 600);
+    check('a block carried off the top of the day stops at midnight',
+      moveBlock(-90, 60).start === 0);
+    check('a block carried off the bottom stops with its end at midnight',
+      (() => { const r = moveBlock(23 * 60 + 45, 60); return r.start + r.mins === 24 * 60; })(),
+      'the whole block stays in the day, rather than its tail being cut off');
+    check('a block longer than the grid still lands somewhere',
+      moveBlock(600, 26 * 60).start === 0);
+  }
+
+  /* ---- stretching one by an edge ---- */
+
+  {
+    // 09:00 for an hour
+    const s = 9 * 60, dur = 60;
+
+    check('dragging the top up starts it earlier and makes it longer',
+      (() => { const r = resizeTop(s, dur, 8 * 60 + 30); return r.start === 510 && r.mins === 90; })());
+    check('dragging the top down starts it later and makes it shorter',
+      (() => { const r = resizeTop(s, dur, 9 * 60 + 30); return r.start === 570 && r.mins === 30; })());
+    check('the end stays exactly where it was',
+      [8 * 60, 9 * 60 + 15, 9 * 60 + 45].every((m) => {
+        const r = resizeTop(s, dur, m); return r.start + r.mins === s + dur;
+      }), 'the top edge is the only one being dragged');
+    check('the top cannot be dragged past the end',
+      (() => { const r = resizeTop(s, dur, 11 * 60); return r.mins === 15 && r.start === s + dur - 15; })(),
+      'a block turned inside out would draw with a negative height');
+    check('...nor off the top of the day', resizeTop(s, dur, -120).start === 0);
+
+    check('dragging the bottom down makes it longer',
+      (() => { const r = resizeBottom(s, 11 * 60); return r.start === 540 && r.mins === 120; })());
+    check('dragging the bottom up makes it shorter',
+      resizeBottom(s, 9 * 60 + 30).mins === 30);
+    check('the start stays exactly where it was',
+      [8 * 60, 10 * 60, 23 * 60].every((m) => resizeBottom(s, m).start === s));
+    check('the bottom cannot be dragged above the start',
+      resizeBottom(s, 7 * 60).mins === 15,
+      'one quarter is the floor, the same one a swept range gets');
+    check('...nor past midnight',
+      resizeBottom(s, 26 * 60).start + resizeBottom(s, 26 * 60).mins === 24 * 60);
+    check('a grid that ends early clamps a stretch to its own end',
+      resizeBottom(s, 23 * 60, { dayEnd: 22 * 60 }).mins === 22 * 60 - s);
   }
 });
 </script>

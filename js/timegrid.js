@@ -45,6 +45,149 @@ export function spanBetween(start, end) {
 const label = (mins, hour12) =>
   (mins >= DAY ? 'midnight' : fmtTime(fromMin(mins), hour12));
 
+/* ---------------- moving and resizing a block ----------------
+   The other half of the calendar gesture: take hold of a block that is already
+   there. The middle moves it, the top and bottom edges stretch it — the same
+   three targets every calendar has, and the reason a block needs no handles
+   drawn on it. */
+
+/** How deep the resize zones at the top and bottom of a block reach, in px. */
+export const EDGE = 8;
+
+/**
+ * Which part of a block the pointer has hold of.
+ *
+ * The zones shrink with the block, and the middle always keeps a third: on a
+ * quarter-hour block two 8px edges would leave nothing to move it by, and a
+ * calendar where short things can only be resized is worse than one where
+ * they cannot be resized at all.
+ */
+export function grabMode(rect, clientY, edge = EDGE) {
+  const zone = Math.min(edge, Math.floor(rect.height / 3));
+  if (zone < 1) return 'move';
+  if (clientY - rect.top < zone) return 'top';
+  if (rect.bottom - clientY < zone) return 'bottom';
+  return 'move';
+}
+
+/**
+ * Where a block lands when it is carried to `mins`.
+ *
+ * `mins` is already the would-be start — the caller subtracts wherever in the
+ * block it was picked up, so a block grabbed by its middle keeps that grip
+ * instead of snapping its top under the pointer.
+ */
+export function moveBlock(mins, dur, { dayEnd = DAY } = {}) {
+  return { start: clamp(snapMins(mins), 0, Math.max(0, dayEnd - dur)), mins: dur };
+}
+
+/** The top edge moves the start; the end stays where it was put. */
+export function resizeTop(startMin, dur, mins, { min = SNAP } = {}) {
+  const end = startMin + dur;
+  const start = clamp(snapMins(mins), 0, end - min);
+  return { start, mins: end - start };
+}
+
+/** The bottom edge moves the end; the start stays where it was put. */
+export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) {
+  const end = clamp(snapMins(mins), startMin + min, dayEnd);
+  return { start: startMin, mins: end - startMin };
+}
+
+/**
+ * Wire one block for dragging.
+ *
+ * plan      { date, start, mins } as drawn — read once, since a re-render
+ *           replaces the element anyway
+ * hit(ev)   -> { date, mins, col }, the same hit test `dragCreate` uses. A
+ *           move follows it wherever it goes, so a grid whose `hit` can name
+ *           another day lets a block cross to it and one that cannot, will not
+ * onDrop({ date, start, mins })   — only when something actually changed
+ * onClick() — a press that never moved is a click, and must open the thing
+ *
+ * A resize stays in the block's own column whatever the pointer does
+ * sideways: dragging an end into tomorrow is not a thing a day grid can draw.
+ */
+export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onClick, dayEnd = DAY }) {
+  const startMin = toMin(plan.start);
+
+  el.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0) return;
+    // touch scrolls the grid, as it does for the sweep
+    if (ev.pointerType === 'touch') return;
+    const anchor = hit(ev);
+    if (!anchor) return;
+
+    const mode = grabMode(el.getBoundingClientRect(), ev.clientY);
+    // where in the block it was taken hold of, kept for the whole drag
+    const grab = anchor.mins - startMin;
+    const hour12 = state.settings.hour12;
+    const startX = ev.clientX, startY = ev.clientY;
+    let ghost = null, started = false, pend = null;
+
+    const paint = (e) => {
+      const now = hit(e) || anchor;
+      let range, col, date;
+      if (mode === 'move') {
+        range = moveBlock(now.mins - grab, plan.mins, { dayEnd });
+        col = now.col;
+        date = now.date;
+      } else {
+        range = mode === 'top'
+          ? resizeTop(startMin, plan.mins, now.mins)
+          : resizeBottom(startMin, now.mins, { dayEnd });
+        col = el.parentElement;
+        date = plan.date;
+      }
+      pend = { date, start: fromMin(range.start), mins: range.mins };
+      if (!ghost) ghost = h('div', { class: 'drop-ghost is-new' }, h('span', { class: 'ghost-t' }));
+      if (ghost.parentElement !== col) col.append(ghost);
+      ghost.style.top = ((range.start - origin) / 60 * hourH) + 'px';
+      ghost.style.height = Math.max(11, range.mins / 60 * hourH - 2) + 'px';
+      ghost.firstChild.textContent =
+        `${label(range.start, hour12)} – ${label(range.start + range.mins, hour12)}`;
+    };
+
+    const move = (e) => {
+      if (!started) {
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 4) return;
+        started = true;
+        el.setPointerCapture?.(e.pointerId);
+        el.classList.add('dragging');
+        document.body.classList.add(mode === 'move' ? 'is-moving' : 'is-sweeping');
+      }
+      e.preventDefault();
+      edge?.(e);
+      paint(e);
+    };
+
+    const finish = (fire) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', onKey);
+      document.body.classList.remove('is-moving', 'is-sweeping');
+      el.classList.remove('dragging');
+      ghost?.remove();
+      ghost = null;
+      if (!started) { onClick?.(); return; }
+      // a block put back exactly where it was is not an edit, and committing
+      // one would stamp updatedAt and push it to Google for nothing
+      const same = fire && pend
+        && pend.date === plan.date && pend.start === plan.start && pend.mins === plan.mins;
+      if (fire && pend && !same) onDrop?.(pend);
+    };
+    const up = () => finish(true);
+    const cancel = () => finish(false);
+    const onKey = (e) => { if (e.key === 'Escape') cancel(); };
+
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', onKey);
+  });
+}
+
 /** Nudge a scroller when the pointer reaches its top or bottom edge. */
 export function edgeScroll(scroller, ev, margin = 44) {
   if (!scroller) return;
