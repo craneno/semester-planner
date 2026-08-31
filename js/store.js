@@ -1306,6 +1306,12 @@ export function parseQuickAdd(input) {
     text = text.replace(pm[0], ' ');
   }
 
+  // "all day" — a date to itself, no time in it. Taken out first so nothing
+  // downstream reads "day" as a word in the title or "all day" as a range.
+  const allDayRe = /\ball[\s-]?day\b/i;
+  const allDay = allDayRe.test(text);
+  if (allDay) text = text.replace(allDayRe, ' ');
+
   // duration
   const dm = text.match(/\s(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?)\b/i);
   if (dm) {
@@ -1388,6 +1394,15 @@ export function parseQuickAdd(input) {
 
   if (range) {
     out.plan = { date: out.due || out.plan?.date || today(), start: range.start, mins: range.mins };
+    out.due = null;
+    out.dueTime = null;
+    if (!hinted) out.type = 'event';
+  }
+
+  // "all day" wins over any time that came with the date: whichever day was
+  // named is the whole of it, and a deadline for that day becomes the day
+  if (allDay) {
+    out.plan = { date: out.plan?.date || out.due || today(), start: null, mins: 0 };
     out.due = null;
     out.dueTime = null;
     if (!hinted) out.type = 'event';

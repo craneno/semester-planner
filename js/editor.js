@@ -88,16 +88,22 @@ function render(item) {
      data — a booked block with a start time — so there is no extra field to
      keep honest. */
   const plan = item.plan || {};
-  const scheduled = !!plan.start;
+  // Three states, all read off the data rather than stored beside it: a block
+  // with a start, a day with no time in it, and a thing that is merely owed.
+  const mode = plan.date ? (plan.start ? 'scheduled' : 'allday') : 'deadline';
+  const scheduled = mode === 'scheduled';
 
   const toMode = (next) => {
+    if (next === mode) return;
+    // whatever date and time this already had follows it across, or switching
+    // back and forth quietly loses what you set
+    const date = plan.date || item.due || today();
+    const start = plan.start || item.dueTime || '09:00';
     if (next === 'scheduled') {
-      // carry the deadline's own date and time across, or switching back and
-      // forth quietly loses the time you set
-      const date = plan.date || item.due || today();
-      const start = plan.start || item.dueTime || '09:00';
       set({ plan: { date, start, mins: plan.mins || item.estMins || 60 }, due: null, dueTime: null },
         { resync: true });
+    } else if (next === 'allday') {
+      set({ plan: { date, start: null, mins: 0 }, due: null, dueTime: null }, { resync: true });
     } else {
       set({ due: item.due || plan.date || today(), dueTime: item.dueTime || plan.start || null, plan: null },
         { resync: true });
@@ -105,18 +111,24 @@ function render(item) {
     rerender();
   };
 
+  const modeBtn = (id, label) => h('button', {
+    class: 'mode' + (mode === id ? ' on' : ''), type: 'button',
+    'aria-pressed': String(mode === id), onclick: () => toMode(id)
+  }, label);
+
   props.append(prop('When',
     h('div', { class: 'mode-toggle' },
-      h('button', {
-        class: 'mode' + (scheduled ? ' on' : ''), type: 'button',
-        'aria-pressed': String(scheduled), onclick: () => scheduled || toMode('scheduled')
-      }, 'Scheduled'),
-      h('button', {
-        class: 'mode' + (scheduled ? '' : ' on'), type: 'button',
-        'aria-pressed': String(!scheduled), onclick: () => scheduled && toMode('deadline')
-      }, 'Deadline'))));
+      modeBtn('scheduled', 'Scheduled'),
+      modeBtn('allday', 'All day'),
+      modeBtn('deadline', 'Deadline'))));
 
-  if (scheduled) {
+  if (mode === 'allday') {
+    props.append(prop('Date',
+      h('input', {
+        type: 'date', value: plan.date || '',
+        onchange: (e) => { set({ plan: { ...plan, date: e.target.value || today(), start: null, mins: 0 } }, { resync: true }); rerender(); }
+      })));
+  } else if (scheduled) {
     const endOf = (p) => fromMin(Math.min(24 * 60 - 1, toMin(p.start || '09:00') + (p.mins || 60)));
     props.append(prop('Date',
       h('input', {

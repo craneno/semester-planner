@@ -92,7 +92,14 @@ window.addEventListener('hashchange', () => { closePeek(); navigate(); });
 
 /* ---------------- chrome ---------------- */
 
-const closeSidebar = () => $('#sidebar').classList.remove('open');
+/* One place decides whether the menu is showing: the sidebar's own class draws
+   it, and the body class is what puts the scrim behind it. */
+function setSidebar(open) {
+  $('#sidebar').classList.toggle('open', open);
+  document.body.classList.toggle('nav-open', open);
+}
+const closeSidebar = () => setSidebar(false);
+const sidebarOpen = () => $('#sidebar').classList.contains('open');
 
 function navButton({ glyph, label, current: isOn, onclick, key }) {
   return h('button', {
@@ -243,6 +250,44 @@ function sweep() {
   });
 }
 
+/* ---------------- the menu, by thumb ----------------
+   Drag in from the left edge to bring the sidebar out, and back to the left to
+   put it away. Kept to the edge on purpose: the week grid is a horizontal
+   scroller and the tray under it is another, so a swipe that counted anywhere
+   on the page would take the gesture away from both. A drag that is mostly
+   vertical is a scroll and is let go of at once. */
+
+const EDGE = 26;      // how far in from the left a swipe may start
+const SWIPE = 52;     // how far it must travel to count
+
+function wireNavSwipe() {
+  const phone = () => matchMedia('(max-width: 860px)').matches;
+  let x0 = 0, y0 = 0, job = null;
+
+  document.addEventListener('touchstart', (e) => {
+    job = null;
+    if (!phone() || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (sidebarOpen()) job = 'close';
+    else if (t.clientX <= EDGE) job = 'open';
+    else return;
+    x0 = t.clientX; y0 = t.clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!job || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
+    // scrolling down the menu is not a swipe out of it
+    if (Math.abs(dy) > Math.abs(dx)) { job = null; return; }
+    if (job === 'open' && dx > SWIPE) { setSidebar(true); job = null; }
+    else if (job === 'close' && dx < -SWIPE) { setSidebar(false); job = null; }
+  }, { passive: true });
+
+  const done = () => { job = null; };
+  document.addEventListener('touchend', done, { passive: true });
+  document.addEventListener('touchcancel', done, { passive: true });
+}
+
 /* ---------------- what's on now ----------------
    The one thing the topbar says about today, on every screen: what you are in
    the middle of, or what is coming. Small, and never a count of anything. */
@@ -267,6 +312,14 @@ function paintNextUp() {
 /** A clock the page has no other reason to keep: "Now" stops being true on its
  *  own, with nothing committed and no render to hang the repaint off — and so
  *  does the day itself, on a tab left open past 3am. */
+/* The calendars measure themselves in CSS pixels read from the stylesheet, and
+   the stylesheet gives an hour a different height on a phone. Crossing the
+   breakpoint — a rotation, usually — has to redraw them, or every block keeps
+   the geometry of the layout it was born in. */
+matchMedia('(max-width: 860px)').addEventListener('change', () => {
+  try { navigate(); } catch { /* pre-boot */ }
+});
+
 let shownDay = today();
 setInterval(() => {
   try {
@@ -338,10 +391,15 @@ function wireQuickAdd() {
     const parsed = parseQuickAdd(input.value);
     let created;
     commit(() => { created = upsertItem(parsed); });
+    // a block typed here is a block like any other, and belongs on the
+    // calendar as soon as it exists rather than whenever something else pushes
+    if (parsed.plan?.date) G.pushItem(created.id).catch(() => {});
     input.value = '';
     const bits = [];
     if (parsed.due) bits.push('due ' + fmtDate(parsed.due));
-    if (parsed.plan?.date) bits.push('planned ' + fmtDate(parsed.plan.date));
+    if (parsed.plan?.date) {
+      bits.push((parsed.plan.start ? 'planned ' : 'all day ') + fmtDate(parsed.plan.date));
+    }
     toast(`Added${bits.length ? ' · ' + bits.join(' · ') : ''}`, { action: 'Open', onAction: () => openItem(created.id) });
     navigate();
   });
@@ -368,7 +426,9 @@ function boot() {
   wireQuickAdd();
   wireKeys();
 
-  $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+  $('#menu-btn').addEventListener('click', () => setSidebar(!sidebarOpen()));
+  $('#nav-scrim').addEventListener('click', closeSidebar);
+  wireNavSwipe();
 
   // collapsing the sidebar: the toggle lives in the topbar, so it is still
   // there to bring it back once the sidebar itself is gone

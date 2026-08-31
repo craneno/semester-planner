@@ -97,6 +97,31 @@ suite('Quick add — dates, ranges and types', async ({ check }) => {
   check('an area is matched by #tag', p('essay #Thermodynamics').areaId === 'a1');
   check('no match leaves it for the store to default', p('random thing').areaId === null);
 
+  /* ---- all day ----
+     A date with no time in it: the third shape a `when` can take, beside a
+     booked block and a deadline. It reaches Google as an all-day event, so
+     the parse has to leave a plan behind rather than a due date. */
+
+  {
+    const r = p('team dinner sep 12 all day');
+    check('"all day" books the day rather than a deadline',
+      !!r.plan && r.plan.date === '2026-09-12', `got ${JSON.stringify(r.plan)}`);
+    check('...with no time of its own', r.plan.start === null, `got ${r.plan.start}`);
+    check('...and nothing owed', r.due === null && r.dueTime === null);
+    check('the words are out of the title', r.title === 'team dinner', `got "${r.title}"`);
+  }
+
+  check('a hyphen reads the same', p('conference oct 2 all-day').plan?.start === null);
+  check('and one word too', p('conference oct 2 allday').plan?.start === null);
+  const { today } = await import('../js/util.js');
+  check('"all day" alone means today',
+    p('reading day all day').plan?.date === today(), `got ${p('reading day all day').plan?.date}`);
+  check('a time range loses to it — the day was named twice',
+    p('offsite sep 12 9-5 all day').plan?.start === null);
+  check('"all" on its own is just a word',
+    p('read all of chapter 4 sep 12').plan === null);
+  check('...and so is "day"', p('day trip sep 12').plan === null);
+
   /* ---- what the store then does with it ---- */
 
   {

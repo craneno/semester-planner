@@ -10,7 +10,7 @@
 import { suite } from './harness.js';
 
 suite('Cloud sync — delete durability', async ({ check }) => {
-  const { state, commit, upsertItem, deleteItem, itemById } = await import('../js/store.js');
+  const { state, commit, subscribe, upsertItem, deleteItem, itemById, applyRow } = await import('../js/store.js');
   const C = await import('../js/cloud.js');
 
   /* A stand-in for Supabase: one in-memory table that stamps synced_at on write,
@@ -138,6 +138,37 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('new remote row is adopted', !!itemById('remote1'), '(never arrived)');
   }
 
+  /* Our own write comes back down the realtime channel we are subscribed to.
+     Applying it sets the row to what it already holds and still reports a
+     change, and the repaint that follows takes the caret out of whatever was
+     being typed — the typing having caused the write. */
+  async function tOwnEchoIsQuiet() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'fw', title: 'freewrite' }); });
+    await C.sync();
+
+    // the server re-announces the row we just sent, unchanged
+    const row = serverRow(fake, 'fw');
+    row.synced_at = new Date(Date.UTC(2026, 0, 9)).toISOString();
+
+    let repaints = 0;
+    const off = subscribe((meta) => { if (meta?.source === 'cloud') repaints++; });
+    await C.sync();
+    off();
+
+    check('our own echo repaints nothing', repaints === 0, `(repainted ${repaints}x)`);
+    check('...and the row is still here', itemById('fw')?.title === 'freewrite');
+  }
+
+  /* The guard has to be the hash, not applyRow: applyRow reports a change for
+     any live row, identical or not, which is what made the echo loud. */
+  {
+    const before = state.items.length;
+    check('applyRow cannot tell an identical row from a new one',
+      applyRow({ kind: 'item', id: 'nosuch', data: { id: 'nosuch', title: 'x' }, deleted: false }) === true);
+    state.items.length = before;
+  }
+
   /* ...and a delete made on another device must still remove it here. */
   async function tRemoteTombstoneApplied() {
     const fake = fresh();
@@ -157,6 +188,7 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['delete beats a live pull', tDeleteBeatsLivePull],
     ['delete during push', tDeleteDuringPush],
     ['remote row adopted', tRemoteRowAdopted],
+    ['our own echo is quiet', tOwnEchoIsQuiet],
     ['remote tombstone applied', tRemoteTombstoneApplied]
   ]) {
     await fn();

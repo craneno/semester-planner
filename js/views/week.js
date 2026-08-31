@@ -1,7 +1,7 @@
 // views/week.js — the calendar. Owned blocks are filled, borrowed ones are outlined.
 
 import {
-  h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel
+  h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx
 } from '../util.js';
 import {
   state, commit, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor
@@ -94,7 +94,9 @@ export function renderWeek(root, { navigate } = {}) {
   }
   body.append(gutter);
 
-  const hourH = 52;
+  // read, never assumed: `--hour-h` is shorter on a phone, and a block drawn
+  // at a desktop hour would sit most of an hour below its own gridline
+  const hourH = hourHeight();
   const top = (mins) => ((mins - dayStart * 60) / 60) * hourH;
 
   days.forEach((d, i) => {
@@ -224,6 +226,9 @@ export function renderWeek(root, { navigate } = {}) {
 }
 
 const snap = (mins) => clamp(Math.round(mins / 15) * 15, 0, 24 * 60 - 15);
+
+/** How tall an hour is drawn, straight from the stylesheet that draws it. */
+const hourHeight = () => cssPx('--hour-h', 52);
 
 /** Nudge the grid when a drag reaches its top or bottom edge. */
 function edgeScroll(ev, body) {

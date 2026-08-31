@@ -9,6 +9,18 @@
 
 export const CHANGELOG = [
   {
+    version: 'v31', date: '2026-08-31',
+    title: 'The phone, fixed',
+    notes: [
+      'Blocks in the Week view sat almost an hour below their own gridline on a phone: the grid drew a shorter hour there than the blocks were placed for. Both read the same number now.',
+      'Tap a block to open it. Touch never started a drag, and the drag was the only thing listening for a tap — so on a phone a block could not be opened at all.',
+      'Habits: the name gets a line of its own and the week sits under it, ticks full width. Seven boxes and two numbers had left the name reading four characters wide.',
+      'Drag in from the left edge for the menu, and back to the left to put it away. Tapping beside it closes it too.',
+      'Writing is no longer interrupted. Sync heard its own change come back from the server and repainted the page for it — every few seconds while you typed, which takes the caret with it. The same went for a quiet minute on Google Calendar.',
+      'All-day events. Say “all day” when you add one, or pick it in the panel beside Scheduled and Deadline. It sits in the all-day row above the grid and goes to Google Calendar as a real all-day event.'
+    ]
+  },
+  {
     version: 'v30', date: '2026-08-30',
     title: 'The day now ends at 3am',
     notes: [

@@ -220,6 +220,11 @@ async function pull(c) {
 
     for (const row of data) {
       if (row.synced_at > maxSynced) maxSynced = row.synced_at;
+      // Our own write, coming back down the realtime channel we are subscribed
+      // to. Applying it would set the row to what it already holds and still
+      // report a change, and the re-render that follows takes the caret out of
+      // whatever was being typed — the write having been caused by that typing.
+      if (!row.deleted && hashes[key(row.kind, row.id)] === hash(row.data)) continue;
       if (winner(row, baseline, hashes) === 'remote') {
         if (applyRow(row)) changed = true;
       }

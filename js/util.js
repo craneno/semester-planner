@@ -206,3 +206,17 @@ export function hexAlpha(hex, a) {
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16));
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
+
+/**
+ * A length read off a CSS custom property, in pixels.
+ *
+ * The calendars draw themselves in JS but rule themselves in CSS: the hour
+ * lines are a repeating gradient, the blocks are absolutely positioned, and
+ * the two only line up while they agree on how tall an hour is. Reading the
+ * number back from the stylesheet is what keeps a media query that shortens
+ * the hour from sliding every block an hour down the page.
+ */
+export function cssPx(name, fallback) {
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}

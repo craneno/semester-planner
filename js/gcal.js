@@ -308,21 +308,35 @@ export async function sync({ full = false } = {}) {
     return;
   }
 
-  applyIncoming(incoming, { replace: !useToken });
+  const changed = applyIncoming(incoming, { replace: !useToken });
   cfg().syncToken = nextSync || cfg().syncToken;
   cfg().lastSync = new Date().toISOString();
-  commit(null, { source: 'gcal' });
+  // the cursor and the timestamp are worth saving either way; the repaint is
+  // only worth it when the calendar actually said something
+  commit(null, changed ? { source: 'gcal' } : undefined);
   setStatus('ready');
 }
 
+/**
+ * Fold what Google sent into state, and say whether any of it landed.
+ *
+ * The answer matters: a quiet minute is the common case, and repainting the
+ * screen for one takes the caret out of whatever is being written.
+ */
 function applyIncoming(raw, { replace }) {
   const byId = new Map(replace ? [] : state.events.map((e) => [e.id, e]));
+  const was = JSON.stringify(state.events);
+  let touched = false;
 
   for (const ev of raw) {
     if (ev.status === 'cancelled') {
       byId.delete(ev.id);
       const owned = state.items.find((t) => t.gcalId === ev.id);
-      if (owned) { owned.gcalId = null; owned.plan = owned.plan ? { ...owned.plan, start: owned.plan.start } : null; }
+      if (owned) {
+        owned.gcalId = null;
+        owned.plan = owned.plan ? { ...owned.plan, start: owned.plan.start } : null;
+        touched = true;
+      }
       continue;
     }
     const n = normalise(ev);
@@ -331,12 +345,14 @@ function applyIncoming(raw, { replace }) {
     if (n.plannerItemId) {
       // our own block came back — accept edits made in Google Calendar
       const item = itemById(n.plannerItemId);
-      if (item && !n.allDay && n.start) {
-        const mins = Math.max(15, (toMin(n.end) || toMin(n.start) + 60) - toMin(n.start));
-        const changed = !item.plan || item.plan.date !== n.date || item.plan.start !== n.start || item.plan.mins !== mins;
-        if (changed) item.plan = { date: n.date, start: n.start, mins };
-        item.gcalId = n.id;
-        if (n.title && n.title !== item.title && !item.title) item.title = n.title;
+      if (item && n.date && (n.allDay || n.start)) {
+        const mins = n.allDay ? 0 : Math.max(15, (toMin(n.end) || toMin(n.start) + 60) - toMin(n.start));
+        const start = n.allDay ? null : n.start;
+        const changed = !item.plan || item.plan.date !== n.date
+          || (item.plan.start || null) !== start || (item.plan.mins || 0) !== mins;
+        if (changed) { item.plan = { date: n.date, start, mins }; touched = true; }
+        if (item.gcalId !== n.id) { item.gcalId = n.id; touched = true; }
+        if (n.title && n.title !== item.title && !item.title) { item.title = n.title; touched = true; }
       }
       continue; // not mirrored into state.events; it renders from the item
     }
@@ -345,19 +361,35 @@ function applyIncoming(raw, { replace }) {
 
   state.events = Array.from(byId.values())
     .filter((e) => e.date >= addDays(state.semester.start, -7) && e.date <= addDays(state.semester.end, 7));
+  return touched || JSON.stringify(state.events) !== was;
 }
 
 /* ---------------- write ---------------- */
 
-function eventBodyFor(item) {
+/**
+ * The Google event a planned item should be.
+ *
+ * A block with no start is an all-day one, and Google says all-day in dates
+ * rather than times — `end.date` being the morning *after*, which is why it is
+ * a day on rather than the same date twice.
+ */
+export function eventBodyFor(item) {
   const area = areaById(item.areaId);
-  const start = item.plan.start || '09:00';
+  const start = item.plan.start;
   const mins = item.plan.mins || item.estMins || 60;
+  const when = start
+    ? {
+      start: { dateTime: toRfc3339(item.plan.date, start), timeZone: tz() },
+      end: { dateTime: toRfc3339(item.plan.date, fromMin(toMin(start) + mins)), timeZone: tz() }
+    }
+    : {
+      start: { date: item.plan.date },
+      end: { date: addDays(item.plan.date, 1) }
+    };
   return {
+    ...when,
     summary: area ? `${area.name}: ${item.title}` : item.title,
     description: [item.notes, item.due ? `Due ${item.due}` : ''].filter(Boolean).join('\n\n'),
-    start: { dateTime: toRfc3339(item.plan.date, start), timeZone: tz() },
-    end: { dateTime: toRfc3339(item.plan.date, fromMin(toMin(start) + mins)), timeZone: tz() },
     extendedProperties: { private: { plannerItemId: item.id } },
     source: { title: 'Semester Planner', url: location.origin + location.pathname }
   };
@@ -374,7 +406,9 @@ export async function pushItem(itemId) {
   if (!cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
   if (!item) return;
 
-  const wantsEvent = !!(item.plan && item.plan.date && item.plan.start && !item.done);
+  // a date is enough: a block with no start of its own is an all-day event,
+  // not a reason to keep the thing off the calendar altogether
+  const wantsEvent = !!(item.plan && item.plan.date && !item.done);
   if (!wantsEvent && !item.gcalId) return;
 
   if (!navigator.onLine || !isSignedIn()) {

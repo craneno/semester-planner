@@ -77,6 +77,31 @@ suite('Calendar — recurring series detection', async ({ check }) => {
 
   s.state.events = [];
   check('no events means no series', G.recurringSeries().length === 0);
+
+  /* ---- what a planned block becomes on Google ----
+     A block with a start is a span of time; one without is the whole day, and
+     Google says whole days in dates rather than times — `end.date` being the
+     morning after, not the same date twice. */
+
+  {
+    const item = (plan) => ({ id: 't1', title: 'Retreat', areaId: null, notes: '', due: null, plan });
+
+    const allDay = G.eventBodyFor(item({ date: '2026-09-12', start: null, mins: 0 }));
+    check('an all-day block goes up as a date', allDay.start.date === '2026-09-12',
+      JSON.stringify(allDay.start));
+    check('...with no time in it', !allDay.start.dateTime && !allDay.end.dateTime);
+    check('...ending the morning after', allDay.end.date === '2026-09-13',
+      'Google reads end.date as exclusive; the same date twice is a zero-length event');
+
+    const timed = G.eventBodyFor(item({ date: '2026-09-12', start: '09:00', mins: 90 }));
+    check('a timed block still goes up as times',
+      !!timed.start.dateTime && !timed.start.date, JSON.stringify(timed.start));
+    check('...for exactly as long as it is', timed.end.dateTime.includes('10:30'),
+      timed.end.dateTime);
+    check('both carry the id that makes it ours',
+      allDay.extendedProperties.private.plannerItemId === 't1'
+      && timed.extendedProperties.private.plannerItemId === 't1');
+  }
 });
 </script>
 </body>

@@ -111,9 +111,24 @@ export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) 
 export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onClick, dayEnd = DAY }) {
   const startMin = toMin(plan.start);
 
+  /* The click is the block's, not the browser's. One is fired after every
+     drag, and a block with its own `onclick` would open the panel each time
+     something was moved. So the listener lives here and a finished drag eats
+     the click that follows it — which is also what lets a *tap* open the
+     panel on a phone, where there is no drag to own it. */
+  let dragged = false;
+  el.addEventListener('click', () => {
+    if (dragged) { dragged = false; return; }
+    onClick?.();
+  });
+
   el.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0) return;
-    // touch scrolls the grid, as it does for the sweep
+    // a fresh press: whatever the last drag left behind is spent, and a flag
+    // still standing because no click followed must not eat this one
+    dragged = false;
+    // touch scrolls the grid, as it does for the sweep — the tap above is how
+    // a block is opened there
     if (ev.pointerType === 'touch') return;
     const anchor = hit(ev);
     if (!anchor) return;
@@ -170,7 +185,9 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onCl
       el.classList.remove('dragging');
       ghost?.remove();
       ghost = null;
-      if (!started) { onClick?.(); return; }
+      // a press that never moved is a click, and the click listener has it
+      if (!started) return;
+      dragged = true;
       // a block put back exactly where it was is not an edit, and committing
       // one would stamp updatedAt and push it to Google for nothing
       const same = fire && pend

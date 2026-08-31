@@ -161,6 +161,53 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     check('a grid that ends early clamps a stretch to its own end',
       resizeBottom(s, 23 * 60, { dayEnd: 22 * 60 }).mins === 22 * 60 - s);
   }
+
+  /* ---- the click a block owns ----
+     The browser fires one after every drag, so dragBlock listens for it
+     rather than letting the element carry its own onclick. That is also the
+     only way a block opens on a phone, where the drag never starts. */
+
+  {
+    const { dragBlock } = await import('../js/timegrid.js');
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-9999px;top:0;width:200px;height:400px';
+    document.body.append(host);
+    const el = document.createElement('div');
+    el.style.cssText = 'position:absolute;top:0;height:52px;width:100%';
+    host.append(el);
+
+    let opened = 0;
+    dragBlock(el, { date: '2026-09-10', start: '09:00', mins: 60 }, {
+      hit: () => ({ date: '2026-09-10', mins: 540, col: host }),
+      hourH: 52,
+      onDrop: () => {},
+      onClick: () => { opened++; }
+    });
+
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    check('a tap on a block opens it', opened === 1, String(opened));
+
+    // a real drag: press, move past the threshold, release — then the click
+    // the browser sends afterwards, which must not open anything
+    const pt = (type, x, y) => new PointerEvent(type,
+      { bubbles: true, button: 0, pointerId: 1, pointerType: 'mouse', clientX: x, clientY: y });
+    el.dispatchEvent(pt('pointerdown', 10, 10));
+    window.dispatchEvent(pt('pointermove', 10, 90));
+    window.dispatchEvent(pt('pointerup', 10, 90));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    check('the click after a drag is eaten, not an open', opened === 1, String(opened));
+
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    check('...and only that one — the next tap opens it again', opened === 2, String(opened));
+
+    // touch never starts a drag, so the tap is all there is
+    el.dispatchEvent(new PointerEvent('pointerdown',
+      { bubbles: true, button: 0, pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 10 }));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    check('a touch press leaves the tap alone', opened === 3, String(opened));
+
+    host.remove();
+  }
 });
 </script>
 </body>
