@@ -387,7 +387,12 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   background: var(--bg, var(--surface));
   color: var(--ink);
   transition: box-shadow .12s ease, transform .12s ease;
-  touch-action: none;
+  /* Panning is the browser's until the press is held out — a finger that came
+     down on a block and kept going is scrolling the grid, not moving anything.
+     `dragBlock` takes the gesture from there. */
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;   /* a long press must not raise iOS's own menu */
+  user-select: none; -webkit-user-select: none;
 }
 .blk:hover { box-shadow: var(--shadow-1); z-index: 4; }
 .blk .t { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
@@ -403,6 +408,11 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); }
 .blk.plan.done { opacity: .5; }
 .blk.dragging { opacity: .85; box-shadow: var(--shadow-2); transform: scale(1.015); z-index: 20; }
+/* Picked up by a finger, which has no cursor to change: the block has to say
+   so itself, or a hold that worked looks like one that did not. */
+@media (hover: none) {
+  .blk.dragging { opacity: .95; transform: scale(1.05); box-shadow: var(--shadow-2); }
+}
 
 /* Only your own planned work can be picked up. The resize zones are the top
    and bottom edges themselves rather than a drawn handle — the same three

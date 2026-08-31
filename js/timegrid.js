@@ -54,6 +54,11 @@ const label = (mins, hour12) =>
 /** How deep the resize zones at the top and bottom of a block reach, in px. */
 export const EDGE = 8;
 
+/** How long a finger must rest on a block before it has hold of it. */
+export const HOLD_MS = 400;
+/** How far it may stray in that time and still be a press rather than a scroll. */
+export const HOLD_SLOP = 8;
+
 /**
  * Which part of a block the pointer has hold of.
  *
@@ -107,6 +112,12 @@ export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) 
  *
  * A resize stays in the block's own column whatever the pointer does
  * sideways: dragging an end into tomorrow is not a thing a day grid can draw.
+ *
+ * A finger has no hover and no second button, so it says which of the two it
+ * means by waiting: a tap opens the block, a press held still for `HOLD_MS`
+ * picks it up. Until the hold is out the gesture still belongs to the
+ * scroller, and any real movement hands it back — you cannot pick up a block
+ * you were only scrolling past.
  */
 export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onClick, dayEnd = DAY }) {
   const startMin = toMin(plan.start);
@@ -127,18 +138,19 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onCl
     // a fresh press: whatever the last drag left behind is spent, and a flag
     // still standing because no click followed must not eat this one
     dragged = false;
-    // touch scrolls the grid, as it does for the sweep — the tap above is how
-    // a block is opened there
-    if (ev.pointerType === 'touch') return;
     const anchor = hit(ev);
     if (!anchor) return;
 
-    const mode = grabMode(el.getBoundingClientRect(), ev.clientY);
+    const touch = ev.pointerType === 'touch';
+    // An 8px edge is a mouse's precision, not a finger's, and a block picked up
+    // by mistake at its top edge stretches instead of moving. A finger always
+    // moves; the panel is where a time gets typed.
+    const mode = touch ? 'move' : grabMode(el.getBoundingClientRect(), ev.clientY);
     // where in the block it was taken hold of, kept for the whole drag
     const grab = anchor.mins - startMin;
     const hour12 = state.settings.hour12;
     const startX = ev.clientX, startY = ev.clientY;
-    let ghost = null, started = false, pend = null;
+    let ghost = null, started = false, pend = null, at = ev, hold = null;
 
     const paint = (e) => {
       const now = hit(e) || anchor;
@@ -163,13 +175,41 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onCl
         `${label(range.start, hour12)} – ${label(range.start + range.mins, hour12)}`;
     };
 
+    const begin = () => {
+      started = true;
+      // a synthetic pointer has none active to capture; the drag still works
+      try { el.setPointerCapture(ev.pointerId); } catch { /* not a live pointer */ }
+      el.classList.add('dragging');
+      document.body.classList.add(mode === 'move' ? 'is-moving' : 'is-sweeping');
+      paint(at);            // the block is under the finger before it has moved
+    };
+
+    /* Once the hold is out the gesture is ours, and this is what stops the
+       browser taking it back as a pan. `touch-action` on the block leaves
+       scrolling alone until this point, so the grid still scrolls under a
+       finger that came down on a block and kept going. */
+    const keepGesture = (e) => { if (started && e.cancelable) e.preventDefault(); };
+    const noMenu = (e) => e.preventDefault();
+
+    if (touch) {
+      window.addEventListener('touchmove', keepGesture, { passive: false });
+      el.addEventListener('contextmenu', noMenu);
+      hold = setTimeout(() => {
+        hold = null;
+        navigator.vibrate?.(8);      // ignored where it is not supported
+        begin();
+      }, HOLD_MS);
+    }
+
     const move = (e) => {
+      if (e.pointerId !== ev.pointerId) return;
+      at = e;
       if (!started) {
-        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 4) return;
-        started = true;
-        el.setPointerCapture?.(e.pointerId);
-        el.classList.add('dragging');
-        document.body.classList.add(mode === 'move' ? 'is-moving' : 'is-sweeping');
+        const far = Math.hypot(e.clientX - startX, e.clientY - startY);
+        // a finger that moves before the hold is out was scrolling past
+        if (touch) { if (far >= HOLD_SLOP) finish(false); return; }
+        if (far < 4) return;
+        begin();
       }
       e.preventDefault();
       edge?.(e);
@@ -177,10 +217,14 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onCl
     };
 
     const finish = (fire) => {
+      clearTimeout(hold);
+      hold = null;
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', cancel);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchmove', keepGesture);
+      el.removeEventListener('contextmenu', noMenu);
       document.body.classList.remove('is-moving', 'is-sweeping');
       el.classList.remove('dragging');
       ghost?.remove();

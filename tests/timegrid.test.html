@@ -200,11 +200,81 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     check('...and only that one — the next tap opens it again', opened === 2, String(opened));
 
-    // touch never starts a drag, so the tap is all there is
-    el.dispatchEvent(new PointerEvent('pointerdown',
-      { bubbles: true, button: 0, pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 10 }));
+    // a quick touch is a tap: the hold never comes out, nothing is picked up
+    const touch = (type, x, y, target) => (target || window).dispatchEvent(new PointerEvent(type,
+      { bubbles: true, button: 0, pointerId: 2, pointerType: 'touch', clientX: x, clientY: y }));
+    touch('pointerdown', 10, 10, el);
+    touch('pointerup', 10, 10);
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    check('a touch press leaves the tap alone', opened === 3, String(opened));
+    check('a tap opens it, having waited for nothing', opened === 3, String(opened));
+
+    host.remove();
+  }
+
+  /* ---- and the hold that picks one up ----
+     A finger has no hover and no second button, so it says which of the two it
+     means by waiting. Real time, because the wait is the feature. */
+
+  {
+    const { dragBlock, HOLD_MS, HOLD_SLOP } = await import('../js/timegrid.js');
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-9999px;top:0;width:200px;height:600px';
+    document.body.append(host);
+
+    // 52px to the hour, and y is minutes from midnight
+    const wire = () => {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:absolute;top:0;height:52px;width:100%';
+      host.append(el);
+      const seen = { opened: 0, dropped: null };
+      dragBlock(el, { date: '2026-09-10', start: '09:00', mins: 60 }, {
+        hit: (e) => ({ date: '2026-09-10', mins: Math.round(e.clientY / 52 * 60), col: host }),
+        hourH: 52,
+        onDrop: (p) => { seen.dropped = p; },
+        onClick: () => { seen.opened++; }
+      });
+      return { el, seen };
+    };
+    const touch = (type, x, y, target) => (target || window).dispatchEvent(new PointerEvent(type,
+      { bubbles: true, button: 0, pointerId: 5, pointerType: 'touch', clientX: x, clientY: y }));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    {
+      const { el, seen } = wire();
+      touch('pointerdown', 20, 9 * 52, el);
+      await wait(HOLD_MS + 120);
+      check('the block is held once the wait is out', el.classList.contains('dragging'));
+      touch('pointermove', 20, 11 * 52);
+      touch('pointerup', 20, 11 * 52);
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      check('...and carrying it moves it', seen.dropped?.start === '11:00',
+        JSON.stringify(seen.dropped));
+      check('...without also opening it', seen.opened === 0, String(seen.opened));
+    }
+
+    {
+      const { el, seen } = wire();
+      touch('pointerdown', 20, 9 * 52, el);
+      // the finger moves straight away: it was scrolling past
+      touch('pointermove', 20, 9 * 52 + HOLD_SLOP + 4);
+      await wait(HOLD_MS + 120);
+      check('a finger that moves first is scrolling, not lifting',
+        !el.classList.contains('dragging'));
+      touch('pointermove', 20, 14 * 52);
+      touch('pointerup', 20, 14 * 52);
+      check('...and leaves the block where it was', seen.dropped === null,
+        JSON.stringify(seen.dropped));
+    }
+
+    {
+      const { el, seen } = wire();
+      touch('pointerdown', 20, 9 * 52, el);
+      await wait(HOLD_MS + 120);
+      touch('pointerup', 20, 9 * 52);            // held, then put straight back
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      check('a hold put back where it started commits nothing', seen.dropped === null);
+      check('...and is not a tap either', seen.opened === 0, String(seen.opened));
+    }
 
     host.remove();
   }

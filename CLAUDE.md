@@ -2,14 +2,14 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **18**, service worker **planner-v31**.
+Schema **18**, service worker **planner-v32**.
 
 ## Working with me
 
 **Ask instead of assuming.** When a request could reasonably mean two different
 things — where something lives, whether it persists, what a new field carries —
-ask before building. Ask early, ask all of it at once, and only about what
-changes the work. Routine judgment calls are still yours.
+ask before building: early, all at once, and only about what changes the work.
+Routine judgment calls are still yours.
 
 ## Working on it
 
@@ -22,7 +22,7 @@ newest entry *is* the version; `version.test.html` fails when it and `sw.js`
 disagree, or when an imported module is not cached. Install fetches with
 `cache: 'reload'`, or Pages' `max-age=600` fills the new cache with the files it
 replaces. **The fetch handler never writes to the cache**, so a page runs all of
-one deploy; refreshing per file once ran one version's JS against another's CSS.
+one deploy — refreshing per file once ran one version's JS against another's CSS.
 
 **When a change appears not to take effect**, almost always a cache. A hash-only
 navigation does not reload — `#/overview` when already there keeps the same
@@ -51,10 +51,10 @@ last-write-wins per row (`updated_at` decides, `synced_at` is the pull cursor).
 **No per-mutation bookkeeping** — never add dirty flags or `markChanged()`.
 
 **A repaint is for news, not for every sync.** `pull()` drops a row that hashes
-to what we already hold — our own write, back down the realtime channel — because
+to what we already hold — our own write, back down the realtime channel — since
 `applyRow` reports a change for any live row and the re-render takes the caret
 out of the box whose typing caused it. `gcal.js` tags its commit `gcal` only when
-something actually arrived, for the same reason.
+something arrived, for the same reason.
 
 **The baseline is what was last *pushed*, not what state holds now.** Both have
 been regressions: a row missing locally is "new from the cloud" *only* if the
@@ -64,13 +64,13 @@ a delete made mid-round-trip is lost.
 
 **Never sync device credentials** — no Google tokens, Supabase URL/anon key or
 cursors in `snapshotRows()`. Settings sync by allowlist (`SYNCED_SETTINGS`);
-anything absent stays device-local, which is how `railClosed` and `railHidden`
-stay per-device. Row kinds are constrained by Postgres — `area, item, note, card,
-meta` — so **a new kind needs an `ALTER` the user must run**
-(`supabase/upgrade.sql`, idempotent, named by `describeSyncError()`). Hence
-habits, links, the wishlist and the chart's bands ride inside `meta`, and
-`applyRow` takes `data.links`, `data.wishlist` and `data.sprints` only when the
-key is **present**: an older device sends none, and absent is not empty.
+anything absent stays device-local, which is how `railHidden` stays per-device.
+Row kinds are constrained by Postgres — `area, item, note, card, meta` — so
+**a new kind needs an `ALTER` the user must run** (`supabase/upgrade.sql`,
+idempotent, named by `describeSyncError()`). Hence habits, links, the wishlist
+and the chart's bands ride inside `meta`, and `applyRow` takes `data.links`,
+`data.wishlist` and `data.sprints` only when **present**: an older device sends
+none, and absent is not empty.
 
 ## Data model
 
@@ -89,8 +89,8 @@ is how Google says a whole day. `ITEM_TYPES` is four: `event`, `task`, `meeting`
 `homework`; an item or link with no area lands in General. Each *seed* is
 pinned to the version that introduced it — `if (from < 5)`, never
 `< SCHEMA_VERSION`, or the next bump resurrects something deliberately deleted.
-A *rename* is the opposite: `MERGED_CATEGORY` is unpinned, in `areaCategory()`,
-because a dead category id must be translated every time it is read.
+A *rename* is the opposite — `MERGED_CATEGORY`, unpinned in `areaCategory()` —
+because a dead id must be translated every time it is read.
 
 ## Routing and views
 
@@ -107,11 +107,10 @@ the glyph breaks the sidebar's one alignment.
 open work, end-of-day note. The topbar's `#nextup` says what is on now or next,
 on every screen, repainted on every commit and on a 30s clock. **The end-of-day
 note is the only thing that crosses a day**: `tomorrow` becomes the next
-morning's `focus` via `carryForward()`, called from the render *before* anything
-reads the note and only when `pendingTomorrow()` says there is something — an
-unconditional `commit()` would sync a row every visit. Tagged
-`{ source: 'carry' }` so `app.js` does not re-render mid-build, and spent
-(`tomorrowUsed`) even when the day has a focus, or it arrives a day late.
+morning's `focus` via `carryForward()`, from the render *before* anything reads
+the note and only when `pendingTomorrow()` says so — an unconditional `commit()`
+would sync a row every visit. Tagged `{ source: 'carry' }` so `app.js` does not
+re-render mid-build, and spent (`tomorrowUsed`) even when the day has a focus.
 **A journal entry lives in the day it was written**, `notes[date].journal[areaId]`,
 so a term of writing syncs as small rows rather than one resent whole; the
 **freewrite** is the opposite, one string on the area. **The day begins at 3am**
@@ -130,29 +129,31 @@ writes it outside, *left* if the end of term is near, hence `head` as well as
 sprint reads "CH…". **A focus or a sprint is a stretch of weeks in one area's
 lane**, swept out horizontally the way a block is on the calendar — same object,
 `kind` deciding whether deliverables are asked for, drawn *above* the work.
-SMART lives in the wording of a deliverable, not in five labelled fields.
 
 ## Gotchas worth keeping
 
 - `restoreDayScroll()` runs **synchronously after append**: `scrollTop` does
-  nothing before layout, and rAF never fires in a background tab — exactly when a
-  restored session renders. `ui.js` keeps **one modal at a time**, and a drag grip
-  must `preventDefault()` on `pointerdown` or it reads as a text selection.
+  nothing before layout and rAF never fires in a background tab, which is exactly
+  when a restored session renders. `ui.js` keeps one modal at a time.
 - Both sweeps — `dragCreate()`, `dragSpan()` — fire only on the **empty grid
   itself**, never on a block in it, never on touch (the gesture scrolls);
-  `pointercancel` and Escape must not open the prompt. `dragBlock()` is the other half: middle moves, edges
-  resize, `grabMode` keeping a third for the middle so a quarter-hour block can
-  still be picked up. **It owns the click** — the browser fires one after every
-  drag, so a block with its own `onclick` would open the panel each time, and
-  the listener living there is also the only reason a *tap* opens one. The
-  sidebar's swipe is kept to the **left edge** for the same reason in reverse:
-  the week grid and its tray are horizontal scrollers, and a swipe that counted
-  anywhere would take the gesture from both.
-- **Pixels per hour come from CSS, never from a constant.** `--hour-h` and
-  `--day-hour-h` are what draw the gridlines; `cssPx()` is what the blocks are
-  placed by. A hard-coded 52 put every block most of an hour below its own line
-  on a phone, where the media query makes the hour 46. Crossing that breakpoint
-  re-renders, or the geometry stays that of the layout it was born in.
+  `pointercancel` and Escape must not open the prompt. `dragBlock()` is the
+  other half: middle moves, edges resize, `grabMode` keeping a third for the
+  middle so a quarter-hour block can still be picked up. **It owns the click**
+  — the browser fires one after every drag, so a block with its own `onclick`
+  would open the panel each time.
+- **A finger says which gesture it means by waiting.** A tap opens a block, a
+  press held `HOLD_MS` picks it up, and movement before that hands the gesture
+  back to the scroller — so `.blk` keeps `touch-action: pan-x pan-y` (`none`
+  would let a block eat the scroll) and `dragBlock` takes it, by
+  `preventDefault()` on `touchmove`, only once the hold is out. On touch the mode
+  is always `move`: an 8px resize edge is finer than a fingertip, and the
+  sidebar's swipe stays at the left edge for the same reason.
+- **Pixels per hour come from CSS, never a constant.** `--hour-h` and
+  `--day-hour-h` draw the gridlines; `cssPx()` places the blocks. A hard-coded 52
+  put every block most of an hour below its own line on a phone, where the media
+  query makes the hour 46. Crossing that breakpoint re-renders, or the geometry
+  stays that of the layout it was born in.
 - **Never autosize a textarea with no width.** One measured at zero wraps every
   word onto its own line and reports tens of thousands of pixels; `fitBoxes()`
   watches width only. `body.rail-hidden` makes `#app` **single-column** — `0 1fr`
@@ -169,7 +170,7 @@ SMART lives in the wording of a deliverable, not in five labelled fields.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies, 575 checks, and
+Serve the repo, open `/tests/`. No runner, no dependencies, 582 checks, and
 `tests/` is excluded from the deploy. One suite per file, named for what it
 covers and headed by why; `tests/index.html` runs them all.
 
@@ -181,19 +182,18 @@ waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `save()` can land between the write and the async `import()`. A fresh instance
 has its own `state`, so a suite that pokes state *and* calls `gcal.js`/`cloud.js`
 must use `sharedStoreWith()` — once per page, since `import()` caches. To add a
-field to a task: the literal in `upsertItem()`, a fallback in `migrate()`, a row
-in `js/editor.js`. Sync ships whatever shape it has.
+field to a task: `upsertItem()`, a fallback in `migrate()`, a row in
+`js/editor.js`. Sync ships whatever shape it has.
 
 ## Where things live
 
 | I want to change… | Edit |
 |---|---|
 | shell, router, sidebar and its swipe, quick add, next-up · state, schema, migrations, parser, the day boundary | `js/app.js` · `js/store.js`, `js/util.js` |
-| a screen · an area's page, its links and freewrite | `js/views/<screen>.js` · `views/areas.js` |
-| the capture box, the unfiled queue, a note card · the task panel | `js/capture.js` · `js/editor.js` |
+| a screen · an area's page, its links and freewrite · the capture box, the unfiled queue, a note card · the task panel | `js/views/<screen>.js` · `views/areas.js` · `js/capture.js` · `js/editor.js` |
 | sweeping, moving or resizing a block · a band on the chart · toasts, modals, peek, reorder, patch notes | `js/timegrid.js` · `views/semester.js`, `js/sprint.js` · `js/ui.js`, `js/changelog.js` |
 | Google Calendar / Supabase sync · colours, themes, fonts | `js/gcal.js`, `js/cloud.js`, `supabase/*.sql` · `css/app.css`, `js/appearance.js` |
 
 Calendar days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
-(`js/util.js`). Build DOM with `h()`, not template strings. No framework, no JSX,
-no TypeScript. Match the surrounding style.
+(`js/util.js`). Build DOM with `h()`, not template strings. No framework, no
+JSX, no TypeScript. Match the surrounding style.

@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v32', date: '2026-08-31',
+    title: 'Press and hold to pick a block up',
+    notes: [
+      'Hold a block for a moment on a phone and it lifts; carry it where it should go and let go. A tap still opens it — waiting is how a finger says which of the two it means.',
+      'Blocks stopped swallowing the scroll. A finger that comes down on one and keeps going now scrolls the grid, as it does everywhere else; only a finger that stays put takes hold.',
+      'A finger always moves a block, never stretches it. The 8px edges that resize under a mouse are finer than a fingertip, and the panel is where a time gets typed.'
+    ]
+  },
+  {
     version: 'v31', date: '2026-08-31',
     title: 'The phone, fixed',
     notes: [
