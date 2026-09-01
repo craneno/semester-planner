@@ -1,18 +1,27 @@
 // editor.js — the task page. Notion-style properties + notes + subtasks.
 
-import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin } from './util.js';
-import { state, commit, itemById, deleteItem, toggleItem, ITEM_TYPES, progress } from './store.js';
-import { peek, closePeek, confirmDialog, toast } from './ui.js';
+import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
+import {
+  state, commit, itemById, upsertItem, deleteItem, toggleItem, ITEM_TYPES, progress,
+  repeatLabel, endSeriesBefore
+} from './store.js';
+import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
 import { pushItem } from './gcal.js';
 
 const syncOut = debounce((id) => pushItem(id).catch(() => {}), 700);
 
 let currentId = null;
+/* Which of the two an edit means, when the thing open is one occurrence of a
+   series. Kept out here because `rerender()` builds the panel again from
+   scratch and the answer must survive that. Defaults to the safe one: you
+   cannot change a term of Tuesdays by mistake. */
+let scope = 'one';
 
 export function openItem(id) {
   const item = itemById(id);
   if (!item) return;
   currentId = id;
+  scope = 'one';
   peek(render(item), { onClose: () => { currentId = null; } });
 }
 
@@ -25,9 +34,23 @@ function rerender() {
 }
 
 function render(item) {
+  /* The row in `state.items` behind whatever is open — the item itself, or the
+     series an occurrence came from. An occurrence is a copy made on demand, so
+     anything written to it directly would be thrown away with it. */
+  const live = item.seriesId
+    ? (state.items.find((t) => t.id === item.seriesId) || item)
+    : item;
+  const isOccurrence = !!item.seriesId;
+  const toSeries = isOccurrence && scope === 'all';
+  const targetId = toSeries ? live.id : item.id;
+
   const set = (patch, { resync = false } = {}) => {
-    commit(() => { Object.assign(item, patch); item.updatedAt = new Date().toISOString(); });
-    if (resync) syncOut(item.id);
+    commit(() => {
+      const next = upsertItem({ id: targetId, ...patch });
+      // keep the copy this render is holding in step with what was stored
+      if (next && targetId === item.id) Object.assign(item, next);
+    });
+    if (resync) syncOut(live.id);
   };
 
   const root = h('div', { style: { display: 'contents' } });
@@ -41,22 +64,10 @@ function render(item) {
     }),
     h('span', { class: 'eyebrow' }, item.done ? 'Done' : item.type),
     h('div', { style: { flex: 1 } }),
-    item.gcalId && h('span', { class: 'eyebrow', title: 'On your Google Calendar' }, 'GCAL'),
+    (item.gcalId || live.gcalIds) && h('span', { class: 'eyebrow', title: 'On your Google Calendar' }, 'GCAL'),
     h('button', {
       class: 'btn ghost sm', title: 'Delete task',
-      onclick: async () => {
-        if (await confirmDialog('Delete this task?', item.title, 'Delete')) {
-          const snapshot = JSON.parse(JSON.stringify(item));
-          // tagged so the view underneath repaints — the peek floats over
-          // whichever view is showing, and it still lists this item
-          commit(() => deleteItem(item.id), { source: 'editor' });
-          closePeek();
-          toast('Task deleted', {
-            action: 'Undo',
-            onAction: () => commit(() => state.items.push(snapshot), { source: 'editor' })
-          });
-        }
-      }
+      onclick: () => (isOccurrence ? removeOccurrence(item, live) : removePlain(item))
     }, '🗑'),
     h('button', { class: 'btn ghost sm', onclick: closePeek, 'aria-label': 'Close' }, '✕'));
 
@@ -69,6 +80,29 @@ function render(item) {
   }));
 
   const props = h('div', { class: 'props' });
+
+  /* One of a series: say so, and say which of the two an edit means. */
+  if (isOccurrence) {
+    props.append(prop('Repeats',
+      h('div', {},
+        h('div', { class: 'mode-toggle' },
+          h('button', {
+            class: 'mode' + (scope === 'one' ? ' on' : ''), type: 'button',
+            'aria-pressed': String(scope === 'one'),
+            onclick: () => { scope = 'one'; rerender(); }
+          }, 'This one'),
+          h('button', {
+            class: 'mode' + (scope === 'all' ? ' on' : ''), type: 'button',
+            'aria-pressed': String(scope === 'all'),
+            onclick: () => { scope = 'all'; rerender(); }
+          }, 'All of them')),
+        h('div', { class: 'eyebrow', style: { marginTop: '5px', color: 'var(--ink-3)' } },
+          repeatLabel(live)),
+        scope === 'one'
+          ? h('div', { class: 'eyebrow', style: { marginTop: '3px', color: 'var(--ink-3)' } },
+            'Area, kind, notes and subtasks belong to the series')
+          : null)));
+  }
 
   props.append(prop('Area',
     h('select', {
@@ -170,6 +204,10 @@ function render(item) {
         h('span', { class: 'eyebrow' }, 'minutes'))));
   }
 
+  /* The repeat rule is the series', so it is only offered where it can be
+     changed: on a one-off, or on an occurrence with "all of them" chosen. */
+  if (!isOccurrence || toSeries) repeatRows(props, live, rerender);
+
   props.append(prop('Priority',
     h('select', { onchange: (e) => set({ priority: e.target.value }) },
       ...['low', 'normal', 'high'].map((p) => h('option', { value: p, selected: p === item.priority }, p[0].toUpperCase() + p.slice(1))))));
@@ -200,17 +238,17 @@ function render(item) {
           if (e.key === 'Enter') { e.preventDefault(); addSub(i + 1); }
           if (e.key === 'Backspace' && !e.target.value) {
             e.preventDefault();
-            commit(() => item.subtasks.splice(i, 1));
+            commit(() => live.subtasks.splice(i, 1));
             rerender();
           }
         }
       }),
-      h('button', { class: 'btn ghost sm', onclick: () => { commit(() => item.subtasks.splice(i, 1)); rerender(); }, 'aria-label': 'Remove subtask' }, '✕')));
+      h('button', { class: 'btn ghost sm', onclick: () => { commit(() => live.subtasks.splice(i, 1)); rerender(); }, 'aria-label': 'Remove subtask' }, '✕')));
   });
   body.append(subs);
 
-  function addSub(at = item.subtasks.length) {
-    commit(() => item.subtasks.splice(at, 0, { id: uid('st'), title: '', done: false }));
+  function addSub(at = live.subtasks.length) {
+    commit(() => live.subtasks.splice(at, 0, { id: uid('st'), title: '', done: false }));
     rerender();
     setTimeout(() => {
       const inputs = document.querySelectorAll('#peek .subtask input[type="text"]');
@@ -224,8 +262,8 @@ function render(item) {
   body.append(h('textarea', {
     placeholder: 'Anything worth remembering — where you left off, page numbers, links.',
     style: { minHeight: '130px' },
-    oninput: debounce((e) => commit(() => { item.notes = e.target.value; }), 400)
-  }, item.notes || ''));
+    oninput: debounce((e) => commit(() => { live.notes = e.target.value; }), 400)
+  }, live.notes || ''));
 
   body.append(h('div', { class: 'eyebrow', style: { marginTop: '20px' } },
     `Created ${fmtDate(item.createdAt.slice(0, 10), { year: true })}`
@@ -237,4 +275,165 @@ function render(item) {
 
 function prop(label, control) {
   return h('div', { class: 'prop' }, h('label', {}, label), control);
+}
+
+/* ---------------- repeating ----------------
+   Google Calendar's vocabulary, in the panel rather than behind a "Custom…"
+   dialog: how often, how many of them apart, which weekdays, and when it
+   stops. A rule needs a day to count from — the block's date or the deadline —
+   so an item with neither cannot repeat and is not asked to. */
+
+const UNIT = { daily: 'days', weekly: 'weeks', monthly: 'months', yearly: 'years' };
+const FREQ_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' };
+
+function repeatRows(props, live, rerender) {
+  const anchor = (live.plan && live.plan.date) || live.due || null;
+  if (!anchor) return;
+
+  const rep = live.repeat;
+  const write = (next) => {
+    commit(() => upsertItem({ id: live.id, repeat: next }));
+    pushItem(live.id).catch(() => {});
+    rerender();
+  };
+  // the exceptions are kept across a change of rule: a week you cancelled
+  // stays cancelled when you move the series from Tuesdays to Wednesdays
+  const edit = (patch) => write({
+    freq: 'weekly', every: 1, days: [], until: null, count: null, ex: {},
+    ...(rep || {}), ...patch
+  });
+
+  props.append(prop('Repeat',
+    h('select', {
+      onchange: (e) => (e.target.value ? edit({ freq: e.target.value }) : write(null))
+    },
+    h('option', { value: '', selected: !rep }, 'Does not repeat'),
+    ...Object.keys(FREQ_LABEL).map((f) =>
+      h('option', { value: f, selected: rep && rep.freq === f }, FREQ_LABEL[f])))));
+
+  if (!rep) return;
+
+  props.append(prop('Every',
+    h('div', { class: 'pair', style: { alignItems: 'center' } },
+      h('input', {
+        type: 'number', min: '1', max: '99', value: String(rep.every || 1),
+        style: { maxWidth: '80px' },
+        onchange: (e) => edit({ every: Math.min(99, Math.max(1, Math.round(+e.target.value) || 1)) })
+      }),
+      h('span', { class: 'eyebrow' }, UNIT[rep.freq]))));
+
+  if (rep.freq === 'weekly') {
+    const chosen = new Set(rep.days && rep.days.length ? rep.days : [new Date(anchor + 'T00:00').getDay()]);
+    props.append(prop('On',
+      h('div', { class: 'daypick' },
+        ...DOW.map((name, d) => h('button', {
+          type: 'button', class: 'day' + (chosen.has(d) ? ' on' : ''),
+          'aria-pressed': String(chosen.has(d)), title: name,
+          onclick: () => {
+            const next = new Set(chosen);
+            if (next.has(d)) next.delete(d); else next.add(d);
+            // a weekly repeat with no weekday at all has no days in it
+            if (next.size) edit({ days: [...next].sort((x, y) => x - y) });
+          }
+        }, name[0])))));
+  }
+
+  const ends = rep.count ? 'count' : rep.until ? 'until' : 'never';
+  props.append(prop('Ends',
+    h('div', { class: 'pair', style: { alignItems: 'center' } },
+      h('select', {
+        onchange: (e) => edit(
+          e.target.value === 'until' ? { until: addMonths(anchor, 3), count: null }
+            : e.target.value === 'count' ? { count: 10, until: null }
+              : { until: null, count: null })
+      },
+      h('option', { value: 'never', selected: ends === 'never' }, 'Never'),
+      h('option', { value: 'until', selected: ends === 'until' }, 'On a date'),
+      h('option', { value: 'count', selected: ends === 'count' }, 'After')),
+      ends === 'until' ? h('input', {
+        type: 'date', value: rep.until || '',
+        onchange: (e) => edit({ until: e.target.value || null, count: null })
+      }) : null,
+      ends === 'count' ? h('input', {
+        type: 'number', min: '1', max: '400', value: String(rep.count || 10),
+        style: { maxWidth: '80px' },
+        onchange: (e) => edit({ count: Math.min(400, Math.max(1, Math.round(+e.target.value) || 1)), until: null })
+      }) : null,
+      ends === 'count' ? h('span', { class: 'eyebrow' }, 'times') : null)));
+
+  props.append(prop('', h('div', { class: 'eyebrow', style: { color: 'var(--ink-3)' } },
+    repeatLabel(live))));
+}
+
+/** A date `n` months on, clamped to the end of a shorter month. */
+function addMonths(date, n) {
+  const d = new Date(date + 'T00:00');
+  const day = d.getDate();
+  const m = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  const last = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+  const out = new Date(m.getFullYear(), m.getMonth(), Math.min(day, last));
+  return `${out.getFullYear()}-${String(out.getMonth() + 1).padStart(2, '0')}-${String(out.getDate()).padStart(2, '0')}`;
+}
+
+/* ---------------- deleting ----------------
+   A one-off asks whether you meant it. A repeating one has to ask *what* you
+   meant as well, because there are three honest answers and picking one for
+   you would either lose a term of Tuesdays or leave a cancelled one standing. */
+
+async function removePlain(item) {
+  if (!await confirmDialog('Delete this task?', item.title, 'Delete')) return;
+  const snapshot = JSON.parse(JSON.stringify(item));
+  // tagged so the view underneath repaints — the peek floats over whichever
+  // view is showing, and it still lists this item
+  commit(() => deleteItem(item.id), { source: 'editor' });
+  closePeek();
+  toast('Task deleted', {
+    action: 'Undo',
+    onAction: () => commit(() => state.items.push(snapshot), { source: 'editor' })
+  });
+}
+
+function removeOccurrence(item, live) {
+  const on = fmtDate(item.occurrence, { weekday: true });
+  const undo = JSON.parse(JSON.stringify(live));
+  const done = (msg) => {
+    closeModal();
+    closePeek();
+    pushItem(live.id).catch(() => {});
+    toast(msg, {
+      action: 'Undo',
+      onAction: () => commit(() => {
+        const i = state.items.findIndex((t) => t.id === undo.id);
+        if (i >= 0) state.items[i] = undo; else state.items.push(undo);
+      }, { source: 'editor' })
+    });
+  };
+
+  modal({
+    title: 'Delete a repeating event',
+    body: h('div', {},
+      h('p', { style: { margin: '0 0 6px' } }, item.title),
+      h('div', { class: 'eyebrow' }, repeatLabel(live))),
+    footer: [
+      h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+      h('button', {
+        class: 'btn', onclick: () => {
+          commit(() => endSeriesBefore(live, item.occurrence), { source: 'editor' });
+          done(`Series ended before ${on}`);
+        }
+      }, 'This and after'),
+      h('button', {
+        class: 'btn', onclick: () => {
+          commit(() => deleteItem(live.id), { source: 'editor' });
+          done('Series deleted');
+        }
+      }, 'All of them'),
+      h('button', {
+        class: 'btn primary', onclick: () => {
+          commit(() => deleteItem(item.id), { source: 'editor' });
+          done(`${on} skipped`);
+        }
+      }, 'This one')
+    ]
+  });
 }

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **18**, service worker **planner-v32**.
+Schema **18**, service worker **planner-v33**.
 
 ## Working with me
 
@@ -76,7 +76,7 @@ none, and absent is not empty.
 
 | | |
 |---|---|
-| `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data, not a field beside it |
+| `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series |
 | `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite` |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
 | `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they become; focuses and sprints on the chart. All three ride in `meta` |
@@ -84,13 +84,25 @@ none, and absent is not empty.
 
 **Only a `plan` block reaches Google Calendar.** A due date alone is never
 pushed — the most common source of "why isn't it on my calendar". An all-day
-plan does go, as `start`/`end` **dates** with the end the morning *after*, which
-is how Google says a whole day. `ITEM_TYPES` is four: `event`, `task`, `meeting`,
-`homework`; an item or link with no area lands in General. Each *seed* is
-pinned to the version that introduced it — `if (from < 5)`, never
-`< SCHEMA_VERSION`, or the next bump resurrects something deliberately deleted.
-A *rename* is the opposite — `MERGED_CATEGORY`, unpinned in `areaCategory()` —
-because a dead id must be translated every time it is read.
+plan does go, as `start`/`end` **dates** with the end the morning *after*.
+`ITEM_TYPES` is four: `event`, `task`, `meeting`, `homework`; no area lands it
+in General. Each *seed* is pinned to the version that introduced it — `if (from
+< 5)`, never `< SCHEMA_VERSION`, or the next bump resurrects something
+deliberately deleted. A *rename* is the opposite (`MERGED_CATEGORY`, unpinned
+in `areaCategory()`): a dead id must be translated every time it is read.
+
+**A repeat is a rule, never copies.** `repeat` on the item (`js/repeat.js` is
+the pure date maths); the screens draw **occurrences**, built on demand and
+named `<id>@<the day the rule gave it>`. A series never draws itself, or its
+first occurrence is on the page twice. Only `plan`, `due`, `title` and `done`
+can be one occurrence's own, in `repeat.ex[key]`; the rest is the series'.
+**An occurrence is a copy** — assigning to it throws the change away, so writes
+go through `upsertItem`/`toggleItem`/`deleteItem`, and views must ask the
+selectors (`itemsPlannedOn`, `itemsDueOn`, `upcoming`) rather than filter
+`state.items`, which holds only the rule. Google gets **one ordinary event per
+occurrence** — `gcalIds` maps the rule's day to its event id, `pushSeries()`
+reconciles, and the term is the horizon since a repeat with no end has no last
+one. The sweep drops an exception that is nothing but an old tick.
 
 ## Routing and views
 
@@ -104,31 +116,29 @@ off the group, outside the `reorderable()` host (a pinned row has no
 the glyph breaks the sidebar's one alignment.
 
 **Overview is the day**: a 24-hour clock opened at 8am beside focus, top three,
-open work, end-of-day note. The topbar's `#nextup` says what is on now or next,
-on every screen, repainted on every commit and on a 30s clock. **The end-of-day
-note is the only thing that crosses a day**: `tomorrow` becomes the next
-morning's `focus` via `carryForward()`, from the render *before* anything reads
-the note and only when `pendingTomorrow()` says so — an unconditional `commit()`
-would sync a row every visit. Tagged `{ source: 'carry' }` so `app.js` does not
-re-render mid-build, and spent (`tomorrowUsed`) even when the day has a focus.
+open work, end-of-day note; `#nextup` says what is on now or next, on every
+screen. **The end-of-day note is the only thing that crosses a day**: `tomorrow`
+becomes the next morning's `focus` via `carryForward()`, from the render
+*before* anything reads the note and only when `pendingTomorrow()` says so — an
+unconditional `commit()` would sync a row every visit. Tagged
+`{ source: 'carry' }` so `app.js` does not re-render mid-build, and spent
+(`tomorrowUsed`) even when the day has a focus.
 **A journal entry lives in the day it was written**, `notes[date].journal[areaId]`,
 so a term of writing syncs as small rows rather than one resent whole; the
-**freewrite** is the opposite, one string on the area. **The day begins at 3am**
+**freewrite** is one string on the area. **The day begins at 3am**
 — `DAY_RESET_HOUR` and `today(now)` in `js/util.js`, the one place it is decided
 — so an entry written at 1am files under the day it is about. `sweepDone()`
-deletes work ticked *before* that reset, behind an Undo toast from `navigate()`;
-`settings.sweepDone` turns it off.
+deletes work ticked *before* that reset, behind an Undo from `navigate()`.
 
-**Semester is a chart, the old list behind a switch.** Bands are the three
-categories, lanes are areas, `area.onChart` (absent reads as true) picks which
-appear. Geometry is **whole days from the first day of term**, times `--day-w` at
+**Semester is a chart, the list behind a switch.** Bands are the three
+categories, lanes are areas, `area.onChart` (absent reads true) picks which. Geometry is **whole days from the first day of term**, times `--day-w` at
 the last moment — which keeps `chartRange`, `itemSpan`, `bandSpan`, `packLanes`,
 `monthBands` and `fitDayWidth` pure and testable. A bar too narrow for its title
-writes it outside, *left* if the end of term is near, hence `head` as well as
-`reserve` — and bands follow that rule too (`bandRows`), or a fortnight-long
-sprint reads "CH…". **A focus or a sprint is a stretch of weeks in one area's
-lane**, swept out horizontally the way a block is on the calendar — same object,
-`kind` deciding whether deliverables are asked for, drawn *above* the work.
+writes it outside, *left* near the end of term, hence `head` as well as
+`reserve`; bands follow that rule too (`bandRows`). A **series draws as its
+run**, first occurrence to last, not one bar at its anchor. **A focus or a
+sprint is a stretch of weeks in one area's lane**, swept out the way a block is
+on the calendar — `kind` deciding whether deliverables are asked for.
 
 ## Gotchas worth keeping
 
@@ -139,9 +149,8 @@ lane**, swept out horizontally the way a block is on the calendar — same objec
   itself**, never on a block in it, never on touch (the gesture scrolls);
   `pointercancel` and Escape must not open the prompt. `dragBlock()` is the
   other half: middle moves, edges resize, `grabMode` keeping a third for the
-  middle so a quarter-hour block can still be picked up. **It owns the click**
-  — the browser fires one after every drag, so a block with its own `onclick`
-  would open the panel each time.
+  middle. **It owns the click** — the browser fires one after every drag, so a
+  block with its own `onclick` would open the panel each time.
 - **A finger says which gesture it means by waiting.** A tap opens a block, a
   press held `HOLD_MS` picks it up, and movement before that hands the gesture
   back to the scroller — so `.blk` keeps `touch-action: pan-x pan-y` (`none`
@@ -161,16 +170,15 @@ lane**, swept out horizontally the way a block is on the calendar — same objec
 - Quick add checks `parseLinkAdd()` **first** — a URL at the front is a bookmark
   — and `parseRange()` before `parseWhen()`, or half of "12-7" becomes a due time
   and the rest is stranded in the title. A link's title comes from its URL alone
-  (a page's own is unreadable across origins), so the guess is meant to be
-  corrected; only `http`/`https` are stored, or a saved `javascript:` URL would
-  run as the app.
-- Capture's **Enter must stay the shortest path out** — an unfiled note, never a
-  question. There is no Notes page: `unfiledQueue()` renders under the box on
-  Overview and `noteCard()` on the area's page; deleting either strands captures.
+  and is meant to be corrected; only `http`/`https` are stored, or a saved
+  `javascript:` URL would run as the app.
+- Capture's **Enter must stay the shortest path out** — an unfiled note, never
+  a question. No Notes page: `unfiledQueue()` on Overview, `noteCard()` on the
+  area's page; deleting either strands captures.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies, 582 checks, and
+Serve the repo, open `/tests/`. No runner, no dependencies, 617 checks, and
 `tests/` is excluded from the deploy. One suite per file, named for what it
 covers and headed by why; `tests/index.html` runs them all.
 
@@ -178,21 +186,13 @@ Suites drive the real modules and clobber app state, so **both guards must
 stay**: refuse to run outside localhost, and restore `localStorage` afterwards,
 waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once at import, so `migrate()` needs a fresh instance —
-`storeWith(raw)`, which **verifies** its seed rather than timing it: a leftover
-`save()` can land between the write and the async `import()`. A fresh instance
-has its own `state`, so a suite that pokes state *and* calls `gcal.js`/`cloud.js`
-must use `sharedStoreWith()` — once per page, since `import()` caches. To add a
-field to a task: `upsertItem()`, a fallback in `migrate()`, a row in
-`js/editor.js`. Sync ships whatever shape it has.
+`storeWith(raw)`, which **verifies** its seed rather than timing it. A fresh
+instance has its own `state`, so a suite that pokes state *and* calls
+`gcal.js`/`cloud.js` must use `sharedStoreWith()` — once per page, since
+`import()` caches. To add a field to a task: `upsertItem()`, a fallback in
+`migrate()`, a row in `js/editor.js`. Sync ships whatever shape it has.
 
-## Where things live
-
-| I want to change… | Edit |
-|---|---|
-| shell, router, sidebar and its swipe, quick add, next-up · state, schema, migrations, parser, the day boundary | `js/app.js` · `js/store.js`, `js/util.js` |
-| a screen · an area's page, its links and freewrite · the capture box, the unfiled queue, a note card · the task panel | `js/views/<screen>.js` · `views/areas.js` · `js/capture.js` · `js/editor.js` |
-| sweeping, moving or resizing a block · a band on the chart · toasts, modals, peek, reorder, patch notes | `js/timegrid.js` · `views/semester.js`, `js/sprint.js` · `js/ui.js`, `js/changelog.js` |
-| Google Calendar / Supabase sync · colours, themes, fonts | `js/gcal.js`, `js/cloud.js`, `supabase/*.sql` · `css/app.css`, `js/appearance.js` |
+## Conventions
 
 Calendar days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
 (`js/util.js`). Build DOM with `h()`, not template strings. No framework, no

@@ -516,7 +516,10 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 .prop > label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 .prop input, .prop select { border-color: transparent; background: transparent; padding: 3px 5px; }
 .prop input:hover, .prop select:hover { background: var(--rule-soft); }
-.prop .pair { display: flex; gap: 6px; }
+/* Two fields and the word between them. It wraps rather than clipping: on a
+   phone the From/To pair is a dozen pixels wider than the column it sits in,
+   and a time input cut in half cannot be read or set. */
+.prop .pair { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .subtask { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .subtask input[type="text"] { border-color: transparent; background: transparent; padding: 2px 4px; }
 .subtask input[type="text"]:hover { background: var(--rule-soft); }
@@ -930,6 +933,26 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .mode-toggle .mode:hover { background: var(--rule-soft); color: var(--ink); }
 .mode-toggle .mode.on { background: var(--accent-soft); color: var(--ink); font-weight: 550; }
 
+
+/* ---------- repeating: the weekday picker ----------
+   Seven of them, so they have to be small; a row rather than a select because
+   "Tuesdays and Thursdays" is one glance and two taps, not a scroll. */
+
+/* Seven across whatever room there is, never wrapping: a week that folds onto
+   two lines stops reading as a week. They share the width instead. */
+.daypick { display: flex; gap: 4px; }
+.daypick .day {
+  flex: 1 1 0; min-width: 0; max-width: 34px; aspect-ratio: 1; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: 50%;
+  background: var(--surface); color: var(--ink-2);
+  font: inherit; font-size: calc(12px * var(--scale)); line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.daypick .day:hover { border-color: var(--accent); color: var(--ink); }
+.daypick .day.on {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  font-weight: 600;
+}
 
 /* ---------- sidebar: carets and collapsing ---------- */
 

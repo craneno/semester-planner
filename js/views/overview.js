@@ -9,7 +9,7 @@ import {
   toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce
 } from '../util.js';
 import {
-  state, commit, toggleItem, upcoming, overdue, workloadFor,
+  state, commit, upsertItem, toggleItem, upcoming, overdue, workloadFor,
   categoryLoad, note, carryForward, pendingTomorrow, areaColor,
   areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn
 } from '../store.js';
@@ -210,7 +210,7 @@ function todayColumn(day, { navigate, go }) {
       hit: at, hourH,
       edge: (ev) => edgeScroll(scroller, ev),
       onDrop: (plan) => {
-        commit(() => { t.plan = { ...t.plan, ...plan }; t.updatedAt = new Date().toISOString(); });
+        commit(() => upsertItem({ id: t.id, plan: { ...t.plan, ...plan } }));
         pushItem(t.id).catch(() => {});
         navigate();
       },

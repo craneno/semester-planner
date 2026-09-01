@@ -9,6 +9,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v33', date: '2026-08-31',
+    title: 'Things that happen again',
+    notes: [
+      'Anything with a date can repeat: daily, weekly on the weekdays you pick, every other week, monthly on the date, yearly — ending never, on a day, or after a number of times. The panel has it under Repeat.',
+      'Open one of them and you are editing that one. The switch at the top says so, and says how the series runs; “All of them” is a tap away when you mean the lot.',
+      'Move a Tuesday, skip a week, tick one off — none of it touches the others. Deleting asks whether you meant this one, this one and everything after, or all of them.',
+      'Every occurrence goes to Google Calendar as its own event, so moving one here moves that one there and leaves the rest alone. The term is the horizon: a repeat with no end fills the semester, not the rest of your life.',
+      'A term of Mondays is one row, not fifty. It syncs, and takes up space, like a single item.'
+    ]
+  },
+  {
     version: 'v32', date: '2026-08-31',
     title: 'Press and hold to pick a block up',
     notes: [

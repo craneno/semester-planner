@@ -19,8 +19,9 @@ import {
 } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, ITEM_TYPES, progress, chartAreas,
-  areasInCategory, areaColor, AREA_CATEGORIES, sprintsForArea, sprintProgress
+  areasInCategory, areaColor, AREA_CATEGORIES, sprintsForArea, sprintProgress, repeatLabel
 } from '../store.js';
+import { isRepeat, repeatDates } from '../repeat.js';
 import { areaTag, dueChip, priorityTag, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { openSprint } from '../sprint.js';
@@ -113,6 +114,24 @@ export function itemSpan(t, range) {
   if (!plan && !due) return null;
   let from = plan || due;
   let to = due || plan;
+
+  /* A repeating item is drawn as its run — the first occurrence in the term to
+     the last — rather than as one bar at the day it happens to count from. On
+     a chart of fifteen weeks the useful fact about a Monday meeting is that it
+     goes on all term; which Mondays is a question for the week. */
+  if (isRepeat(t.repeat)) {
+    const hits = repeatDates(t.repeat, from, range.start, range.end);
+    if (!hits.length) return null;
+    from = hits[0];
+    to = hits[hits.length - 1];
+    const a = diffDays(range.start, from);
+    const b = diffDays(range.start, to);
+    return {
+      from: a, to: b, days: b - a + 1,
+      milestone: !plan && hits.length === 1, repeat: true, runs: hits.length,
+      clipStart: false, clipEnd: false
+    };
+  }
   if (from > to) [from, to] = [to, from];       // planned after it was owed
   if (to < range.start || from > range.end) return null;
   // clipped rather than dropped: work that began before the term still shows
@@ -510,6 +529,12 @@ function dragSpan(track, { area, range, dayW, navigate }) {
 }
 
 function describeSpan(t, s) {
+  // a repeating bar is a run, so the useful line is the rule and how many of
+  // them land in the term, not the one day the series counts from
+  if (s.repeat) {
+    return `${t.title}\n${repeatLabel(t)} · ${s.runs} in this term`
+      + (t.estMins ? ` · ${fmtDuration(t.estMins)} each` : '');
+  }
   const when = s.milestone
     ? `Due ${fmtDate(t.due)}`
     : `Planned ${fmtDate(t.plan.date)}${t.due && t.due !== t.plan.date ? ` → due ${fmtDate(t.due)}` : ''}`;

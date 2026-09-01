@@ -9,7 +9,10 @@
 //        extendedProperties.private.plannerItemId, so a round trip never
 //        creates a duplicate.
 
-import { state, commit, itemById, areaById } from './store.js';
+import {
+  state, commit, itemById, areaById, upsertItem, seriesById, splitOccurrence,
+  repeats, occurrencesBetween
+} from './store.js';
 import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays } from './util.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
@@ -343,16 +346,30 @@ function applyIncoming(raw, { replace }) {
     if (!n) continue;
 
     if (n.plannerItemId) {
-      // our own block came back — accept edits made in Google Calendar
+      // our own block came back — accept edits made in Google Calendar. The id
+      // may name one occurrence of a series, in which case the change is that
+      // occurrence's own and `upsertItem` files it as an exception rather than
+      // rewriting the rule for every other week.
       const item = itemById(n.plannerItemId);
       if (item && n.date && (n.allDay || n.start)) {
         const mins = n.allDay ? 0 : Math.max(15, (toMin(n.end) || toMin(n.start) + 60) - toMin(n.start));
         const start = n.allDay ? null : n.start;
         const changed = !item.plan || item.plan.date !== n.date
           || (item.plan.start || null) !== start || (item.plan.mins || 0) !== mins;
-        if (changed) { item.plan = { date: n.date, start, mins }; touched = true; }
-        if (item.gcalId !== n.id) { item.gcalId = n.id; touched = true; }
-        if (n.title && n.title !== item.title && !item.title) { item.title = n.title; touched = true; }
+        if (changed) { upsertItem({ id: item.id, plan: { date: n.date, start, mins } }); touched = true; }
+        const cut = splitOccurrence(item.id);
+        if (cut) {
+          const series = seriesById(item.id);
+          if (series && (series.gcalIds || {})[cut.on] !== n.id) {
+            series.gcalIds = { ...(series.gcalIds || {}), [cut.on]: n.id };
+            touched = true;
+          }
+        } else if (item.gcalId !== n.id) {
+          item.gcalId = n.id; touched = true;
+        }
+        if (n.title && n.title !== item.title && !item.title) {
+          upsertItem({ id: item.id, title: n.title }); touched = true;
+        }
       }
       continue; // not mirrored into state.events; it renders from the item
     }
@@ -400,11 +417,103 @@ function queue(op) {
   commit();
 }
 
+/* ---------------- a series on the calendar ----------------
+   Every occurrence is an ordinary Google event of its own, so a week moved
+   here is a week moved there and Google never has to be told a rule. The cost
+   is bookkeeping: `item.gcalIds` maps the day the rule named to the event id
+   standing for it, and a push is a reconciliation — create what is missing,
+   patch what has changed, delete what should no longer be there.
+
+   Bounded by the term, because a repeat with no end has no last occurrence and
+   something has to decide how much calendar to fill. */
+
+const HORIZON = 250;
+
+const windowStart = () => addDays(state.semester.start, -7);
+const windowEnd = () => addDays(state.semester.end, 7);
+
+/** What a series should have on the calendar: day the rule named -> body. */
+function wantedFor(item) {
+  const want = new Map();
+  if (item.done) return want;
+  const from = windowStart(), to = windowEnd();
+  for (const o of occurrencesBetween(from, to, (t) => t.id === item.id)) {
+    if (o.done || !o.plan || !o.plan.date) continue;
+    if (want.size >= HORIZON) break;
+    want.set(o.occurrence, eventBodyFor(o));
+  }
+  return want;
+}
+
+/**
+ * Bring a repeating item's Google events in line with its rule.
+ *
+ * Deletes first: a rule that shrank should give the days back before the API
+ * is asked for anything new, so an interrupted run leaves too few events
+ * rather than a calendar with both the old shape and the new one on it.
+ */
+async function pushSeries(item, calId) {
+  const want = wantedFor(item);
+  const have = item.gcalIds || {};
+  const ids = { ...have };
+
+  for (const [key, id] of Object.entries(have)) {
+    if (want.has(key)) continue;
+    try { await api(`/calendars/${calId}/events/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+    catch (err) { if (err.code !== 404 && err.code !== 410) throw err; }
+    delete ids[key];
+  }
+  for (const [key, body] of want) {
+    if (ids[key]) {
+      try {
+        await api(`/calendars/${calId}/events/${encodeURIComponent(ids[key])}`, { method: 'PATCH', body });
+        continue;
+      } catch (err) {
+        // gone from Google's side: fall through and make it again
+        if (err.code !== 404 && err.code !== 410) throw err;
+        delete ids[key];
+      }
+    }
+    const ev = await api(`/calendars/${calId}/events`, { method: 'POST', body });
+    ids[key] = ev.id;
+  }
+  item.gcalIds = Object.keys(ids).length ? ids : null;
+  // a series has no single event of its own; the one it had before it repeated
+  // is now the first occurrence's
+  item.gcalId = null;
+}
+
 /** Push (or remove) the Google event backing a planner item. */
 export async function pushItem(itemId) {
-  const item = itemById(itemId);
+  // an occurrence is not a row: the series is what has events to reconcile
+  const item = seriesById(itemId);
   if (!cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
   if (!item) return;
+
+  if (repeats(item)) {
+    if (!navigator.onLine || !isSignedIn()) { queue({ kind: 'upsert', itemId: item.id }); return; }
+    try {
+      await pushSeries(item, encodeURIComponent(cfg().calendarId || 'primary'));
+      commit(null, { source: 'gcal-push' });
+    } catch (err) {
+      gcal.lastError = err;
+      queue({ kind: 'upsert', itemId: item.id });
+      setStatus('error', err.message);
+    }
+    return;
+  }
+
+  // no longer a series: whatever it left on the calendar is not wanted
+  if (item.gcalIds) {
+    const calId = encodeURIComponent(cfg().calendarId || 'primary');
+    const stale = Object.values(item.gcalIds);
+    item.gcalIds = null;
+    commit(null, { source: 'gcal-push' });
+    for (const id of stale) {
+      try { await api(`/calendars/${calId}/events/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+      catch { /* already gone, or it will be swept next time */ }
+    }
+  }
 
   // a date is enough: a block with no start of its own is an all-day event,
   // not a reason to keep the thing off the calendar altogether

@@ -1,6 +1,7 @@
 // store.js — single source of truth. Local-first, localStorage-backed.
 
 import { uid, today, addDays, toMin, fromMin, diffDays } from './util.js';
+import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js';
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
@@ -295,7 +296,11 @@ function migrate(raw) {
       doneAt: t.doneAt || null,
       subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
       notes: t.notes || '',
+      repeat: isRepeat(t.repeat) ? t.repeat : null,
       gcalId: t.gcalId || null,
+      // one Google event per occurrence, so a series needs one id per day it
+      // lands on rather than the single `gcalId` a one-off carries
+      gcalIds: (t.gcalIds && typeof t.gcalIds === 'object') ? t.gcalIds : null,
       createdAt: t.createdAt || new Date().toISOString(),
       updatedAt: t.updatedAt || new Date().toISOString()
     };
@@ -364,7 +369,135 @@ window.addEventListener('storage', (e) => {
 /* ---------------- selectors ---------------- */
 
 export const areaById = (id) => state.areas.find((a) => a.id === id) || null;
-export const itemById = (id) => state.items.find((t) => t.id === id) || null;
+
+/* ---------------- occurrences ----------------
+   A repeating item is one row with a rule on it. What the screens draw are
+   *occurrences*: read-only copies made on demand, named `<itemId>@<date>` for
+   the day the rule put them on. Nothing is written per occurrence except what
+   one occurrence can own on its own — when it is, what it is called, whether
+   it is done — and that goes in `repeat.ex`, keyed by that same date.
+
+   The parent never draws itself once it repeats, or the first occurrence would
+   be on the page twice. */
+
+const AT = '@';
+export const occurrenceId = (id, date) => id + AT + date;
+
+/** `t_x@2026-09-08` -> { id, on }, a plain id -> null. */
+export function splitOccurrence(id) {
+  const i = String(id).indexOf(AT);
+  return i < 0 ? null : { id: String(id).slice(0, i), on: String(id).slice(i + 1) };
+}
+
+export const seriesById = (id) => {
+  const cut = splitOccurrence(id);
+  return state.items.find((t) => t.id === (cut ? cut.id : id)) || null;
+};
+
+/** The day a series counts from — the block it was drawn on, or its deadline. */
+export const repeatAnchor = (item) => (item.plan && item.plan.date) || item.due || null;
+
+export const repeats = (item) => !!item && isRepeat(item.repeat) && !!repeatAnchor(item);
+
+/** One occurrence's own version of things, made on demand. */
+const overrideFor = (item, key) => {
+  item.repeat.ex = item.repeat.ex || {};
+  item.repeat.ex[key] = item.repeat.ex[key] || {};
+  return item.repeat.ex[key];
+};
+
+/**
+ * The occurrence a series puts on `key`, or null if that one was deleted.
+ *
+ * `repeat` is stripped from the copy: an occurrence does not repeat, and the
+ * views ask that question of everything they draw.
+ */
+export function occurrenceOf(item, key) {
+  if (!repeats(item)) return null;
+  const ov = (item.repeat.ex || {})[key] || null;
+  if (ov && ov.off) return null;
+  const on = (ov && ov.date) || key;
+  const o = {
+    ...item,
+    id: occurrenceId(item.id, key),
+    seriesId: item.id,
+    occurrence: key,
+    repeat: null,
+    done: !!(ov && ov.done),
+    doneAt: (ov && ov.doneAt) || null
+  };
+  if (ov && ov.title) o.title = ov.title;
+  if (item.plan) {
+    o.plan = { ...item.plan, date: on };
+    if (ov && ov.start !== undefined) o.plan.start = ov.start;
+    if (ov && ov.mins !== undefined) o.plan.mins = ov.mins;
+  }
+  if (item.due) o.due = on;
+  return o;
+}
+
+/** Every occurrence of one series that shows on `date`, moved ones included. */
+function occurrencesOn(item, date) {
+  if (!repeats(item)) return [];
+  const out = [];
+  for (const key of repeatDates(item.repeat, repeatAnchor(item), date, date)) {
+    const o = occurrenceOf(item, key);
+    // one moved off this day is drawn on the day it was moved to, not here
+    if (o && ((o.plan && o.plan.date) || o.due) === date) out.push(o);
+  }
+  for (const [key, ov] of Object.entries(item.repeat.ex || {})) {
+    if (key === date || !ov || ov.off || ov.date !== date) continue;
+    if (!isRepeatDate(item.repeat, repeatAnchor(item), key)) continue;
+    const o = occurrenceOf(item, key);
+    if (o) out.push(o);
+  }
+  return out;
+}
+
+/** Every occurrence of every series inside a window, in date order. */
+export function occurrencesBetween(from, to, pick = () => true) {
+  const out = [];
+  for (const item of state.items) {
+    if (!repeats(item) || !pick(item)) continue;
+    const anchor = repeatAnchor(item);
+    for (const key of repeatDates(item.repeat, anchor, from, to)) {
+      const o = occurrenceOf(item, key);
+      if (o) out.push(o);
+    }
+    for (const [key, ov] of Object.entries(item.repeat.ex || {})) {
+      if (!ov || ov.off || !ov.date || ov.date < from || ov.date > to) continue;
+      if (key >= from && key <= to) continue;          // already taken above
+      if (!isRepeatDate(item.repeat, anchor, key)) continue;
+      const o = occurrenceOf(item, key);
+      if (o) out.push(o);
+    }
+  }
+  return out.sort((a, b) => {
+    const x = (a.plan && a.plan.date) || a.due || '', y = (b.plan && b.plan.date) || b.due || '';
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+}
+
+export const repeatLabel = (item) =>
+  (repeats(item) ? describeRepeat(item.repeat, repeatAnchor(item)) : '');
+
+/**
+ * An item by id — a plain one, or one occurrence of a series.
+ *
+ * Everything that opens, ticks or drags a thing goes through here, which is
+ * what lets an occurrence be handled like any other item by every screen.
+ */
+export function itemById(id) {
+  const cut = splitOccurrence(id);
+  if (!cut) return state.items.find((t) => t.id === id) || null;
+  const parent = state.items.find((t) => t.id === cut.id);
+  if (!repeats(parent)) return null;
+  // the day has to be one the rule actually named. `occurrenceOf` builds
+  // whatever it is handed, which is right for the callers that walked the rule
+  // to get there and wrong for an id off a stale link or a hand-typed one.
+  if (!isRepeatDate(parent.repeat, repeatAnchor(parent), cut.on)) return null;
+  return occurrenceOf(parent, cut.on);
+}
 export const areaColor = (id) => (areaById(id) || {}).color || 'var(--muted)';
 export const areaName = (id) => (areaById(id) || {}).name || 'Unassigned';
 
@@ -426,18 +559,41 @@ export function nextForArea(areaId, limit = 3) {
     .slice(0, limit);
 }
 
-export function itemsDueOn(date) { return state.items.filter((t) => t.due === date); }
-export function itemsPlannedOn(date) { return state.items.filter((t) => t.plan && t.plan.date === date); }
+/* A series never answers for itself — its occurrences do, this one included.
+   Everything below asks `state.items` for the plain ones and the rule for the
+   rest, so no screen has to know which it is holding. */
+
+export function itemsDueOn(date) {
+  return [
+    ...state.items.filter((t) => !repeats(t) && t.due === date),
+    ...occurrencesBetween(date, date, (t) => !!t.due).filter((o) => o.due === date)
+  ];
+}
+
+export function itemsPlannedOn(date) {
+  return [
+    ...state.items.filter((t) => !repeats(t) && t.plan && t.plan.date === date),
+    ...state.items.filter((t) => repeats(t) && t.plan).flatMap((t) => occurrencesOn(t, date))
+  ];
+}
+
+/** How far back an unbounded question about the past is allowed to look. */
+const LOOKBACK = 120;
 
 export function overdue(ref = today()) {
-  return state.items.filter((t) => !t.done && t.due && t.due < ref);
+  return [
+    ...state.items.filter((t) => !repeats(t) && !t.done && t.due && t.due < ref),
+    ...occurrencesBetween(addDays(ref, -LOOKBACK), addDays(ref, -1), (t) => !!t.due)
+      .filter((o) => !o.done && o.due && o.due < ref)
+  ];
 }
 
 export function upcoming(days = 14, ref = today()) {
   const end = addDays(ref, days);
-  return state.items
-    .filter((t) => !t.done && t.due && t.due >= ref && t.due <= end)
-    .sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
+  return [
+    ...state.items.filter((t) => !repeats(t) && !t.done && t.due && t.due >= ref && t.due <= end),
+    ...occurrencesBetween(ref, end, (t) => !!t.due).filter((o) => !o.done)
+  ].sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
 }
 
 export function progress(item) {
@@ -447,8 +603,15 @@ export function progress(item) {
 
 export function workloadFor(dates) {
   const set = new Set(dates);
+  const sorted = [...set].sort();
+  const all = [
+    ...state.items.filter((t) => !repeats(t)),
+    // one window rather than one expansion per day: the same week asked seven
+    // times over would walk every rule seven times
+    ...(sorted.length ? occurrencesBetween(sorted[0], sorted[sorted.length - 1]) : [])
+  ];
   let mins = 0, count = 0;
-  for (const t of state.items) {
+  for (const t of all) {
     if (t.done) continue;
     const d = (t.plan && t.plan.date) || t.due;
     if (d && set.has(d)) { mins += (t.plan && t.plan.mins) || t.estMins || 0; count++; }
@@ -532,8 +695,45 @@ export function nowNext(date = today(), mins = minsNow()) {
  *  is one. Falls back to unassigned rather than inventing an area. */
 export const defaultAreaId = () => areasInCategory('personal')[0]?.id || null;
 
+/**
+ * What one occurrence is allowed to differ in.
+ *
+ * When it is, what it is called, and whether it is done — the things a single
+ * day of a series owns. An area, a kind, a note or a repeat rule belong to the
+ * series whichever occurrence you were looking at when you changed them, so
+ * they are written straight through to the parent.
+ */
+const OCCURRENCE_OWNS = new Set(['plan', 'due', 'title', 'done', 'doneAt']);
+
+/** Fold a patch aimed at one occurrence into that occurrence's exception. */
+function patchOccurrence(parent, key, patch) {
+  const ov = overrideFor(parent, key);
+  const rest = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (k === 'id') continue;
+    if (!OCCURRENCE_OWNS.has(k)) { rest[k] = v; continue; }
+    if (k === 'plan' && v) {
+      if (v.date !== undefined) ov.date = v.date;
+      if (v.start !== undefined) ov.start = v.start;
+      if (v.mins !== undefined) ov.mins = v.mins;
+    } else if (k === 'due') {
+      ov.date = v;
+    } else {
+      ov[k] = v;
+    }
+  }
+  if (Object.keys(rest).length) Object.assign(parent, rest);
+  parent.updatedAt = new Date().toISOString();
+  return occurrenceOf(parent, key);
+}
+
 export function upsertItem(patch) {
   const now = new Date().toISOString();
+  const cut = patch.id ? splitOccurrence(patch.id) : null;
+  if (cut) {
+    const parent = state.items.find((t) => t.id === cut.id);
+    return parent && repeats(parent) ? patchOccurrence(parent, cut.on, patch) : null;
+  }
   let item = patch.id ? itemById(patch.id) : null;
   if (item) {
     Object.assign(item, patch, { updatedAt: now });
@@ -541,8 +741,8 @@ export function upsertItem(patch) {
     item = {
       id: uid('t'), title: 'Untitled', areaId: null, type: 'task',
       due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60,
-      done: false, doneAt: null, subtasks: [], notes: '',
-      gcalId: null, createdAt: now, updatedAt: now, ...patch
+      done: false, doneAt: null, subtasks: [], notes: '', repeat: null,
+      gcalId: null, gcalIds: null, createdAt: now, updatedAt: now, ...patch
     };
     if (!item.areaId) item.areaId = defaultAreaId();
     state.items.push(item);
@@ -550,9 +750,35 @@ export function upsertItem(patch) {
   return item;
 }
 
+/**
+ * Delete an item, or one occurrence of a series.
+ *
+ * A deleted occurrence is a mark in the rule's exceptions rather than a hole
+ * anything has to remember: the day stays named, and turning the repeat off
+ * later brings nothing back with it.
+ */
 export function deleteItem(id) {
+  const cut = splitOccurrence(id);
+  if (cut) {
+    const parent = state.items.find((t) => t.id === cut.id);
+    if (!parent || !repeats(parent)) return;
+    const ov = overrideFor(parent, cut.on);
+    ov.off = true;
+    parent.updatedAt = new Date().toISOString();
+    return;
+  }
   const i = state.items.findIndex((t) => t.id === id);
   if (i >= 0) state.items.splice(i, 1);
+}
+
+/** Stop a series after the occurrence shown, keeping everything before it. */
+export function endSeriesBefore(item, key) {
+  if (!repeats(item)) return;
+  item.repeat = { ...item.repeat, until: addDays(key, -1), count: null };
+  for (const k of Object.keys(item.repeat.ex || {})) {
+    if (k >= key) delete item.repeat.ex[k];
+  }
+  item.updatedAt = new Date().toISOString();
 }
 
 /* ---------------- sweeping finished work ----------------
@@ -590,6 +816,7 @@ export const doneBefore = (day = today(), spare = null) =>
  * undo, which is a smaller loss than a note that cannot die.
  */
 export function sweepDone(day = today(), spare = null) {
+  sweepTicks(day);
   const gone = doneBefore(day, spare);
   if (!gone.length) return gone;
   const ids = new Set(gone.map((t) => t.id));
@@ -600,7 +827,38 @@ export function sweepDone(day = today(), spare = null) {
   return gone;
 }
 
+/**
+ * The same reset, applied to a series.
+ *
+ * A series is never deleted for having been done — there is always another
+ * one. What goes is the tick: an exception that says nothing but "this one was
+ * finished" on a day now over, which is exactly the row a term of ticking
+ * would otherwise grow without end.
+ */
+function sweepTicks(day) {
+  if (state.settings.sweepDone === false) return;
+  for (const item of state.items) {
+    const ex = item.repeat && item.repeat.ex;
+    if (!ex) continue;
+    for (const [key, ov] of Object.entries(ex)) {
+      if (!ov || !ov.done || key >= day) continue;
+      if (Object.keys(ov).some((k) => k !== 'done' && k !== 'doneAt')) continue;
+      delete ex[key];
+    }
+  }
+}
+
 export function toggleItem(id, force) {
+  const cut = splitOccurrence(id);
+  if (cut) {
+    const parent = state.items.find((t) => t.id === cut.id);
+    if (!parent || !repeats(parent)) return;
+    const ov = overrideFor(parent, cut.on);
+    ov.done = force ?? !ov.done;
+    ov.doneAt = ov.done ? new Date().toISOString() : null;
+    parent.updatedAt = new Date().toISOString();
+    return;
+  }
   const t = itemById(id);
   if (!t) return;
   t.done = force ?? !t.done;

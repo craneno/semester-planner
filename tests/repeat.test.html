@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Repeat tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* Two halves, tested apart because they fail apart. The rule is arithmetic on
+   dates — the 31st of a month February does not have, an interval counted
+   from the anchor's own week — and it never touches state. The occurrence is
+   what the screens hold: a copy made on demand, whose edits have to land on
+   the series' exceptions rather than on the copy that is about to be thrown
+   away. */
+import { suite, sharedStoreWith } from './harness.js';
+
+suite('Repeat — the rule', async ({ check }) => {
+  const { repeatDates, isRepeatDate, describeRepeat, isRepeat } = await import('../js/repeat.js');
+  const R = (o) => ({ freq: 'weekly', every: 1, days: [], until: null, count: null, ex: {}, ...o });
+
+  /* ---- what counts as a rule at all ---- */
+
+  {
+    check('a rule needs a frequency it knows', !isRepeat({ every: 1 }));
+    check('...and a real one', !isRepeat({ freq: 'fortnightly' }));
+    check('the four are rules', ['daily', 'weekly', 'monthly', 'yearly'].every((f) => isRepeat({ freq: f })));
+    check('nothing is not a rule', !isRepeat(null) && !isRepeat(undefined));
+  }
+
+  /* ---- daily ---- */
+
+  {
+    // 2026-09-07 is a Monday
+    const d = repeatDates(R({ freq: 'daily' }), '2026-09-07', '2026-09-07', '2026-09-11');
+    check('daily is every day', d.join() === '2026-09-07,2026-09-08,2026-09-09,2026-09-10,2026-09-11', d.join());
+    check('every other day skips one',
+      repeatDates(R({ freq: 'daily', every: 2 }), '2026-09-07', '2026-09-07', '2026-09-12').join()
+      === '2026-09-07,2026-09-09,2026-09-11');
+    check('the window is a window, not the start',
+      repeatDates(R({ freq: 'daily' }), '2026-09-01', '2026-09-09', '2026-09-10').join()
+      === '2026-09-09,2026-09-10');
+    check('nothing before the anchor',
+      repeatDates(R({ freq: 'daily' }), '2026-09-07', '2026-09-01', '2026-09-08').join()
+      === '2026-09-07,2026-09-08');
+  }
+
+  /* ---- weekly, which is the one people actually use ---- */
+
+  {
+    // Mondays and Wednesdays from a Monday
+    const mw = repeatDates(R({ freq: 'weekly', days: [1, 3] }), '2026-09-07', '2026-09-07', '2026-09-17');
+    check('weekly lands on each weekday chosen',
+      mw.join() === '2026-09-07,2026-09-09,2026-09-14,2026-09-16', mw.join());
+
+    check('no weekdays chosen means the anchor’s own',
+      repeatDates(R({ freq: 'weekly' }), '2026-09-09', '2026-09-09', '2026-09-24').join()
+      === '2026-09-09,2026-09-16,2026-09-23', 'a Wednesday anchor is a Wednesday repeat');
+
+    // the fortnight has to count from the anchor's week, not from the year's
+    const fort = repeatDates(R({ freq: 'weekly', every: 2, days: [2] }), '2026-09-08', '2026-09-08', '2026-10-07');
+    check('every other week counts from the week the anchor is in',
+      fort.join() === '2026-09-08,2026-09-22,2026-10-06', fort.join());
+
+    check('a weekday earlier in the anchor’s week is not backdated',
+      repeatDates(R({ freq: 'weekly', days: [1, 5] }), '2026-09-11', '2026-09-01', '2026-09-15').join()
+      === '2026-09-11,2026-09-14', 'the anchor is a Friday; the Monday before it is not an occurrence');
+  }
+
+  /* ---- monthly and yearly, where the calendar fights back ---- */
+
+  {
+    const m = repeatDates(R({ freq: 'monthly' }), '2026-01-31', '2026-01-01', '2026-06-30');
+    check('monthly on the 31st skips the months without one',
+      m.join() === '2026-01-31,2026-03-31,2026-05-31', m.join());
+    check('...rather than sliding to the 1st or the 28th',
+      !m.some((d) => d.endsWith('-03-01') || d.endsWith('-02-28')));
+
+    check('monthly on a day every month has is every month',
+      repeatDates(R({ freq: 'monthly' }), '2026-09-15', '2026-09-01', '2026-12-31').length === 4);
+    check('every three months is a quarter',
+      repeatDates(R({ freq: 'monthly', every: 3 }), '2026-01-15', '2026-01-01', '2026-12-31').join()
+      === '2026-01-15,2026-04-15,2026-07-15,2026-10-15');
+
+    const leap = repeatDates(R({ freq: 'yearly' }), '2024-02-29', '2024-01-01', '2032-12-31');
+    check('yearly on the 29th of February waits for the leap year',
+      leap.join() === '2024-02-29,2028-02-29,2032-02-29', leap.join());
+    check('yearly otherwise is the same date each year',
+      repeatDates(R({ freq: 'yearly' }), '2026-09-07', '2026-01-01', '2029-12-31').join()
+      === '2026-09-07,2027-09-07,2028-09-07,2029-09-07');
+  }
+
+  /* ---- when it stops ---- */
+
+  {
+    check('until is the last day it may fall on',
+      repeatDates(R({ freq: 'daily', until: '2026-09-09' }), '2026-09-07', '2026-09-01', '2026-12-31').join()
+      === '2026-09-07,2026-09-08,2026-09-09');
+    check('an until before the anchor yields nothing',
+      repeatDates(R({ freq: 'daily', until: '2026-09-01' }), '2026-09-07', '2026-09-01', '2026-12-31').length === 0);
+
+    check('count is how many there are in all',
+      repeatDates(R({ freq: 'weekly', days: [1] , count: 3 }), '2026-09-07', '2026-09-01', '2026-12-31').join()
+      === '2026-09-07,2026-09-14,2026-09-21');
+    check('...counted from the anchor, not from the window',
+      repeatDates(R({ freq: 'daily', count: 3 }), '2026-09-07', '2026-09-09', '2026-12-31').join()
+      === '2026-09-09', 'three in all, and only the third is inside the window');
+    check('count counts occurrences, not weeks',
+      repeatDates(R({ freq: 'weekly', days: [1, 3], count: 3 }), '2026-09-07', '2026-09-01', '2026-12-31').join()
+      === '2026-09-07,2026-09-09,2026-09-14');
+  }
+
+  /* ---- the awkward asks ---- */
+
+  {
+    check('a backwards window is empty',
+      repeatDates(R({ freq: 'daily' }), '2026-09-07', '2026-09-10', '2026-09-01').length === 0);
+    check('a rule with no anchor is empty', repeatDates(R({ freq: 'daily' }), null, '2026-09-01', '2026-09-30').length === 0);
+    check('a window too far to walk to gives up rather than hanging',
+      repeatDates(R({ freq: 'daily' }), '2026-09-07', '3000-01-01', '3000-12-31').length === 0,
+      'a thousand years of days is past the step guard, and the guard is the point');
+    check('...while one merely far away is still reached',
+      repeatDates(R({ freq: 'yearly' }), '2026-09-07', '2200-01-01', '2200-12-31').join()
+      === '2200-09-07', 'a yearly rule steps a year at a time and gets there');
+
+    check('isRepeatDate is the single-day question',
+      isRepeatDate(R({ freq: 'weekly', days: [1] }), '2026-09-07', '2026-09-14')
+      && !isRepeatDate(R({ freq: 'weekly', days: [1] }), '2026-09-07', '2026-09-15'));
+  }
+
+  /* ---- and how it reads ---- */
+
+  {
+    check('a plain weekly names its day',
+      describeRepeat(R({ freq: 'weekly', days: [2] }), '2026-09-08') === 'Every week on Tue',
+      describeRepeat(R({ freq: 'weekly', days: [2] }), '2026-09-08'));
+    check('two days are joined with an and',
+      describeRepeat(R({ freq: 'weekly', days: [1, 3] }), '2026-09-07') === 'Every week on Mon and Wed');
+    check('an interval is said',
+      describeRepeat(R({ freq: 'weekly', every: 2, days: [1] }), '2026-09-07') === 'Every 2 weeks on Mon');
+    check('monthly says which day of the month',
+      describeRepeat(R({ freq: 'monthly' }), '2026-09-03') === 'Every month on the 3rd',
+      describeRepeat(R({ freq: 'monthly' }), '2026-09-03'));
+    check('...with the right ordinal',
+      describeRepeat(R({ freq: 'monthly' }), '2026-09-11') === 'Every month on the 11th');
+    check('an end is said too',
+      describeRepeat(R({ freq: 'daily', count: 5 }), '2026-09-07') === 'Every day, 5 times');
+    check('nothing describes nothing', describeRepeat(null, '2026-09-07') === '');
+  }
+});
+
+suite('Repeat — occurrences', async ({ check }) => {
+  const s = await sharedStoreWith({
+    version: 18,
+    semester: { name: 'Fall 2026', start: '2026-09-01', end: '2026-12-12' },
+    areas: [{ id: 'c1', name: 'Thermo', category: 'course', order: 0 }],
+    items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {},
+    settings: { sweepDone: true }
+  });
+
+  /** A weekly Monday/Wednesday standup, planned 9–10. */
+  const seed = () => {
+    s.state.items.length = 0;
+    return s.upsertItem({
+      id: 'sync', title: 'Standup', areaId: 'c1', type: 'meeting',
+      plan: { date: '2026-09-07', start: '09:00', mins: 60 },
+      repeat: { freq: 'weekly', every: 1, days: [1, 3], until: null, count: null, ex: {} }
+    });
+  };
+
+  /* ---- the series never draws itself ---- */
+
+  {
+    seed();
+    const mon = s.itemsPlannedOn('2026-09-07');
+    check('the anchor day has exactly one thing on it', mon.length === 1, String(mon.length));
+    check('...and it is an occurrence, not the series',
+      mon[0].id === 'sync@2026-09-07' && mon[0].seriesId === 'sync', mon[0].id);
+    check('a later Wednesday has one too',
+      s.itemsPlannedOn('2026-09-16').map((o) => o.id).join() === 'sync@2026-09-16');
+    check('a day the rule misses has none', s.itemsPlannedOn('2026-09-08').length === 0);
+    check('an occurrence does not itself repeat', mon[0].repeat === null);
+    check('it carries the series’ time', mon[0].plan.start === '09:00' && mon[0].plan.mins === 60);
+    check('and its area', mon[0].areaId === 'c1');
+  }
+
+  /* ---- one of them, by id ---- */
+
+  {
+    seed();
+    check('an occurrence id resolves', s.itemById('sync@2026-09-14')?.title === 'Standup');
+    check('...only on a day the rule lands on', s.itemById('sync@2026-09-15') === null);
+    check('a plain id still resolves to the series', s.itemById('sync')?.id === 'sync');
+    check('an id for nothing is null', s.itemById('nope@2026-09-14') === null);
+  }
+
+  /* ---- ticking one ---- */
+
+  {
+    const item = seed();
+    s.toggleItem('sync@2026-09-09', true);
+    check('one occurrence is done', s.itemById('sync@2026-09-09').done === true);
+    check('...and the next one is not', s.itemById('sync@2026-09-14').done === false);
+    check('...nor the series itself', item.done === false);
+    check('the tick is kept as an exception', item.repeat.ex['2026-09-09'].done === true);
+    check('and nothing was added to the item list', s.state.items.length === 1);
+  }
+
+  /* ---- moving one ---- */
+
+  {
+    const item = seed();
+    s.upsertItem({ id: 'sync@2026-09-14', plan: { date: '2026-09-15', start: '11:00', mins: 30 } });
+    check('the day it was moved off is empty', s.itemsPlannedOn('2026-09-14').length === 0);
+    check('the day it was moved to has it',
+      s.itemsPlannedOn('2026-09-15').map((o) => o.id).join() === 'sync@2026-09-14',
+      'it keeps the name of the day the rule gave it');
+    check('...at its new time', s.itemById('sync@2026-09-14').plan.start === '11:00');
+    check('the week after is untouched', s.itemById('sync@2026-09-16').plan.start === '09:00');
+    check('the series still starts where it did', item.plan.start === '09:00');
+  }
+
+  /* ---- skipping one, and ending the run ---- */
+
+  {
+    const item = seed();
+    s.deleteItem('sync@2026-09-09');
+    check('a skipped occurrence is gone from its day', s.itemsPlannedOn('2026-09-09').length === 0);
+    check('...and cannot be fetched', s.itemById('sync@2026-09-09') === null);
+    check('...but the series is still there', s.state.items.length === 1);
+    check('and the rest still run', s.itemsPlannedOn('2026-09-14').length === 1);
+
+    s.endSeriesBefore(item, '2026-09-21');
+    check('ending before a day stops it the day before', item.repeat.until === '2026-09-20');
+    check('...so that day is empty', s.itemsPlannedOn('2026-09-21').length === 0);
+    check('...and the one before it is not', s.itemsPlannedOn('2026-09-16').length === 1);
+  }
+
+  /* ---- what an occurrence owns, and what it does not ---- */
+
+  {
+    const item = seed();
+    s.upsertItem({ id: 'sync@2026-09-14', title: 'Standup (long)', areaId: null, notes: 'once' });
+    check('a title can be one occurrence’s own',
+      s.itemById('sync@2026-09-14').title === 'Standup (long)');
+    check('...without renaming the rest', s.itemById('sync@2026-09-16').title === 'Standup');
+    check('an area belongs to the series whichever day you changed it from',
+      item.areaId === null && s.itemById('sync@2026-09-16').areaId === null);
+    check('...and so do notes', item.notes === 'once');
+  }
+
+  /* ---- the selectors that count ---- */
+
+  {
+    seed();
+    const load = s.workloadFor(['2026-09-07', '2026-09-09', '2026-09-14']);
+    check('workload counts occurrences', load.count === 3, String(load.count));
+    check('...for their real length', load.mins === 180, String(load.mins));
+
+    s.upsertItem({
+      id: 'read', title: 'Weekly reading', areaId: 'c1',
+      due: '2026-09-04', plan: null,
+      repeat: { freq: 'weekly', every: 1, days: [5], until: null, count: null, ex: {} }
+    });
+    check('a repeating deadline lands on its day',
+      s.itemsDueOn('2026-09-11').map((o) => o.id).join() === 'read@2026-09-11');
+    const soon = s.upcoming(14, '2026-09-05');
+    check('upcoming sees them', soon.filter((t) => t.seriesId === 'read').length === 2,
+      String(soon.filter((t) => t.seriesId === 'read').length));
+    check('...and not the series row itself', !soon.some((t) => t.id === 'read'));
+  }
+
+  /* ---- the tick that would otherwise pile up ---- */
+
+  {
+    const item = seed();
+    s.toggleItem('sync@2026-09-07', true);
+    s.upsertItem({ id: 'sync@2026-09-09', plan: { date: '2026-09-10' } });
+    s.sweepDone('2026-09-30');
+    check('an old tick is swept', !item.repeat.ex['2026-09-07'],
+      'a term of ticking would grow the row without end');
+    check('...but a moved day is not', item.repeat.ex['2026-09-09'].date === '2026-09-10',
+      'that one is not just a tick, and losing it would move the day back');
+
+    s.toggleItem('sync@2026-10-05', true);
+    s.sweepDone('2026-10-01');
+    check('a tick for a day still to come stays', item.repeat.ex['2026-10-05'].done === true);
+  }
+
+  /* ---- and the series is still one row ---- */
+
+  {
+    seed();
+    s.toggleItem('sync@2026-09-07', true);
+    s.upsertItem({ id: 'sync@2026-09-09', plan: { date: '2026-09-10' } });
+    const rows = s.snapshotRows().filter((r) => r.kind === 'item');
+    check('a term of Mondays syncs as one row', rows.length === 1, String(rows.length));
+    check('...carrying its exceptions with it',
+      Object.keys(rows[0].data.repeat.ex).sort().join() === '2026-09-07,2026-09-09');
+  }
+});
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@ import {
   h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx
 } from '../util.js';
 import {
-  state, commit, areaColor, classesOn, eventsOn, itemsDueOn, workloadFor
+  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -75,8 +75,8 @@ export function renderWeek(root, { navigate } = {}) {
         cell.append(h('div', { class: 'due-flag', style: { '--c': 'var(--ink-3)' }, title: e.title }, e.title));
       }
     }
-    // planned but untimed
-    for (const t of state.items.filter((x) => x.plan && x.plan.date === d && !x.plan.start)) {
+    // planned but untimed — the selector, so a repeating one is here too
+    for (const t of itemsPlannedOn(d).filter((x) => !x.plan.start)) {
       cell.append(h('div', {
         class: 'due-flag', style: { '--c': areaColor(t.areaId), opacity: .8 },
         title: 'Planned (no time set) — drag into the grid to give it a time',
@@ -140,7 +140,7 @@ export function renderWeek(root, { navigate } = {}) {
     }
 
     // planned work blocks
-    for (const t of state.items.filter((x) => x.plan && x.plan.date === d && x.plan.start)) {
+    for (const t of itemsPlannedOn(d).filter((x) => x.plan.start)) {
       const s = toMin(t.plan.start), mins = t.plan.mins || t.estMins || 60;
       const color = areaColor(t.areaId);
       const hgt = Math.max(20, (mins / 60) * hourH - 2);
@@ -193,7 +193,7 @@ export function renderWeek(root, { navigate } = {}) {
 
   /* ---- unscheduled tray ---- */
   const loose = state.items
-    .filter((t) => !t.done && !t.plan && (!t.due || t.due <= addDays(days[6], 14)))
+    .filter((t) => !t.done && !t.plan && !t.repeat && (!t.due || t.due <= addDays(days[6], 14)))
     .sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : 1)
     .slice(0, 24);
 
@@ -269,7 +269,7 @@ function wireBlock(el, item, body, days, dayStart, hourH, navigate) {
     hourH, origin: dayStart * 60,
     edge: (ev) => edgeScroll(ev, body),
     onDrop: (plan) => {
-      commit(() => { item.plan = { ...item.plan, ...plan }; item.updatedAt = new Date().toISOString(); });
+      commit(() => upsertItem({ id: item.id, plan: { ...item.plan, ...plan } }));
       pushItem(item.id).catch(() => {});
       navigate();
     },
