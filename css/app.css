@@ -379,7 +379,12 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .daycol.today { background-color: color-mix(in srgb, var(--accent) 5%, transparent); }
 
 .blk {
-  position: absolute; left: 3px; right: 3px;
+  /* One column unless something shares the hour: `--lane-x` and `--lane-w` are
+     fractions of the day, set by packBlocks, and default to the whole of it. */
+  position: absolute;
+  left: calc(3px + var(--lane-x, 0) * (100% - 6px));
+  width: calc(var(--lane-w, 1) * (100% - 6px));
+  z-index: calc(1 + var(--lane-z, 0));
   border-radius: 4px; padding: 3px 5px; overflow: hidden; cursor: pointer;
   font-size: calc(11.5px * var(--scale)); line-height: 1.3;
   border: 1px solid var(--rule);
@@ -394,7 +399,7 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   -webkit-touch-callout: none;   /* a long press must not raise iOS's own menu */
   user-select: none; -webkit-user-select: none;
 }
-.blk:hover { box-shadow: var(--shadow-1); z-index: 4; }
+.blk:hover { box-shadow: var(--shadow-1); z-index: 12; }
 .blk .t { font-family: var(--font-mono); font-size: 10px; color: var(--ink-2); }
 .blk .n {
   font-weight: 500; overflow: hidden; text-overflow: ellipsis;
@@ -404,6 +409,10 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .blk.compact { display: flex; align-items: center; gap: 6px; padding-top: 1px; padding-bottom: 1px; }
 .blk.compact .n { -webkit-line-clamp: 1; white-space: nowrap; }
 .blk.compact .t { flex: none; }
+/* Sharing the column with two others leaves a third of it: a short block can
+   carry its time or its name across that, and the name is the one the grid
+   cannot already tell you. */
+.blk.narrow.compact .t { display: none; }
 .blk.class { border-left-style: solid; }
 .blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); }
 .blk.plan.done { opacity: .5; }

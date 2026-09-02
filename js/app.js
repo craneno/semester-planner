@@ -1,12 +1,12 @@
 // app.js — shell, router, quick add.
 
-import { h, $, clear, fmtDate, fmtTime, today, debounce } from './util.js';
+import { h, $, clear, fmtDate, fmtTime, today, debounce, tz, zoneLabel, fmtDuration } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
-  reorderAreas, parseLinkAdd, addLink
+  reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules
 } from './store.js';
-import { toast, closePeek, reorderable } from './ui.js';
+import { toast, closePeek, reorderable, modal, closeModal } from './ui.js';
 import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
@@ -419,6 +419,52 @@ function wireKeys() {
   });
 }
 
+/* ---------------- opened somewhere else ----------------
+   A schedule imported in one zone and read in another is silently wrong by
+   the difference — the lecture that says 7:30 met at 10:30. The times cannot
+   be moved without asking: a week away is not a move, and a shift applied
+   twice is worse than one never applied. So it is a question, once, and the
+   answer is written into the rows themselves rather than kept here, which is
+   what stops the next device asking it again. */
+
+function askAboutZone() {
+  const drift = scheduleDrift();
+  if (!drift) return;
+  const later = drift.mins > 0;
+  const by = fmtDuration(Math.abs(drift.mins));
+  const way = later ? 'later' : 'earlier';
+  const shift = () => {
+    commit(() => { shiftSchedules(drift.from); }, { source: 'zone' });
+    navigate();
+    toast(`Class times moved ${by} ${way}.`, {
+      action: 'Undo',
+      onAction: () => {
+        commit(() => { shiftSchedules(drift.to, drift.from); }, { source: 'zone' });
+        navigate();
+      }
+    });
+  };
+  // "leave them" is an answer, not a dismissal: the rows are restamped where
+  // they stand, or the same question would be waiting at the next boot.
+  // Closing the dialog without answering is neither, and it asks again.
+  const keep = () => commit(() => { stampSchedules(drift.to); }, { source: 'zone' });
+
+  modal({
+    title: 'Your clock has moved',
+    body: h('div', {},
+      h('p', { style: { marginTop: 0 } },
+        `These class times were set in ${zoneLabel(drift.from)}, and this device is on `,
+        `${zoneLabel(drift.to)} — so every one of them reads ${by} ${later ? 'early' : 'late'}.`),
+      h('p', { style: { margin: 0, color: 'var(--ink-2)' } },
+        `Move ${drift.rows} meeting time${drift.rows === 1 ? '' : 's'} ${by} ${way}?`)),
+    footer: [
+      h('button', { class: 'btn', onclick: () => { keep(); closeModal(); } }, 'Leave them'),
+      h('button', { class: 'btn primary', onclick: () => { shift(); closeModal(); } },
+        `Shift ${by} ${way}`)
+    ]
+  });
+}
+
 /* ---------------- boot ---------------- */
 
 function boot() {
@@ -469,6 +515,8 @@ function boot() {
   // Google Calendar and Supabase, each only if the user has set it up
   G.start().catch((e) => console.warn('gcal', e));
   C.start().catch((e) => console.warn('cloud', e));
+
+  askAboutZone();
 
   // service worker
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

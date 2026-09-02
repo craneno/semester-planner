@@ -279,6 +279,83 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     host.remove();
   }
 });
+
+/* Two things at the same hour used to be two things in the same place, the
+   later one drawn flat over the earlier. What decides the widths is pure
+   arithmetic on starts and lengths, so it is testable without a grid — and it
+   is the arithmetic that is easy to get subtly wrong: which blocks belong to
+   the same cluster, and how many columns that cluster is worth. */
+suite('Time grid — two things at once', async ({ check }) => {
+  const { packBlocks, LAP } = await import('../js/timegrid.js');
+  const at = (h, mins) => ({ start: h * 60, mins });
+  const round = (n) => Math.round(n * 1000) / 1000;
+
+  {
+    const one = packBlocks([at(9, 60)]);
+    check('one block has the column to itself', one[0].x === 0 && one[0].w === 1);
+    check('...and no stacking to do', one[0].z === 0);
+  }
+
+  {
+    const apart = packBlocks([at(9, 60), at(11, 60)]);
+    check('blocks that do not touch each other are both full width',
+      apart.every((l) => l.x === 0 && l.w === 1),
+      JSON.stringify(apart));
+  }
+
+  {
+    // 8:45–10:15 and 9:30–10:00 — the pair from the screenshot
+    const pair = packBlocks([{ start: 525, mins: 90 }, { start: 570, mins: 30 }]);
+    check('two that overlap take half the column each',
+      pair[0].x === 0 && pair[1].x === 0.5, JSON.stringify(pair));
+    check('the earlier one runs on under the later',
+      round(pair[0].w) === round(0.5 * (1 + LAP)), String(pair[0].w));
+    check('...and the last column stops at the edge', pair[1].w === 0.5);
+    check('later columns draw on top', pair[1].z > pair[0].z);
+  }
+
+  {
+    const three = packBlocks([at(9, 120), at(9, 60), at(9, 60)]);
+    check('three at once are thirds', three.every((l) => round(l.w * 3) >= 1)
+      && round(three[2].x) === round(2 / 3), JSON.stringify(three));
+  }
+
+  {
+    // a long block bridges two that would otherwise be separate clusters
+    const bridged = packBlocks([{ start: 540, mins: 240 }, at(9, 60), at(12, 60)]);
+    check('a block that spans the morning keeps them all one cluster',
+      bridged.every((l) => l.w < 1), JSON.stringify(bridged));
+    check('...and takes the first column itself, being the longest',
+      bridged[0].x === 0);
+  }
+
+  {
+    // the second pair starts after the first is over: two clusters, not four columns
+    const two = packBlocks([at(9, 60), at(9, 60), at(11, 60), at(11, 60)]);
+    check('a gap starts the packing over',
+      two.every((l) => l.x === 0 || l.x === 0.5), JSON.stringify(two));
+  }
+
+  {
+    const back = packBlocks([at(9, 60), at(10, 60)]);
+    check('touching end to start is not overlapping',
+      back[0].w === 1 && back[1].w === 1, JSON.stringify(back));
+  }
+
+  {
+    const out = packBlocks([at(11, 60), at(9, 60), at(9, 30)]);
+    check('the answer comes back in the order the blocks were given',
+      out.length === 3 && out[0].x === 0 && out[0].w === 1,
+      'the 11am was passed first and is still first');
+  }
+
+  {
+    check('nothing to pack is nothing', packBlocks([]).length === 0);
+    const junk = packBlocks([{ start: null, mins: 0 }, at(0, 30)]);
+    check('a block with no time still gets a width rather than a crash',
+      junk.every((l) => l.w > 0), JSON.stringify(junk));
+  }
+});
 </script>
 </body>
 </html>

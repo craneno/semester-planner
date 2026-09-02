@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timezone tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* "07:30" is not a time until you know where it was written. A schedule
+   imported in Vancouver and read in Boston is three hours wrong, and nothing
+   in the data used to say so. Two halves again: the arithmetic of what a zone
+   was offset by, and what moving a schedule between two of them does to the
+   clock — including the part that bites, which is a class crossing midnight
+   and landing on the wrong weekday. */
+import { suite, storeWith } from './harness.js';
+
+const PT = 'America/Los_Angeles';
+const ET = 'America/New_York';
+const IST = 'Asia/Kolkata';
+const term = new Date('2026-09-15T12:00:00Z');
+const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+suite('Timezones — the arithmetic', async ({ check }) => {
+  const { zoneOffset, zoneShift, zoneLabel } = await import('../js/util.js');
+
+  {
+    check('UTC is offset by nothing', zoneOffset('UTC', term) === 0);
+    check('the west is behind', zoneOffset(PT, term) < 0);
+    check('the east of it is less behind', zoneOffset(ET, term) > zoneOffset(PT, term));
+    check('a half-hour zone is a half hour',
+      zoneOffset(IST, term) === 330, String(zoneOffset(IST, term)));
+  }
+
+  {
+    check('a zone the browser has never heard of is null rather than a guess',
+      zoneOffset('Mars/Olympus', term) === null);
+    check('...and shifting to it moves nothing',
+      zoneShift(PT, 'Mars/Olympus', term) === 0);
+  }
+
+  {
+    check('Pacific to Eastern is three hours later',
+      zoneShift(PT, ET, term) === 180, String(zoneShift(PT, ET, term)));
+    check('and back again is three hours earlier', zoneShift(ET, PT, term) === -180);
+    check('a zone to itself is nothing', zoneShift(ET, ET, term) === 0);
+    check('nothing to somewhere is nothing', zoneShift(null, ET, term) === 0);
+  }
+
+  {
+    // both ends move together in winter, so the gap holds — which is the whole
+    // reason the offset is asked for at an instant rather than looked up once
+    const january = new Date('2027-01-15T12:00:00Z');
+    check('the gap survives daylight saving', zoneShift(PT, ET, january) === 180);
+  }
+
+  {
+    check('a zone names itself short where the browser knows one',
+      /^[A-Z]{2,5}$/.test(zoneLabel(ET, term)), zoneLabel(ET, term));
+    check('...and by its city where it does not',
+      zoneLabel('Mars/Olympus') === 'Olympus', zoneLabel('Mars/Olympus'));
+    check('no zone is no label', zoneLabel(null) === '');
+  }
+});
+
+/* One store instance, and the areas swapped out under it between cases.
+   A fresh instance per case would be tidier to read and much worse to run:
+   each one schedules a save() that lands on the next one's fixture, which is
+   the race harness.js retries against and loses when a suite asks eight
+   times. Nothing here needs migrate(), so nothing here needs a new module. */
+suite('Timezones — a schedule that moved', async ({ check }) => {
+  const s = await storeWith({
+    version: 19,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [], items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {}
+  });
+  /** Put one course with this schedule in front of the selectors. */
+  const given = (schedule, stamp = PT, extra = {}) => {
+    s.state.areas = [{
+      id: 'c1', name: 'Thermo', category: 'course', order: 0, color: '#888',
+      archived: false, location: '', grading: [], ...extra,
+      schedule: schedule.map((m) => ({ location: '', tz: stamp, ...m }))
+    }];
+    return () => s.state.areas[0].schedule[0];
+  };
+
+  {
+    // Monday and Wednesday at 7:30, written in Pacific
+    const slot = given([{ days: [1, 3], start: '07:30', end: '08:45' }]);
+    const moved = s.shiftSchedules(PT, ET, term);
+    check('every slot in the zone is moved', moved === 1);
+    check('the class is three hours later', slot().start === '10:30', slot().start);
+    check('...and still an hour and a quarter long', slot().end === '11:45', slot().end);
+    check('the days it meets are untouched', slot().days.join() === '1,3');
+    check('and it now says where it is written', slot().tz === ET, slot().tz);
+  }
+
+  {
+    // an evening seminar moved east is the next morning's
+    const slot = given([{ days: [5], start: '22:00', end: '23:30' }]);
+    s.shiftSchedules(PT, ET, term);
+    check('a class that crosses midnight rolls its clock', slot().start === '01:00', slot().start);
+    check('...and carries the weekday with it', slot().days.join() === '6', slot().days.join());
+    check('...keeping its length', slot().end === '02:30', slot().end);
+  }
+
+  {
+    // and westward, where the day rolls back instead
+    const slot = given([{ days: [0], start: '01:00', end: '02:00' }], ET);
+    s.shiftSchedules(ET, PT, term);
+    check('going west across midnight lands the day before',
+      slot().start === '22:00' && slot().days.join() === '6',
+      `${slot().start} on ${slot().days.join()}`);
+  }
+
+  {
+    const slot = given([{ days: [2], start: '09:00', end: '10:00' }], ET);
+    const moved = s.shiftSchedules(PT, ET, term);
+    check('a slot written somewhere else is left alone', moved === 0);
+    check('...and keeps its time', slot().start === '09:00');
+  }
+
+  {
+    const slot = given([{ days: [1], start: '07:30', end: '08:45' }]);
+    s.shiftSchedules(PT, ET, term);
+    s.shiftSchedules(PT, ET, term);
+    check('shifting twice does not move it twice', slot().start === '10:30',
+      'the stamp left behind is what stops the second one');
+  }
+
+  {
+    const slot = given([{ days: [1], start: '07:30', end: '08:45' }]);
+    s.shiftSchedules(PT, ET, term);
+    s.shiftSchedules(ET, PT, term);
+    check('and it is its own undo', slot().start === '07:30');
+  }
+
+  {
+    const slot = given([{ days: [1], start: '07:30', end: '08:45' }]);
+    s.stampSchedules(ET);
+    check('stamping says where without moving anything',
+      slot().start === '07:30' && slot().tz === ET);
+  }
+
+  {
+    given([{ days: [1], start: '07:30', end: '08:45' }]);
+    check('the zones a schedule claims are listed', s.scheduleZones().join() === PT);
+  }
+
+  /* ---- and what the app asks about, off the same instance ---- */
+
+  const elsewhere = here === PT ? ET : PT;
+
+  {
+    given([{ days: [1], start: '07:30', end: '08:45' }], here);
+    check('a schedule written here is not news', s.scheduleDrift(term) === null);
+  }
+
+  {
+    given([{ days: [1], start: '07:30', end: '08:45' }], elsewhere);
+    const d = s.scheduleDrift(term);
+    check('one written elsewhere is', !!d);
+    check('...and says which way and by how much',
+      !!d && d.from === elsewhere && d.to === here && d.mins !== 0, JSON.stringify(d));
+    check('...and how many meetings it is about', !!d && d.rows === 1);
+  }
+
+  {
+    given([{ days: [1], start: '07:30', end: '08:45' }], elsewhere, { archived: true });
+    check('an archived course is not asked about', s.scheduleDrift(term) === null,
+      'a dropped class must not raise a question about the term');
+  }
+
+  {
+    given([]);
+    check('no schedule, no question', s.scheduleDrift(term) === null);
+  }
+
+  {
+    // Phoenix and Los Angeles keep the same clock all summer: different names,
+    // nothing to fix, and nothing worth interrupting anyone for
+    given([{ days: [1], start: '07:30', end: '08:45' }], 'America/Phoenix');
+    const d = s.scheduleDrift(new Date('2026-07-15T12:00:00Z'));
+    const sameClock = ['America/Los_Angeles', 'America/Phoenix'].includes(here);
+    check('two names for one clock are not a move', !sameClock || d === null,
+      sameClock ? '' : 'only checkable on a Pacific machine; skipped here');
+  }
+});
+
+suite('Timezones — an older device', async ({ check }) => {
+  {
+    // v18 knew nothing about zones, so the only claim the upgrade can make is
+    // the one reading it — which is why Settings can correct it
+    const s = await storeWith({
+      version: 18,
+      semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+      areas: [{
+        id: 'c1', name: 'Thermo', category: 'course', order: 0,
+        schedule: [{ days: [1], start: '07:30', end: '08:45', location: '' }]
+      }],
+      items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {}
+    });
+    const m = s.state.areas[0].schedule[0];
+    check('an unstamped slot is stamped where it is being read', m.tz === here, m.tz);
+    check('...without its time being touched', m.start === '07:30');
+    check('...so the upgrade itself asks nothing', s.scheduleDrift(term) === null);
+  }
+
+  {
+    // a stamp already made is a fact, and a later upgrade must not overwrite it
+    const s = await storeWith({
+      version: 19,
+      semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+      areas: [{
+        id: 'c1', name: 'Thermo', category: 'course', order: 0,
+        schedule: [{ days: [1], start: '07:30', end: '08:45', location: '', tz: PT }]
+      }],
+      items: [], cards: [], links: [], wishlist: [], habits: [], habitLog: {}, notes: {}
+    });
+    check('a stamp already made survives the read', s.state.areas[0].schedule[0].tz === PT);
+  }
+});
+</script>
+</body>
+</html>

@@ -28,6 +28,7 @@ const SUITES = [
   ['Focuses and sprints', './sprints.test.html'],
   ['Time grid', './timegrid.test.html'],
   ['Repeating', './repeat.test.html'],
+  ['Timezones', './zones.test.html'],
   ['Calendar', './gcal.test.html'],
   ['Cloud sync', './sync.test.html'],
   ['Version', './version.test.html']
@@ -55,8 +56,10 @@ for (const [name, src] of SUITES) {
       window.removeEventListener('message', onMsg);
       done(e.data.testResult);
     });
-    // a suite that throws before reporting must not hang the page
-    setTimeout(() => done(frame.contentWindow?.__result), 30000);
+    // a suite that throws before reporting must not hang the page. Generous,
+    // because a file now waits for every suite in it and each one sits out
+    // save() and pushSoon before it restores localStorage
+    setTimeout(() => done(frame.contentWindow?.__result), 90000);
   }));
 }
 

@@ -1,7 +1,7 @@
 // views/settings.js — semester, Google Calendar, appearance, data.
 
-import { h, clear, debounce, fmtTime, fromMin, DAY_RESET_HOUR } from '../util.js';
-import { state, commit, exportJson, importJson } from '../store.js';
+import { h, clear, debounce, fmtTime, fromMin, DAY_RESET_HOUR, tz, zoneLabel, zoneShift, fmtDuration } from '../util.js';
+import { state, commit, exportJson, importJson, scheduleZones, shiftSchedules, stampSchedules } from '../store.js';
 import { toast, confirmDialog } from '../ui.js';
 import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
 import { CHANGELOG, APP_VERSION } from '../changelog.js';
@@ -29,7 +29,8 @@ export function renderSettings(root, { navigate }) {
       field('Last day', h('input', {
         type: 'date', value: state.semester.end,
         onchange: (e) => { commit(() => { state.semester.end = e.target.value; }); navigate(); }
-      })))
+      }))),
+    zoneRow(navigate)
   ]));
 
   /* ---------- google calendar ---------- */
@@ -340,6 +341,68 @@ function release(r) {
 }
 
 /* ---------- bits ---------- */
+
+/* The zone a class schedule is written in.
+   The app asks by itself when a device turns up somewhere new, but that only
+   works for times it saw stamped. Anything imported before there was a stamp
+   claims whichever zone first read it, so this is where a wrong claim is put
+   right — and where a shift can be made on purpose, without moving house. */
+
+function zoneRow(navigate) {
+  const claimed = scheduleZones();
+  if (!claimed.length) return null;
+  const from = claimed[0];
+  const options = [...new Set([...claimed, tz(), ...zoneChoices()])];
+  const note = h('div', { class: 'eyebrow', style: { marginTop: '6px' } });
+  const paint = (pick) => {
+    const mins = zoneShift(pick, tz());
+    note.textContent = pick === from
+      ? `Shown as written. This device is on ${zoneLabel(tz())}.`
+      : mins
+        ? `Every class moves ${fmtDuration(Math.abs(mins))} ${mins > 0 ? 'later' : 'earlier'}.`
+        : 'Same clock — nothing moves.';
+  };
+  paint(from);
+
+  const pick = h('select', {
+    onchange: (e) => {
+      /* Two steps, and the order is the whole of it: first agree that the
+         times mean `said` — a relabel, nothing moves — and only then read
+         them here, which is the shift. Doing it the other way round would
+         move times that were never in the zone they were leaving. */
+      const said = e.target.value;
+      const moved = zoneShift(said, tz());
+      commit(() => { stampSchedules(said); shiftSchedules(said, tz()); });
+      toast(moved
+        ? `Class times moved ${fmtDuration(Math.abs(moved))} ${moved > 0 ? 'later' : 'earlier'}.`
+        : 'Class times unchanged.', {
+        action: 'Undo',
+        onAction: () => {
+          commit(() => { shiftSchedules(tz(), said); stampSchedules(from); });
+          navigate();
+        }
+      });
+      navigate();
+    }
+  }, ...options.map((z) => h('option', { value: z, selected: z === from }, zoneLabel(z) + ' — ' + z)));
+  pick.addEventListener('input', (e) => paint(e.target.value));
+
+  return h('div', {}, field('Class times were set in', pick), note);
+}
+
+/** A short list to choose from where the browser will not enumerate them. */
+function zoneChoices() {
+  try {
+    const all = Intl.supportedValuesOf('timeZone');
+    if (all && all.length) return all;
+  } catch { /* older browsers answer with the ones people actually move between */ }
+  return [
+    'America/Los_Angeles', 'America/Denver', 'America/Phoenix', 'America/Chicago',
+    'America/New_York', 'America/Halifax', 'Europe/London', 'Europe/Paris',
+    'Europe/Berlin', 'Asia/Kolkata', 'Asia/Shanghai', 'Asia/Tokyo',
+    'Australia/Sydney', 'Pacific/Auckland', 'UTC'
+  ];
+}
 
 function section(title, children) {
   return h('section', { class: 'card', style: { marginBottom: '18px' } },

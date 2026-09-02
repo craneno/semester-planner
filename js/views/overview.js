@@ -16,7 +16,7 @@ import {
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
-import { dragCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll } from '../timegrid.js';
+import { dragCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 
 export function renderOverview(root, { navigate, go }) {
@@ -128,7 +128,11 @@ function todayColumn(day, { navigate, go }) {
   }
 
   const lanes = h('div', { class: 'day-lanes' });
+  /* Placed by time alone, blocks that share an hour would sit on top of one
+     another; the widths are settled once the whole day is gathered. */
+  const laid = [];
   const block = ({ start, mins, cls, color, title, sub, onclick, done }) => {
+    laid.push({ start, mins });
     const height = Math.max(16, (mins / 60) * hourH - 2);
     return h('div', {
       class: 'blk ' + cls + (done ? ' done' : '') + (height < 34 ? ' compact' : ''),
@@ -172,6 +176,8 @@ function todayColumn(day, { navigate, go }) {
     lanes.append(el);
     plans.push([el, t, mins]);
   }
+
+  applyLanes(lanes.children, packBlocks(laid));
 
   if (day === today()) {
     const now = new Date();

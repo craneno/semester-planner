@@ -8,7 +8,7 @@ import {
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
-import { dragCreate, dragBlock, newBlockPrompt } from '../timegrid.js';
+import { dragCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 
 let anchor = today();          // any date inside the shown week
@@ -107,11 +107,17 @@ export function renderWeek(root, { navigate } = {}) {
       style: { height: hours.length * hourH + 'px' }
     });
 
+    /* Everything with a time on it, gathered before any of it is placed:
+       a class and a block of work that share an hour have to share the
+       column, and that cannot be decided one block at a time. */
+    const laid = [];
+    const lay = (start, mins, el) => { laid.push({ start, mins }); col.append(el); return el; };
+
     // recurring classes
     for (const c of classesOn(d)) {
       const s = toMin(c.start), e = toMin(c.end) || s + 60;
       const hgt = Math.max(18, ((e - s) / 60) * hourH - 2);
-      col.append(h('div', {
+      lay(s, e - s, h('div', {
         class: 'blk class' + (hgt < COMPACT_H ? ' compact' : ''),
         style: {
           top: top(s) + 'px', height: hgt + 'px',
@@ -128,7 +134,7 @@ export function renderWeek(root, { navigate } = {}) {
       for (const e of eventsOn(d).filter((x) => !x.allDay && x.start)) {
         const s = toMin(e.start), en = toMin(e.end) || s + 60;
         const hgt = Math.max(18, ((en - s) / 60) * hourH - 2);
-        col.append(h('div', {
+        lay(s, en - s, h('div', {
           class: 'blk ext' + (hgt < COMPACT_H ? ' compact' : ''),
           style: { top: top(s) + 'px', height: hgt + 'px' },
           title: `${e.title}${e.location ? ' · ' + e.location : ''} (Google Calendar)`,
@@ -156,8 +162,11 @@ export function renderWeek(root, { navigate } = {}) {
       h('div', { class: 't' }, fmtTime(t.plan.start, hour12) + ' · ' + fmtDuration(mins)),
       h('div', { class: 'n' }, t.title));
       wireBlock(el, t, body, days, dayStart, hourH, navigate);
-      col.append(el);
+      lay(s, mins, el);
     }
+
+    // and now the widths, which only the whole day knows
+    applyLanes(col.querySelectorAll('.blk'), packBlocks(laid));
 
     // double click empty space -> an hour, named the same way a drag is
     col.addEventListener('dblclick', (e) => {

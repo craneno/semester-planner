@@ -42,6 +42,83 @@ export function spanBetween(start, end) {
   return e - s;
 }
 
+/* ---------------- two things at once ----------------
+   Blocks are placed by time alone, so anything sharing an hour lands on top of
+   whatever was appended first — the 9:30 that hides behind the 8:45. Every
+   calendar answers the same way: the ones that overlap share the width. */
+
+/** How far a block reaches under the one to its right, as a share of a column.
+ *  Not zero: the titles are left-aligned, so a block whose left edge shows is
+ *  still readable, and the extra width is what makes a lone neighbour on a
+ *  phone worth tapping. */
+export const LAP = 0.25;
+
+/**
+ * Side-by-side geometry for blocks that overlap, as fractions of the column.
+ *
+ * Pure arithmetic on `{start, mins}` — no DOM, no CSS — so the width a block
+ * gets is testable without a grid to hang it in. Blocks are grouped into
+ * clusters of things that actually touch, and only a cluster is split: a lone
+ * afternoon block stays full width however busy the morning was.
+ *
+ * @param {Array<{start:number, mins:number}>} blocks minutes from midnight
+ * @returns {Array<{x:number, w:number, z:number}>} one per block, in the order
+ *   given: `x` the left edge and `w` the width, both 0..1 of the column, and
+ *   `z` the stacking order — later columns draw over the tail of earlier ones.
+ */
+export function packBlocks(blocks) {
+  const out = blocks.map(() => ({ x: 0, w: 1, z: 0 }));
+  const spans = blocks.map((b, i) => {
+    const start = Number.isFinite(b.start) ? b.start : 0;
+    return { i, start, end: start + Math.max(1, b.mins || 0) };
+  });
+  // earliest first, and the longer of two that start together first: a block
+  // that spans the cluster belongs in the left column, not squeezed at the end
+  spans.sort((a, b) => a.start - b.start || b.end - a.end || a.i - b.i);
+
+  let cluster = [];          // the blocks currently overlapping
+  let ends = [];             // where each column is free again
+  const flush = () => {
+    const cols = ends.length;
+    for (const { i, col } of cluster) {
+      out[i] = {
+        x: col / cols,
+        // all but the last column run on under their neighbour
+        w: (1 / cols) * (col === cols - 1 ? 1 : 1 + LAP),
+        z: col
+      };
+    }
+    cluster = []; ends = [];
+  };
+
+  for (const s of spans) {
+    // a gap with nothing running through it ends the cluster, and the next one
+    // starts again at full width
+    if (ends.length && s.start >= Math.max(...ends)) flush();
+    let col = ends.findIndex((e) => e <= s.start);
+    if (col < 0) { col = ends.length; ends.push(s.end); }
+    else ends[col] = Math.max(ends[col], s.end);
+    cluster.push({ i: s.i, col });
+  }
+  if (cluster.length) flush();
+  return out;
+}
+
+/** Write a pack onto the blocks it was worked out for, in the same order. */
+export function applyLanes(els, lanes) {
+  lanes.forEach((lane, i) => {
+    const el = els[i];
+    if (!el) return;
+    el.style.setProperty('--lane-x', lane.x);
+    el.style.setProperty('--lane-w', lane.w);
+    el.style.setProperty('--lane-z', lane.z);
+    // narrower than half a column and a short block can show the time or the
+    // title, not both — and which of the two is wanted is never in doubt: the
+    // grid already says when it is
+    el.classList.toggle('narrow', lane.w < 0.5);
+  });
+}
+
 const label = (mins, hour12) =>
   (mins >= DAY ? 'midnight' : fmtTime(fromMin(mins), hour12));
 

@@ -565,7 +565,20 @@ export async function start() {
   setStatus('ready');
   listCalendars().catch(() => {});
   await flushOutbox();
-  await sync();
+  /* The mirror keeps wall-clock times, worked out from the instant Google
+     sent at the moment it was fetched. Carried to another zone they are the
+     old clock's, and a token sync never asks again about an event that did
+     not change — so a device that has moved re-reads the lot. The marker is
+     device-local by being outside SYNCED_SETTINGS: which zone a phone is in
+     is no business of the laptop's. */
+  const here = tz();
+  const moved = state.settings.tzSeen && state.settings.tzSeen !== here;
+  if (state.settings.tzSeen !== here) {
+    state.settings.tzSeen = here;
+    if (moved) cfg().syncToken = '';
+    commit();
+  }
+  await sync({ full: moved });
   schedule();
 }
 

@@ -1,11 +1,11 @@
 // store.js — single source of truth. Local-first, localStorage-backed.
 
-import { uid, today, addDays, toMin, fromMin, diffDays } from './util.js';
+import { uid, today, addDays, toMin, fromMin, diffDays, tz, zoneShift, zoneLabel } from './util.js';
 import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js';
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -94,6 +94,9 @@ const DEFAULTS = () => {
       weekStart: 0,     // Sunday
       dayStart: 7,      // week grid first hour
       dayEnd: 23,
+      // the zone this device last opened in. Device-local by staying out of
+      // SYNCED_SETTINGS: a phone that has travelled is not news for the laptop
+      tzSeen: '',
       gcal: {
         clientId: '',
         calendarId: 'primary',
@@ -254,6 +257,15 @@ function migrate(raw) {
   // Monday for ever — and pinned rather than forced, so Settings can still
   // put it back and the next bump will not overrule that.
   if (from < 18) s.settings.weekStart = 0;
+  // v19: a class time now says which zone it was written in. Nothing recorded
+  // it before, so the only claim that can be made is the zone reading this —
+  // wrong for a schedule that came from another one, which is why Settings can
+  // correct it. Stamped rather than left blank so the check below has an
+  // answer, and pinned so a later bump never restamps a corrected row.
+  if (from < 19) {
+    const here = tz();
+    for (const a of s.areas) for (const m of a.schedule || []) m.tz = m.tz || here;
+  }
 
   // the habit page is useless empty, so give it the ones it was built for.
   // Pinned per version like the area seeds: a habit deleted on purpose must
@@ -638,6 +650,88 @@ export function classesOn(date) {
   }
   return out.sort((x, y) => toMin(x.start) - toMin(y.start));
 }
+
+/* ---------------- a schedule that has moved ----------------
+   Class times are wall clock — "07:30" — and a wall clock is only true in one
+   zone. Imported in Vancouver and read in Boston, every lecture is three hours
+   early with nothing in the data to notice it. So each slot records the zone
+   it is written in, and the two below are the noticing and the fixing. */
+
+/** Roll one slot's clock by `mins`, carrying the weekday when it crosses
+ *  midnight — an evening seminar moved east is the next morning's, and moving
+ *  the time without the day would put it on a Tuesday it never met. */
+function shiftSlot(m, mins) {
+  const s = toMin(m.start);
+  if (!Number.isFinite(s)) return;
+  const e = toMin(m.end);
+  const dur = Number.isFinite(e) ? (e - s + 1440) % 1440 : null;
+  const moved = s + mins;
+  const roll = Math.floor(moved / 1440);
+  m.start = fromMin(((moved % 1440) + 1440) % 1440);
+  if (dur !== null) m.end = fromMin((toMin(m.start) + dur) % 1440);
+  if (roll) m.days = (m.days || []).map((d) => (((d + roll) % 7) + 7) % 7);
+}
+
+/**
+ * What the class schedule was written in, when that is not where we are.
+ *
+ * @returns {null|{from, to, mins, rows, label}} `mins` is what reading the
+ *   schedule here costs it. Null when everything already agrees, and null too
+ *   when two zones merely have different names for the same clock — Phoenix
+ *   and Los Angeles in July is not news worth interrupting anyone for.
+ */
+export function scheduleDrift(at = new Date()) {
+  const here = tz();
+  const tally = new Map();
+  for (const a of state.areas) {
+    if (a.archived) continue;
+    for (const m of a.schedule || []) {
+      if (m.tz && m.tz !== here) tally.set(m.tz, (tally.get(m.tz) || 0) + 1);
+    }
+  }
+  let from = null, rows = 0;
+  for (const [zone, n] of tally) if (n > rows) { from = zone; rows = n; }
+  if (!from) return null;
+  const mins = zoneShift(from, here, at);
+  if (!mins) return null;
+  return { from, to: here, mins, rows, label: `${zoneLabel(from, at)} → ${zoneLabel(here, at)}` };
+}
+
+/** Rewrite every slot written in `from` so it reads correctly in `to`, and
+ *  stamp it, which is what keeps a second device from offering the same shift
+ *  again. Its own inverse: shifting back is the same call the other way. */
+export function shiftSchedules(from, to = tz(), at = new Date()) {
+  const mins = zoneShift(from, to, at);
+  let n = 0;
+  for (const a of state.areas) {
+    let touched = false;
+    for (const m of a.schedule || []) {
+      if (m.tz && m.tz !== from) continue;
+      if (mins) shiftSlot(m, mins);
+      m.tz = to;
+      touched = true; n++;
+    }
+    if (touched) a.updatedAt = new Date().toISOString();
+  }
+  return n;
+}
+
+/** Say the times are right where they are and the zone label was the stale
+ *  part — the answer to the offer below when a trip is not a move. */
+export function stampSchedules(zone = tz()) {
+  for (const a of state.areas) {
+    if (!(a.schedule || []).length) continue;
+    for (const m of a.schedule) m.tz = zone;
+    a.updatedAt = new Date().toISOString();
+  }
+}
+
+/** Every zone the schedule claims, for the Settings row that corrects a claim. */
+export const scheduleZones = () => {
+  const set = new Set();
+  for (const a of state.areas) for (const m of a.schedule || []) if (m.tz) set.add(m.tz);
+  return [...set].sort();
+};
 
 /** External Google events on a date. */
 export function eventsOn(date) {

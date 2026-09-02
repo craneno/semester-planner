@@ -181,6 +181,48 @@ export const tzLabel = (on = new Date()) => {
   } catch { return tz(); }
 };
 
+/* A wall-clock time is only half a fact: "07:30" is a different moment in
+   Vancouver than in Boston, and a schedule carried between the two is three
+   hours wrong with nothing in the data to say so. These two put the missing
+   half back — what a zone was offset by, and what that costs a time written
+   in one and read in another. */
+
+/** Minutes east of UTC that `zone` stood at, at the instant `at`. */
+export function zoneOffset(zone, at = new Date()) {
+  try {
+    const f = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    const p = {};
+    for (const x of f.formatToParts(at)) p[x.type] = x.value;
+    if (!p.year) return null;
+    const asUtc = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+    return Math.round((asUtc - at.getTime()) / 60000);
+  } catch { return null; }
+}
+
+/** Minutes to add to a wall-clock time written in `from` to read it in `to`.
+ *  Zero when either zone is one the browser does not know, which leaves the
+ *  times alone rather than moving them by a guess. */
+export function zoneShift(from, to, at = new Date()) {
+  if (!from || !to || from === to) return 0;
+  const a = zoneOffset(from, at), b = zoneOffset(to, at);
+  return a === null || b === null ? 0 : b - a;
+}
+
+/** Short label for any zone — "PDT" where the browser knows one, else the city. */
+export const zoneLabel = (zone, on = new Date()) => {
+  if (!zone) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' }).formatToParts(on);
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (name && !/^GMT[+-]?/.test(name)) return name;
+  } catch { /* an unknown zone is named by its city below */ }
+  return zone.split('/').pop().replace(/_/g, ' ');
+};
+
 /* ---------- misc ---------- */
 
 export function debounce(fn, ms = 300) {

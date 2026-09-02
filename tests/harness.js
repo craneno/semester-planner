@@ -11,11 +11,21 @@ const LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 let nonce = 0;
 export const freshStore = () => import(`../js/store.js?t=${++nonce}`);
 
+/* A file holds as many suites as it has things to say, and they are started
+   together — so the page is not finished until the last of them is. Counted
+   rather than guessed: every suite() registers before any of them can await,
+   which is the only moment at which the number is known. Without this the
+   runner took the first suite to finish as the file's whole answer, and a
+   failure in a later one went unseen. */
+let pending = 0;
+const totals = { failed: 0, passed: 0 };
+
 /**
  * @param {string} title   shown at the top of the page
  * @param {(t) => Promise<void>} body  receives { check, log, freshStore }
  */
 export async function suite(title, body) {
+  pending++;
   const out = document.createElement('div');
   document.body.append(out);
   const line = (msg, cls = '') => {
@@ -63,12 +73,19 @@ export async function suite(title, body) {
   return report(title, failed, passed);
 }
 
-/** Let tests/index.html aggregate suites it runs in iframes. */
+/** Let tests/index.html aggregate suites it runs in iframes.
+ *  One message per *file*, once every suite in it has reported — and
+ *  `__result` kept current all the while, so the runner's timeout still has
+ *  the tally of whatever did finish. */
 function report(title, failed, passed) {
-  const result = { suite: title, failed, passed };
-  window.__result = result;
-  if (window.parent !== window) window.parent.postMessage({ testResult: result }, '*');
-  return result;
+  totals.failed += failed;
+  totals.passed += passed;
+  const file = location.pathname.split('/').pop() || title;
+  window.__result = { suite: file, failed: totals.failed, passed: totals.passed };
+  if (--pending === 0 && window.parent !== window) {
+    window.parent.postMessage({ testResult: window.__result }, '*');
+  }
+  return { suite: title, failed, passed };
 }
 
 /**

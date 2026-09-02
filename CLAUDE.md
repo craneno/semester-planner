@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no dependencies,
 backed by `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **18**, service worker **planner-v33**.
+Schema **19**, service worker **planner-v34**.
 
 ## Working with me
 
@@ -64,7 +64,7 @@ a delete made mid-round-trip is lost.
 
 **Never sync device credentials** — no Google tokens, Supabase URL/anon key or
 cursors in `snapshotRows()`. Settings sync by allowlist (`SYNCED_SETTINGS`);
-anything absent stays device-local, which is how `railHidden` stays per-device.
+anything absent stays device-local — how `railHidden` and `tzSeen` stay so.
 Row kinds are constrained by Postgres — `area, item, note, card, meta` — so
 **a new kind needs an `ALTER` the user must run** (`supabase/upgrade.sql`,
 idempotent, named by `describeSyncError()`). Hence habits, links, the wishlist
@@ -77,7 +77,7 @@ none, and absent is not empty.
 | | |
 |---|---|
 | `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series |
-| `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite` |
+| `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite`, and a `schedule` of meetings each stamped with the `tz` it is written in |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
 | `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they become; focuses and sprints on the chart. All three ride in `meta` |
 | `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror and queued writes |
@@ -172,22 +172,34 @@ on the calendar — `kind` deciding whether deliverables are asked for.
   and the rest is stranded in the title. A link's title comes from its URL alone
   and is meant to be corrected; only `http`/`https` are stored, or a saved
   `javascript:` URL would run as the app.
+- **A wall-clock time needs the zone it was written in.** Every `area.schedule`
+  slot carries `tz`; `scheduleDrift()` notices a device that has moved and
+  `shiftSchedules()` rewrites the times, carrying the weekday across midnight.
+  The stamp is the answer as well as the question — it stops a second device
+  offering the same shift. `state.events` holds wall clock worked out at fetch
+  time, so a move (`settings.tzSeen`, device-local) drops the sync token.
+- **Blocks that overlap share the width**, or the later is drawn flat over the
+  earlier. `packBlocks()` is pure — clusters of things that touch, a column each,
+  `LAP` running all but the last under its neighbour; `applyLanes()` writes it as
+  `--lane-x/w/z`. Too narrow for both, a compact block keeps its name, not its time.
 - Capture's **Enter must stay the shortest path out** — an unfiled note, never
   a question. No Notes page: `unfiledQueue()` on Overview, `noteCard()` on the
   area's page; deleting either strands captures.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no dependencies, 617 checks, and
-`tests/` is excluded from the deploy. One suite per file, named for what it
-covers and headed by why; `tests/index.html` runs them all.
+Serve the repo, open `/tests/`. No runner, no dependencies, 714 checks, and
+`tests/` is excluded from the deploy. A file holds several suites, each named for
+what it covers and headed by why, and reports to `tests/index.html` **once the
+last has finished** — taking the first hid a failure in a later one.
 
 Suites drive the real modules and clobber app state, so **both guards must
 stay**: refuse to run outside localhost, and restore `localStorage` afterwards,
 waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once at import, so `migrate()` needs a fresh instance —
-`storeWith(raw)`, which **verifies** its seed rather than timing it. A fresh
-instance has its own `state`, so a suite that pokes state *and* calls
+`storeWith(raw)`, which **verifies** its seed rather than timing it — and ask
+for few, since each instance schedules a `save()` that lands on the next one's
+fixture. A fresh instance has its own `state`, so a suite that pokes state *and* calls
 `gcal.js`/`cloud.js` must use `sharedStoreWith()` — once per page, since
 `import()` caches. To add a field to a task: `upsertItem()`, a fallback in
 `migrate()`, a row in `js/editor.js`. Sync ships whatever shape it has.

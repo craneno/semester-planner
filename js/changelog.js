@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v34', date: '2026-09-01',
+    title: 'Where you are, and what is under what',
+    notes: [
+      'A class schedule now records the timezone it was written in. Open the planner somewhere else and it says so — “these were set in Pacific, you are on Eastern” — and moves every meeting by the difference on one tap, or leaves them where they are if the trip is not a move.',
+      'Settings → Semester has the same thing by hand, for a schedule imported before any of this existed and still on the old clock. Say where the times came from and they move once, with an Undo.',
+      'Moving between zones also re-reads the Google calendar from scratch, since its times were worked out where you used to be.',
+      'Two things at the same hour no longer sit on top of each other. They share the width, the way a calendar does — which on a phone is the difference between seeing the 9:30 and not knowing it was there.'
+    ]
+  },
+  {
     version: 'v33', date: '2026-08-31',
     title: 'Things that happen again',
     notes: [

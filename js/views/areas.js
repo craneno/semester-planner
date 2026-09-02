@@ -2,7 +2,7 @@
 // and the drill-down into one area's full list. Both shapes live here because
 // they render the same rows from the same data; only the scope differs.
 
-import { h, clear, fmtTime, fmtDate, today, debounce, DOW } from '../util.js';
+import { h, clear, fmtTime, fmtDate, today, debounce, DOW, tz } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, deleteArea, areasInCategory, itemsForArea,
   nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress,
@@ -438,7 +438,7 @@ function editArea(area, categoryId, navigate) {
     });
     meetingsHost.append(h('button', {
       class: 'btn ghost sm',
-      onclick: () => { draft.schedule.push({ days: [], start: '10:30', end: '11:35', location: '' }); drawMeetings(); }
+      onclick: () => { draft.schedule.push({ days: [], start: '10:30', end: '11:35', location: '', tz: tz() }); drawMeetings(); }
     }, '+ Add meeting time'));
   }
   drawMeetings();
@@ -577,7 +577,9 @@ function calendarPicker(draft, redrawMeetings, fields) {
       host.append(h('button', {
         class: 'series', type: 'button',
         onclick: () => {
-          draft.schedule = sx.schedule.map((r) => ({ ...r, days: [...r.days] }));
+          // stamped with the zone the times were just read in: Google holds
+          // instants, and this is the wall clock they came out as here
+          draft.schedule = sx.schedule.map((r) => ({ ...r, days: [...r.days], tz: tz() }));
           if (!draft.name.trim()) { draft.name = sx.title; fields.nameInput.value = sx.title; }
           if (!draft.location && sx.location) {
             draft.location = sx.location;
