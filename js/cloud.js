@@ -14,7 +14,7 @@
 // Splitting them means clock skew between your laptop and phone can't make
 // the app miss a change; at worst it settles a genuine conflict the wrong way.
 
-import { state, commit, save, subscribe, snapshotRows, applyRow, rowStamp } from './store.js';
+import { state, commit, save, subscribe, snapshotRows, applyRow, rowStamp, SCHEMA_VERSION } from './store.js';
 import { debounce } from './util.js';
 import { applyAppearance } from './appearance.js';
 
@@ -24,6 +24,7 @@ const CDN = [
 ];
 const TABLE = 'planner_rows';
 const BASE_KEY = (uid) => `semesterPlanner.cloudBase.${uid}`;
+const SCHEMA_KEY = (uid) => `semesterPlanner.cloudSchema.${uid}`;
 const EPOCH = '1970-01-01T00:00:00Z';
 const PAGE = 500;
 
@@ -158,6 +159,24 @@ function storeBaseline(map) {
   try { localStorage.setItem(BASE_KEY(cloud.userId), JSON.stringify(map)); } catch { /* quota */ }
 }
 
+/* An upgrade is not an edit.
+   The baseline spots changes by hashing each row, so a migration that adds a
+   field — a `tz` on every class meeting, say — makes every row it touched look
+   edited, and the first device to open the new version pushes its whole copy
+   over everyone else's. That is how a freewrite written on the phone was
+   replaced by the laptop's empty one. So the schema the baseline was built
+   under is recorded, and when it moves we throw the baseline away: with none,
+   the cloud wins every row, and the new shape goes up only after we have
+   agreed with the server about what it holds. */
+const baselineSchema = () => {
+  if (!cloud.userId) return null;
+  try { return Number(localStorage.getItem(SCHEMA_KEY(cloud.userId))) || null; } catch { return null; }
+};
+function storeSchema() {
+  if (!cloud.userId) return;
+  try { localStorage.setItem(SCHEMA_KEY(cloud.userId), String(SCHEMA_VERSION)); } catch { /* quota */ }
+}
+
 function currentHashes() {
   const out = {};
   for (const r of snapshotRows()) out[key(r.kind, r.id)] = hash(r.data);
@@ -178,7 +197,9 @@ export async function sync({ full = false } = {}) {
   setStatus('syncing');
   try {
     const c = await client();
-    if (full) { cfg().cursor = ''; storeBaseline(null); }
+    // an upgrade since the last sync counts as a full one: adopt, then send
+    const upgraded = baselineSchema() !== SCHEMA_VERSION;
+    if (full || upgraded) { cfg().cursor = ''; storeBaseline(null); }
 
     const cursorAfterPull = await pull(c);
     const pushed = await push(c);
@@ -189,6 +210,7 @@ export async function sync({ full = false } = {}) {
     // while the round trip was in flight has not been sent yet, and baking it
     // into the baseline would hide it from the next push forever.
     storeBaseline(pushed.hashes);
+    storeSchema();
     save();
     setStatus('ready');
   } catch (err) {
@@ -285,7 +307,13 @@ async function push(c) {
     const k = key(r.kind, r.id);
     hashes[k] = hash(r.data);
     if (!baseline || baseline[k] !== hashes[k]) {
-      out.push({ user_id: cloud.userId, kind: r.kind, id: r.id, data: r.data, deleted: false, updated_at: now });
+      // the row's own edit time, not the clock at push time: a row that was
+      // dirtied by an upgrade rather than by a person must not present itself
+      // as the newest thing anyone has written
+      out.push({
+        user_id: cloud.userId, kind: r.kind, id: r.id, data: r.data,
+        deleted: false, updated_at: rowStamp(r.kind, r.id) || now
+      });
     }
   }
   // present at last sync, gone now => deleted on this device

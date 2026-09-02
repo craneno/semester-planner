@@ -9,6 +9,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v35', date: '2026-09-02',
+    title: 'Nothing older wins',
+    notes: [
+      'A bug of mine deleted a freewrite. Yesterday’s upgrade stamped a timezone onto every class meeting; sync spots changes by hashing rows, so every area looked freshly edited, and the first device to open it pushed its whole copy over the other one’s. This release is the fix and the guard against the next one.',
+      'An upgrade is no longer an edit. The sync layer remembers which schema it last agreed with the server about, and when that moves it adopts the server’s copy first and sends the new shape after.',
+      'Areas now keep the time they were really edited — the old code threw that away on every load, so a stale copy could beat a fresh one with nothing to compare. A push carries that time instead of the clock at send.',
+      'Your database can now refuse a stale write outright. Run supabase/upgrade.sql once in the SQL editor: it adds a trigger that keeps whichever version was written last, so a bad build cannot do this again even if the app is wrong.',
+      'And copies. Before the app reads anything it keeps a copy on the device — one a day, five days back, plus one taken the moment a schema upgrade is about to run. Settings → Data lists them. Nothing that syncs can reach them.'
+    ]
+  },
+  {
     version: 'v34', date: '2026-09-01',
     title: 'Where you are, and what is under what',
     notes: [

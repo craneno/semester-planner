@@ -27,3 +27,38 @@ delete from public.planner_rows where kind = 'session';
 -- Realtime respects RLS only when replica identity carries the filter column.
 -- A project created before this was added syncs correctly but never live.
 alter table public.planner_rows replica identity full;
+
+-- Nothing older may overwrite something newer.
+--
+-- The client decides conflicts last-write-wins, which works right up until a
+-- client is wrong about what it holds. A schema upgrade that adds a field to
+-- every row makes each one look freshly edited; the first device to open the
+-- new version then pushes its whole copy over everyone else's, and an upsert
+-- keeps no history to undo it with. A freewrite was lost that way.
+--
+-- The client is now careful about this, but "careful" is not a guarantee and a
+-- bad build reaches every device at once. This is the guarantee: the database
+-- itself keeps whichever version was written last, and a stale write is
+-- dropped rather than applied. A delete is always allowed through — a
+-- tombstone is a real decision, and it carries its own newer stamp.
+create or replace function public.planner_rows_keep_newest()
+returns trigger
+language plpgsql
+as $$
+begin
+  if NEW.deleted is distinct from true
+     and OLD.updated_at is not null
+     and NEW.updated_at is not null
+     and NEW.updated_at < OLD.updated_at then
+    return OLD;
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists planner_rows_keep_newest on public.planner_rows;
+
+create trigger planner_rows_keep_newest
+  before update on public.planner_rows
+  for each row
+  execute function public.planner_rows_keep_newest();

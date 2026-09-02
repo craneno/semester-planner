@@ -1,7 +1,7 @@
 // views/settings.js — semester, Google Calendar, appearance, data.
 
 import { h, clear, debounce, fmtTime, fromMin, DAY_RESET_HOUR, tz, zoneLabel, zoneShift, fmtDuration } from '../util.js';
-import { state, commit, exportJson, importJson, scheduleZones, shiftSchedules, stampSchedules } from '../store.js';
+import { state, commit, exportJson, importJson, scheduleZones, shiftSchedules, stampSchedules, listBackups, readBackup } from '../store.js';
 import { toast, confirmDialog } from '../ui.js';
 import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
 import { CHANGELOG, APP_VERSION } from '../changelog.js';
@@ -308,7 +308,8 @@ export function renderSettings(root, { navigate }) {
             location.reload();
           }
         }
-      }, 'Erase all data'))
+      }, 'Erase all data')),
+    backupList()
   ]));
 
   /* ---------- version history ----------
@@ -341,6 +342,44 @@ function release(r) {
 }
 
 /* ---------- bits ---------- */
+
+/* Copies this device kept on its own.
+   Sync is fan-out, not safety: a bad row reaches every device in seconds and
+   the server keeps no history. These are taken before the app touches
+   anything — one a day, plus one the moment a schema upgrade is about to run,
+   which is when every row changes shape at once. They never leave the device
+   and nothing that syncs can reach them. */
+
+function backupList() {
+  const backups = listBackups();
+  if (!backups.length) return null;
+
+  const rows = backups.map((b) => {
+    const pre = b.label.startsWith('before-');
+    return h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 0' } },
+      h('span', { class: 'num', style: { fontSize: '12.5px', minWidth: '110px' } },
+        pre ? 'before ' + b.label.slice(7) : b.label),
+      h('span', { style: { fontSize: '12px', color: 'var(--ink-3)', flex: 1 } },
+        pre ? 'taken as the upgrade ran' : `${Math.round(b.size / 1024)} KB`),
+      h('button', {
+        class: 'btn sm', onclick: () => {
+          const text = readBackup(b.key);
+          if (!text) return toast('That copy is gone.');
+          const blob = new Blob([text], { type: 'application/json' });
+          const a = h('a', { href: URL.createObjectURL(blob), download: `planner-${b.label}.json` });
+          document.body.append(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+      }, 'Save'));
+  });
+
+  return h('div', { style: { marginTop: '6px' } },
+    h('div', { class: 'eyebrow', style: { marginBottom: '4px' } }, 'Copies kept on this device'),
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 6px' } },
+      'Taken before anything is read, so a bad sync cannot reach them. Save one, '
+      + 'then Restore from file to put it back.'),
+    ...rows);
+}
 
 /* The zone a class schedule is written in.
    The app asks by itself when a device turns up somewhere new, but that only

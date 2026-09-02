@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **19**, service worker **planner-v34**.
+Schema **19**, service worker **planner-v35**.
 
 ## Working with me
 
@@ -69,6 +69,26 @@ round have been bugs we shipped: a row missing here is "new from the cloud"
 *only* if the baseline never had it, or taking the server copy undoes a delete;
 and the baseline must be the hashes `push()` sent, never a snapshot taken after,
 or a delete made mid-trip is lost.
+
+**A migration is not an edit, and this one cost real data.** The baseline
+hashes each row, so a migration that adds a field — `tz` on every class meeting
+— makes every row it touched look edited, and the first device to open the new
+build pushes its whole copy over everyone else's. A freewrite went that way. So
+`cloud.js` records the schema its baseline was built under, and a bump throws
+the baseline away: with none, the cloud wins every row, and the new shape goes
+up only once we agree with the server. `push()` sends `rowStamp()`, never the
+clock at send; `rowStamp()` must know every kind that carries one, and
+**`migrate()` must carry `updatedAt` through** — the area normaliser did not,
+which left every area with no clock at all. Postgres has the last word:
+`planner_rows_keep_newest` drops a write older than the row it lands on
+(`supabase/upgrade.sql`; a delete still passes, being its own decision).
+
+**Sync is fan-out, not safety.** An upsert keeps no history and reaches every
+device in seconds. `keepBackups()` copies the raw state *before `migrate()`
+reads it* — one a day, five kept, plus one named `before-v<n>` the moment an
+upgrade is about to run. `events`/`outbox` are left out (rebuilt from Google,
+and most of the bytes), and the copies sit under their own keys so nothing
+syncable can reach them. Settings → Data lists them.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
@@ -200,7 +220,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no deps, 714 checks, and `tests/` is
+Serve the repo, open `/tests/`. No runner, no deps, 743 checks, and `tests/` is
 left out of the deploy. A file holds several suites, each named for what it
 covers and headed by why, and it reports to `tests/index.html` **once the last
 one has finished** — taking the first hid a failure in a later one.

@@ -211,7 +211,13 @@ function migrate(raw) {
     // bound to it without a guard at every read
     freewrite: typeof a.freewrite === 'string' ? a.freewrite : '',
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
-    grading: Array.isArray(a.grading) ? a.grading : []
+    grading: Array.isArray(a.grading) ? a.grading : [],
+    // Carried, not rebuilt. upsertArea() stamps an edit, but this normaliser
+    // used to drop the stamp on the next load, so every area reached the sync
+    // layer with no clock at all — and a stale copy could beat a fresh one
+    // because there was nothing to compare. That cost a freewrite.
+    createdAt: a.createdAt || null,
+    updatedAt: a.updatedAt || a.createdAt || null
   }));
 
   // Seed a category that would otherwise be an empty heading, once, on the
@@ -342,7 +348,61 @@ function loadRaw() {
   return null;
 }
 
-export const state = migrate(loadRaw());
+/* ---------------- local backups ----------------
+   Sync is not a backup. A bad row can be pushed to every device in seconds,
+   and Postgres keeps no history — an upsert writes over what was there. So
+   before any of that, the state as it was found is kept here, on this device,
+   where nothing that syncs can reach it.
+
+   Two kinds. One per day, the last few days kept, so a slow leak is caught.
+   And one taken the moment a schema upgrade is about to run, because that is
+   when the shape of every row changes at once and the damage is widest. The
+   Google mirror and the outbox are dropped from both: they are rebuilt from
+   Google on the next sync, and they are most of the bytes. */
+
+const BAK = 'semesterPlanner.bak.';
+const KEEP_DAYS = 5;
+
+/** Everything worth keeping, minus what a sync can fetch again. */
+const backupOf = (raw) => {
+  const { events, outbox, ...rest } = raw || {};
+  return JSON.stringify({ ...rest, backedUpAt: new Date().toISOString() });
+};
+
+export function listBackups() {
+  const out = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(BAK)) out.push({ key: k, label: k.slice(BAK.length), size: (localStorage.getItem(k) || '').length });
+  }
+  return out.sort((a, b) => (a.label < b.label ? 1 : -1));
+}
+
+export const readBackup = (key) => localStorage.getItem(key);
+
+/** Keep today's copy and the pre-upgrade one, and drop the oldest dailies. */
+function keepBackups(raw) {
+  if (!raw || typeof raw !== 'object') return;
+  const put = (name) => {
+    if (localStorage.getItem(BAK + name)) return;   // already have this one
+    try { localStorage.setItem(BAK + name, backupOf(raw)); } catch { prune(true); }
+  };
+  const prune = (hard = false) => {
+    const dailies = listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label));
+    for (const b of dailies.slice(hard ? KEEP_DAYS - 2 : KEEP_DAYS)) {
+      try { localStorage.removeItem(b.key); } catch { /* nothing else to try */ }
+    }
+  };
+  // the one that matters most: the shape about to be rewritten
+  const from = raw.version || 0;
+  if (from && from < SCHEMA_VERSION) put(`before-v${SCHEMA_VERSION}`);
+  put(today());
+  prune();
+}
+
+const raw = loadRaw();
+try { keepBackups(raw); } catch (e) { console.warn('planner: backup failed', e); }
+export const state = migrate(raw);
 
 let saveTimer = null;
 const subs = new Set();
@@ -1846,6 +1906,10 @@ export function applyRow({ kind, id, data, deleted }) {
 export function rowStamp(kind, id) {
   if (kind === 'item') return itemById(id)?.updatedAt || null;
   if (kind === 'card') return cardById(id)?.updatedAt || null;
+  if (kind === 'area') return areaById(id)?.updatedAt || null;
+  if (kind === 'note') return state.notes[id]?.updatedAt || null;
+  // `meta` still has none: it is a bag of lists, not a row anyone edits. The
+  // guard for it is that a schema bump never pushes — see cloud.js.
   return null;
 }
 

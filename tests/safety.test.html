@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Safety tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* Written after a real loss. A schema upgrade added a field to every area, the
+   sync layer hashes rows to spot changes, so every area looked freshly edited
+   — and the first device to open the new build pushed its whole copy over
+   everyone else's. A freewrite written on the phone was replaced by the
+   laptop's empty one, and an upsert keeps no history to undo it with.
+
+   Three things have to hold, and each is checked here:
+     an upgrade must not look like an edit,
+     a row must carry the time it was really edited, not the time it was sent,
+     and there must be a copy on this device that no sync can reach. */
+import { suite, storeWith } from './harness.js';
+
+const base = (over = {}) => ({
+  version: 19,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [], items: [], cards: [], links: [], wishlist: [], sprints: [],
+  habits: [], habitLog: {}, notes: {}, ...over
+});
+
+suite('Safety — a row says when it was really edited', async ({ check }) => {
+  const s = await storeWith(base({
+    areas: [{
+      id: 'c1', name: 'Job search', category: 'personal', order: 0,
+      freewrite: 'email the distributor', schedule: [],
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-30T12:00:00.000Z'
+    }],
+    items: [{ id: 't1', title: 'apply', areaId: 'c1', updatedAt: '2026-08-30T12:00:00.000Z' }]
+  }));
+
+  {
+    // the bug that cost the freewrite: migrate() rebuilt each area and dropped
+    // the stamp, so every area reached the sync layer with no clock at all
+    const a = s.state.areas[0];
+    check('an area keeps the time it was edited', a.updatedAt === '2026-08-30T12:00:00.000Z', String(a.updatedAt));
+    check('...and the day it was made', a.createdAt === '2026-08-01T00:00:00.000Z');
+    check('...and its freewrite is still there', a.freewrite === 'email the distributor');
+  }
+
+  {
+    check('sync can read an area’s clock',
+      s.rowStamp('area', 'c1') === '2026-08-30T12:00:00.000Z', String(s.rowStamp('area', 'c1')));
+    check('...an item’s, as before', s.rowStamp('item', 't1') === '2026-08-30T12:00:00.000Z');
+    check('...and says so plainly when there is none', s.rowStamp('area', 'nope') === null);
+  }
+
+  {
+    s.upsertArea({ id: 'c1', freewrite: 'and chase the tank' });
+    const after = s.rowStamp('area', 'c1');
+    check('an edit moves the clock forward', after > '2026-08-30T12:00:00.000Z', String(after));
+  }
+
+  {
+    // an area the user has never touched has no clock to offer, and that must
+    // be an honest null rather than a made-up now
+    s.state.areas.push({ id: 'c2', name: 'Rocket', category: 'project', order: 1, schedule: [] });
+    check('an untouched area claims nothing', s.rowStamp('area', 'c2') == null);
+  }
+});
+
+suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
+  // The shape of the fix, checked where it lives: cloud.js keeps the schema
+  // its baseline was built under, and a bump throws the baseline away so the
+  // cloud wins every row before the new shape is sent anywhere.
+  const src = await fetch('../js/cloud.js').then((r) => r.text());
+
+  check('the baseline records the schema it was built under',
+    /SCHEMA_KEY|baselineSchema/.test(src));
+  check('a bump clears the baseline the same way a full sync does',
+    /upgraded[\s\S]{0,120}storeBaseline\(null\)/.test(src),
+    'with no baseline, winner() gives every row to the cloud');
+  check('and the schema is only recorded once the sync has finished',
+    /storeBaseline\(pushed\.hashes\);\s+storeSchema\(\);/.test(src),
+    'recording it early would let a failed sync count as agreed');
+
+  check('a push sends the row’s own edit time',
+    /updated_at: rowStamp\(r\.kind, r\.id\) \|\| now/.test(src),
+    'not the clock at push time, or an upgrade dates itself newer than every real edit');
+
+  const schema = await fetch('../supabase/schema.sql').then((r) => r.text());
+  const upgrade = await fetch('../supabase/upgrade.sql').then((r) => r.text());
+  for (const [name, sql] of [['schema.sql', schema], ['upgrade.sql', upgrade]]) {
+    check(`${name} refuses a stale write`, /planner_rows_keep_newest/.test(sql),
+      'the client can be wrong; the database is the backstop');
+    check(`...and still lets a delete through in ${name}`,
+      /NEW\.deleted is distinct from true/.test(sql),
+      'a tombstone is a real decision');
+  }
+  log('The trigger is the only guard a bad build cannot get past.');
+});
+
+suite('Safety — a copy this device keeps', async ({ check }) => {
+  const KEY = 'semesterPlanner.v1';
+  const BAK = 'semesterPlanner.bak.';
+  const clear = () => {
+    for (const k of Object.keys(localStorage)) if (k.startsWith(BAK)) localStorage.removeItem(k);
+  };
+
+  {
+    clear();
+    // a store opened on data from an older schema
+    const s = await storeWith(base({
+      version: 18,
+      areas: [{ id: 'c1', name: 'Job search', category: 'personal', order: 0, freewrite: 'email the distributor', schedule: [] }],
+      events: [{ id: 'e1', title: 'a mirrored event', date: '2026-09-02' }]
+    }));
+    const kept = s.listBackups();
+    check('an upgrade leaves a copy behind', kept.some((b) => b.label === 'before-v' + s.SCHEMA_VERSION),
+      kept.map((b) => b.label).join() || 'none');
+    check('...and a copy for the day as well', kept.some((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label)));
+
+    const pre = JSON.parse(s.readBackup(BAK + 'before-v' + s.SCHEMA_VERSION));
+    check('the copy holds the data as it was found', pre.version === 18, String(pre.version));
+    check('...with the freewrite in it', pre.areas[0].freewrite === 'email the distributor');
+    check('...and says when it was taken', !!pre.backedUpAt);
+    check('the Google mirror is left out of it', pre.events === undefined,
+      'it is most of the bytes and the next sync fetches it again');
+    check('so is the outbox', pre.outbox === undefined);
+  }
+
+  {
+    // the copy is taken before anything is written, so a second load on the
+    // same day must not overwrite it with whatever happened since
+    const first = localStorage.getItem(BAK + '2000-01-01');
+    localStorage.setItem(BAK + '2000-01-01', JSON.stringify({ marker: 'kept' }));
+    await storeWith(base());
+    check('a copy already taken is left alone',
+      JSON.parse(localStorage.getItem(BAK + '2000-01-01')).marker === 'kept',
+      'one a day, and it is the state at the start of the day');
+    if (first === null) localStorage.removeItem(BAK + '2000-01-01');
+  }
+
+  {
+    clear();
+    const s = await storeWith(base());
+    check('a store on current data still keeps the day’s copy',
+      s.listBackups().length === 1);
+    check('...but no upgrade copy, there having been no upgrade',
+      !s.listBackups().some((b) => b.label.startsWith('before-')));
+  }
+
+  {
+    clear();
+    for (const d of ['2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30']) {
+      localStorage.setItem(BAK + d, JSON.stringify({ day: d }));
+    }
+    const s = await storeWith(base());
+    const dailies = s.listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label));
+    check('old copies are dropped rather than piling up for ever', dailies.length <= 5,
+      String(dailies.length));
+    check('...and the newest are the ones kept',
+      dailies[0].label > dailies[dailies.length - 1].label || dailies.length === 1,
+      dailies.map((b) => b.label).join());
+    clear();
+  }
+
+  {
+    check('the copies are not in the store, so nothing can sync them away',
+      !JSON.stringify(JSON.parse(localStorage.getItem(KEY) || '{}')).includes('backedUpAt'));
+  }
+});
+</script>
+</body>
+</html>
