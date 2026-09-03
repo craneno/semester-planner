@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v41', date: '2026-09-03',
+    title: 'The store in pieces',
+    notes: [
+      'Nothing to see: store.js was one 2,000-line file and is now a set of small ones under js/store/. Every screen works as before. If anything looks off, say which screen.'
+    ]
+  },
+  {
     version: 'v40', date: '2026-09-03',
     title: 'Sync that watches itself',
     notes: [

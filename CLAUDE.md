@@ -41,7 +41,15 @@ DevTools → **Bypass for network**, `await caches.keys()`, or `curl` from outsi
 
 `state` in [js/store.js](js/store.js) is the one live object. No reducers, no
 per-view copies: views change it in place inside `commit(() => { … })`, which
-saves (waits 120ms) and tells subscribers. Use the selectors that are already
+saves (waits 120ms) and tells subscribers. **`js/store/` is the store in
+slices**, and `store.js` stays the one API: pure modules (`constants`, `urls`,
+`migrate`, `backups`, the parsers in `quickadd`) and slices that take the
+state as their first argument (`areas`, `cards`, `links`, `wishlist`,
+`sprints`, `habits`), bound to the live `state` by `bind()`. **A slice never
+owns state**: `storeWith` busts only `store.js`, so a slice that kept its own
+would be shared by every fresh instance in the tests. Items, notes, areas'
+edits, the selectors over items and the sync rows stay in `store.js`. A new
+slice goes in `sw.js`'s `SHELL` too, or `version.test.html` fails. Use the selectors that are already
 there (`itemById`, `itemsDueOn`, `upcoming`, `classesOn`, `dayTimeline`, …)
 instead of filtering by hand again. `commit(fn, { source })` — `app.js` redraws
 only for `external`, `gcal`, `cloud`, `editor`, `restore`; tag one made from a
@@ -230,7 +238,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 920 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 939 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their
