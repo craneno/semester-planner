@@ -56,7 +56,8 @@ for (const [name, src] of SUITES) {
   host.append(frame);
 
   results.push(await new Promise((resolve) => {
-    const done = (r) => resolve(r || { suite: name, failed: 1, passed: 0 });
+    let settled = false;
+    const done = (r) => { settled = true; resolve(r || { suite: name, failed: 1, passed: 0 }); };
     window.addEventListener('message', function onMsg(e) {
       if (e.source !== frame.contentWindow || !e.data?.testResult) return;
       window.removeEventListener('message', onMsg);
@@ -64,8 +65,15 @@ for (const [name, src] of SUITES) {
     });
     // a suite that throws before reporting must not hang the page. Generous,
     // because a file now waits for every suite in it and each one sits out
-    // save() and pushSoon before it restores localStorage
-    setTimeout(() => done(frame.contentWindow?.__result), 90000);
+    // save() and pushSoon before it restores localStorage. What it has so
+    // far is kept, but a file that did not finish is a failure: taking the
+    // partial count as the whole once called a half-run file a pass
+    setTimeout(() => {
+      if (settled) return;
+      const r = frame.contentWindow?.__result;
+      label.textContent = name + ' — did not finish in 90s';
+      done({ suite: name, failed: (r?.failed || 0) + 1, passed: r?.passed || 0 });
+    }, 90000);
   }));
 }
 

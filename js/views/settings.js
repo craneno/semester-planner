@@ -50,7 +50,8 @@ export function renderSettings(root, { navigate }) {
     const map = {
       off: 'Not configured', 'signed-out': 'Signed out', connecting: 'Connecting…',
       ready: g.lastSync ? `Synced ${new Date(g.lastSync).toLocaleTimeString()}` : 'Connected',
-      syncing: 'Syncing…', error: 'Error: ' + G.gcal.message, offline: 'Offline — changes queued'
+      syncing: 'Syncing…', error: 'Error: ' + G.gcal.message, offline: 'Offline — changes queued',
+      waiting: G.gcal.message
     };
     statusLine.textContent = map[G.gcal.status] || G.gcal.status;
     statusLine.style.color = G.gcal.status === 'error' ? 'var(--danger)' : 'var(--ink-3)';

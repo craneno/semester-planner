@@ -26,9 +26,10 @@ const GIS_SRC = 'https://accounts.google.com/gsi/client';
 export const gcal = {
   token: null,
   calendars: [],
-  status: 'off',     // off | signed-out | connecting | ready | syncing | error | offline
+  status: 'off',     // off | signed-out | connecting | ready | syncing | error | offline | waiting
   message: '',
-  lastError: null
+  lastError: null,
+  backoffUntil: 0    // Google asked for a pause: nothing goes out before this
 };
 
 const listeners = new Set();
@@ -412,9 +413,46 @@ export function eventBodyFor(item) {
   };
 }
 
+/* ---------------- the queue ----------------
+   Nothing goes out the moment it changes. A block dragged five times is one
+   PATCH, not five, and a series moved is one reconciliation — Google's
+   per-user rate is a few writes a second, and a drag session overran it.
+   Every push lands in `state.outbox` (one row per item; the kind is decided
+   at send time from the item as it is then), and the outbox goes out
+   together `wait` after the last change, or `maxWait` after the first when
+   the changes keep coming. Offline, or signed out, the same queue waits for
+   the network. */
+export const pushSettings = { wait: 30000, maxWait: 90000, backoff: 60000, backoffMax: 900000 };
+let flushTimer = null;
+let firstQueuedAt = 0;
+let backoff = 0;
+
 function queue(op) {
-  state.outbox.push({ ...op, at: Date.now() });
+  const row = { ...op, at: Date.now() };
+  const i = state.outbox.findIndex((o) => o.itemId === op.itemId);
+  if (i >= 0) state.outbox[i] = row; else state.outbox.push(row);
   commit();
+}
+
+function scheduleFlush(delay) {
+  const now = Date.now();
+  if (!firstQueuedAt) firstQueuedAt = now;
+  const wait = delay ?? Math.min(pushSettings.wait, Math.max(0, firstQueuedAt + pushSettings.maxWait - now));
+  clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => { flushTimer = null; flushOutbox().catch(() => {}); }, wait);
+}
+
+const isRateLimit = (err) => err?.code === 429
+  || (err?.code === 403 && /rateLimit|usageLimits|quota/i.test(err.message || ''));
+
+/** Google said slow down: keep the queue, wait longer each time it says so. */
+function pauseAfter(err) {
+  backoff = Math.min(backoff ? backoff * 2 : pushSettings.backoff, pushSettings.backoffMax);
+  gcal.backoffUntil = Date.now() + backoff;
+  gcal.lastError = err;
+  const at = new Date(gcal.backoffUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  setStatus('waiting', `Google asked for a pause — sending again at ${at}`);
+  scheduleFlush(backoff);
 }
 
 /* ---------------- a series on the calendar ----------------
@@ -483,9 +521,21 @@ async function pushSeries(item, calId) {
   item.gcalId = null;
 }
 
-/** Push (or remove) the Google event backing a planner item. */
+/**
+ * Push (or remove) the Google event backing a planner item — later, with
+ * whatever else changes meanwhile (see the queue above). Resolves at once.
+ */
 export async function pushItem(itemId) {
   // an occurrence is not a row: the series is what has events to reconcile
+  const item = seriesById(itemId);
+  if (!cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
+  if (!item) return;
+  queue({ kind: 'upsert', itemId: item.id });
+  scheduleFlush();
+}
+
+/** The push itself, now. Throws nothing: a failure re-queues the item. */
+async function pushNow(itemId) {
   const item = seriesById(itemId);
   if (!cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
   if (!item) return;
@@ -496,8 +546,9 @@ export async function pushItem(itemId) {
       await pushSeries(item, encodeURIComponent(cfg().calendarId || 'primary'));
       commit(null, { source: 'gcal-push' });
     } catch (err) {
-      gcal.lastError = err;
       queue({ kind: 'upsert', itemId: item.id });
+      if (isRateLimit(err)) { pauseAfter(err); return; }
+      gcal.lastError = err;
       setStatus('error', err.message);
     }
     return;
@@ -537,18 +588,33 @@ export async function pushItem(itemId) {
     }
     commit(null, { source: 'gcal-push' });
   } catch (err) {
-    if (err.code === 404 && item.gcalId) { item.gcalId = null; commit(); return pushItem(itemId); }
-    gcal.lastError = err;
+    if (err.code === 404 && item.gcalId) { item.gcalId = null; commit(); return pushNow(itemId); }
     queue({ kind: wantsEvent ? 'upsert' : 'delete', itemId });
+    if (isRateLimit(err)) { pauseAfter(err); return; }
+    gcal.lastError = err;
     setStatus('error', err.message);
   }
 }
 
+/** Send the queue, one item at a time, stopping for the rest if Google asks for a pause. */
 export async function flushOutbox() {
   if (!state.outbox.length || !navigator.onLine || !isSignedIn()) return;
+  if (gcal.backoffUntil > Date.now()) { scheduleFlush(gcal.backoffUntil - Date.now()); return; }
+  clearTimeout(flushTimer); flushTimer = null;
+  firstQueuedAt = 0;
   const pending = state.outbox.splice(0, state.outbox.length);
   commit();
-  for (const op of pending) await pushItem(op.itemId);
+  let paused = false;
+  for (const op of pending) {
+    if (paused) { queue(op); continue; }   // back in line, behind the one that hit the limit
+    await pushNow(op.itemId);
+    if (gcal.backoffUntil > Date.now()) paused = true;
+  }
+  if (!paused) {
+    backoff = 0;
+    gcal.backoffUntil = 0;
+    if (gcal.status === 'waiting') setStatus('ready');
+  }
 }
 
 /* ---------------- lifecycle ---------------- */

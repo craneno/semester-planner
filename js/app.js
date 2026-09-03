@@ -389,7 +389,8 @@ function paintSync() {
     ready: g.lastSync ? 'Calendar synced' : 'Calendar connected',
     syncing: 'Syncing…',
     error: 'Calendar problem — open Settings',
-    offline: 'Offline · queued'
+    offline: 'Offline · queued',
+    waiting: 'Calendar paused · sending soon'
   });
 
   const c = state.settings.cloud;

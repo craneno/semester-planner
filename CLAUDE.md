@@ -133,7 +133,12 @@ up here, its hash recorded, or it would be pushed again for ever.
 | `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror and writes waiting to go |
 
 **Only a `plan` block goes to Google Calendar.** A due date on its own is never
-pushed — the top source of "why isn't it on my calendar". An all-day plan goes
+pushed — the top source of "why isn't it on my calendar". **A push is a queue,
+never a request**: `pushItem()` puts the item in `state.outbox` (one row per
+item) and `flushOutbox()` sends the lot `pushSettings.wait` after the last
+change — a drag session hit Google's rate limit when every drop went out at
+once. A 403 `rateLimitExceeded` is a pause (`backoffUntil`, doubling), not an
+error. An all-day plan goes
 as `start`/`end` **dates**, the end being the morning *after*. `ITEM_TYPES` is
 `event`, `task`, `meeting`, `homework`; no area puts it in General. Each *seed*
 is pinned to the version that added it — `if (from < 5)`, never
@@ -261,7 +266,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1024 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1035 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their
@@ -272,6 +277,9 @@ refuse to run anywhere but localhost, and put `localStorage` back afterwards,
 waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once, at import, so `migrate()` needs a fresh instance —
 `storeWith(raw)`, which **checks** its seed rather than sleeping and hoping.
+A file that has not reported in 90s is a **failure**, whatever it passed so
+far. A tab hidden five minutes gets Chrome's one-timer-a-minute throttling,
+so a long run in a background pane stalls; CI is the gate, not the pane.
 A fresh instance has its own `state`, so a suite that pokes state
 *and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` — once per page,
 since `import()` caches. To add a field to a task: `upsertItem()`, a fallback in

@@ -103,6 +103,83 @@ suite('Calendar — recurring series detection', async ({ check }) => {
       && timed.extendedProperties.private.plannerItemId === 't1');
   }
 });
+
+/* Pushes are a queue. What has to hold: nothing goes out the moment a block
+   changes; the changes of one item fold into one write, sent after a quiet
+   spell; a rate limit is a pause that keeps the queue and sends again by
+   itself, and is never shown as an error. */
+suite('Calendar — pushes go out together', async ({ check }) => {
+  const s = await sharedStoreWith(base);
+  const G = await import('../js/gcal.js');
+  // A hidden tab throttles a timer set from inside another timer harder
+  // with every link in the chain, down to one a minute; a message hop after
+  // each wait starts the chain over, so this suite runs the same hidden as
+  // shown.
+  const hop = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms)).then(hop);
+
+  const real = globalThis.fetch;
+  const calls = [];
+  let answer = () => ({ ok: true, status: 200, json: async () => ({ id: 'ev-' + calls.length }), text: async () => '' });
+  globalThis.fetch = async (url, init = {}) => { calls.push({ method: init.method || 'GET', url: String(url) }); return answer(); };
+  const writes = () => calls.filter((c) => c.method !== 'GET');
+
+  const g = s.state.settings.gcal;
+  Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary' });
+  G.gcal.token = { access_token: 'tok', expires_at: Date.now() + 3600e3 };
+  Object.assign(G.pushSettings, { wait: 300, maxWait: 600, backoff: 400, backoffMax: 1000 });
+  s.state.outbox.length = 0;
+
+  try {
+    s.upsertItem({ id: 'g1', title: 'Lab prep', plan: { date: '2026-09-10', start: '09:00', mins: 60 } });
+    await G.pushItem('g1');
+    s.upsertItem({ id: 'g1', plan: { date: '2026-09-10', start: '10:00', mins: 60 } });
+    await G.pushItem('g1');
+    s.upsertItem({ id: 'g1', plan: { date: '2026-09-10', start: '11:00', mins: 60 } });
+    await G.pushItem('g1');
+    check('nothing goes out the moment a block moves', writes().length === 0);
+    check('...it waits in the outbox, once', s.state.outbox.filter((o) => o.itemId === 'g1').length === 1);
+    await tick(450);
+    check('after a quiet spell, three moves are one write', writes().length === 1 && writes()[0].method === 'POST', JSON.stringify(writes()));
+    check('...and the item has its event', s.itemById('g1').gcalId === 'ev-1' && s.state.outbox.length === 0);
+
+    // changes that keep coming still land within maxWait of the first, and
+    // never more often than one write per `wait` — measured against the
+    // clock, since a browser pane in the background stretches every timer
+    const t0 = performance.now();
+    for (let i = 0; i < 8; i++) {
+      setTimeout(() => {
+        s.upsertItem({ id: 'g1', plan: { date: '2026-09-10', start: `1${i}:00`, mins: 60 } });
+        G.pushItem('g1');
+      }, i * 100);
+    }
+    await tick(1500);
+    const took = performance.now() - t0;
+    check('a run of changes still goes up before too long', writes().length >= 2 && writes()[1].method === 'PATCH', String(writes().length));
+    check('...and never more often than one write per wait',
+      writes().length - 1 <= Math.floor(took / G.pushSettings.wait) + 1, `${writes().length - 1} writes in ${Math.round(took)}ms`);
+
+    // Google says slow down: a pause, not an error
+    answer = () => ({ ok: false, status: 403, text: async () => '{"error":{"errors":[{"domain":"usageLimits","reason":"rateLimitExceeded"}]}}' });
+    s.upsertItem({ id: 'g1', plan: { date: '2026-09-11', start: '09:00', mins: 60 } });
+    await G.pushItem('g1');
+    await tick(450);
+    check('a rate limit is a pause, shown as waiting, not an error', G.gcal.status === 'waiting' && /pause/.test(G.gcal.message), G.gcal.status);
+    check('...the change stays in line', s.state.outbox.some((o) => o.itemId === 'g1'));
+    check('...for as long as Google asked', G.gcal.backoffUntil > Date.now());
+    const n = writes().length;
+    answer = () => ({ ok: true, status: 200, json: async () => ({ id: 'ev-x' }), text: async () => '' });
+    await tick(600);
+    check('...and goes out by itself when the pause is over', writes().length === n + 1 && s.state.outbox.length === 0, `${writes().length} vs ${n}`);
+    check('...back to ready', G.gcal.status === 'ready' && G.gcal.backoffUntil === 0);
+  } finally {
+    globalThis.fetch = real;
+    G.gcal.token = null;
+    Object.assign(g, { enabled: false, pushPlans: true, clientId: '' });
+    Object.assign(G.pushSettings, { wait: 30000, maxWait: 90000, backoff: 60000, backoffMax: 900000 });
+    s.state.outbox.length = 0;
+  }
+});
 </script>
 </body>
 </html>

@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v46', date: '2026-09-03',
+    title: 'Google, in batches',
+    notes: [
+      'Every drop of a block used to go to Google Calendar that instant, and a repeating block sent every one of its occurrences each time — a few minutes of moving things around hit Google’s rate limit and the calendar went red. Changes now queue and go out together, half a minute after the last one (a minute and a half at most), so a block moved five times is one write.',
+      'When Google does ask for a pause, the queue waits it out and sends again by itself. The calendar line says so; it is not an error.'
+    ]
+  },
+  {
     version: 'v45', date: '2026-09-03',
     title: 'Move one, the rest follow',
     notes: [
