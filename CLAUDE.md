@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v37**.
+Schema **20**, service worker **planner-v44**.
 
 ## Working with me
 
@@ -52,7 +52,8 @@ edits, the selectors over items and the sync rows stay in `store.js`. A new
 slice goes in `sw.js`'s `SHELL` too, or `version.test.html` fails. Use the selectors that are already
 there (`itemById`, `itemsDueOn`, `upcoming`, `classesOn`, `dayTimeline`, …)
 instead of filtering by hand again. `commit(fn, { source })` — `app.js` redraws
-only for `external`, `gcal`, `cloud`, `editor`, `restore`; tag one made from a
+only for `external`, `gcal`, `cloud`, `editor`, `restore`, `undo`, `redo`,
+`canvas`; tag one made from a
 floating panel, or the view under it will not repaint.
 
 ## Cloud sync
