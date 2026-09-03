@@ -633,7 +633,11 @@ export function upsertItem(patch) {
   }
   let item = patch.id ? itemById(patch.id) : null;
   if (item) {
+    const moved = patch.areaId !== undefined && patch.areaId !== item.areaId && patch.canvasArea === undefined;
+    const teaches = moved && canvasUnmoved(item);
     Object.assign(item, patch, { updatedAt: now });
+    if (moved && item.canvasCourse) item.canvasArea = null;   // by hand: no longer the import's to move
+    if (teaches) followCourse(item, now);
   } else {
     item = {
       id: uid('t'), title: 'Untitled', areaId: null, type: 'task',
@@ -645,6 +649,25 @@ export function upsertItem(patch) {
     state.items.push(item);
   }
   return item;
+}
+
+/* A Canvas assignment sits where the import put it (`canvasArea`) until a
+   person moves it, which sets `canvasArea` null: moved, wherever it sits now,
+   even back where the import had it. Moving one still unmoved teaches its
+   course: the rest still where the import put them go along, marked moved
+   too, and the next import learns from them (`homeFor` in canvas.js). An
+   older import that never kept the key is unmoved while it sits in the
+   default area. */
+export const canvasUnmoved = (t) => !!t.canvasCourse
+  && (t.canvasArea === undefined ? t.areaId === defaultAreaId() : t.areaId === t.canvasArea);
+
+function followCourse(lead, now) {
+  for (const t of state.items) {
+    if (t === lead || t.canvasCourse !== lead.canvasCourse || !canvasUnmoved(t)) continue;
+    t.areaId = lead.areaId;
+    t.canvasArea = null;
+    t.updatedAt = now;
+  }
 }
 
 /**
@@ -707,7 +730,7 @@ export function splitSeriesAt(series, key, patch = {}) {
 export function duplicateItem(id) {
   const src = seriesById(id);
   if (!src) return null;
-  const { id: _id, gcalId, gcalIds, canvasId, createdAt, updatedAt, ...rest } = src;
+  const { id: _id, gcalId, gcalIds, canvasId, canvasCourse, canvasArea, createdAt, updatedAt, ...rest } = src;
   return upsertItem({
     ...rest,
     title: `${src.title} (copy)`,

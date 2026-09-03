@@ -151,6 +151,12 @@ own: redrawn, pushed, never remembered. **The small edits live in
 own that puts the old *when* back through `upsertItem`. A Canvas
 assignment is a deadline with `canvasId` (`js/canvas.js`); a re-import
 refreshes the date and title and leaves the area, the tick and the notes alone.
+**The course teaches by example**: an assignment sits where the import put it
+(`canvasArea`) until moved by hand, which nulls the key — even back to the
+same area; moving one still unmoved takes the rest of its course along
+(`followCourse` in `upsertItem`), and `homeFor()` files the next import where
+the moved ones sit. Neither key is written when absent, or every row would
+look edited to sync.
 The feed comes in as a file, or by itself: Instructure sends no CORS headers
 and the link carries a token, so the link lives in `planner_feeds` on the
 server, **never in state**, and the `canvas-feed` Edge Function
@@ -255,7 +261,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1013 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1024 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

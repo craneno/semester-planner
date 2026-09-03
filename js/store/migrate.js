@@ -267,6 +267,10 @@ export function migrate(raw) {
       notes: t.notes || '',
       repeat: isRepeat(t.repeat) ? t.repeat : null,
       canvasId: t.canvasId || null,   // the Canvas assignment this came from, if any
+      // its course, and where the import put it (null once moved by hand).
+      // Only when there: a key on every row would make each look edited to sync
+      ...(t.canvasCourse ? { canvasCourse: t.canvasCourse } : {}),
+      ...('canvasArea' in t ? { canvasArea: t.canvasArea || null } : {}),
       gcalId: t.gcalId || null,
       // one Google event per occurrence, so a series needs one id per day it
       // lands on rather than the single `gcalId` a one-off carries

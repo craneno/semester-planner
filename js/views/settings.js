@@ -404,7 +404,7 @@ export function renderSettings(root, { navigate }) {
     if (!bits.length) bits.push('nothing new');
     toast(`Canvas: ${bits.join(', ')}${res.unfiled.length ? ` · ${res.unfiled.length} to file` : ''}`, { ms: 5000 });
     if (res.unfiled.length) {
-      toast(`Unfiled: ${res.unfiled.slice(0, 3).join(' · ')}${res.unfiled.length > 3 ? ' …' : ''}`, { ms: 8000 });
+      toast(`Unfiled: ${res.unfiled.slice(0, 3).join(' · ')}${res.unfiled.length > 3 ? ' …' : ''} — move one and the rest of its course go along.`, { ms: 9000 });
     }
   }
   const icsInput = h('input', {

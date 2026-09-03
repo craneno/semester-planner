@@ -166,6 +166,48 @@ suite('Canvas — the import', async ({ check }) => {
   }
 });
 
+/* A course no area is named for. What has to hold: it lands in the default
+   area, unfiled, remembering the course; move one and the rest go along;
+   moving one again is that one alone; the next feed files new ones from the
+   course where the moved ones sit; an older import that never kept the
+   course is filed on the next feed; a copy is not from Canvas. */
+suite('Canvas — move one, the rest follow', async ({ check }) => {
+  const { importCanvas, homeFor } = await import('../js/canvas.js');
+  const COURSE = 'ME 4500 Capstone Design';
+  const ev = (u, i) => ['BEGIN:VEVENT', `UID:event-assignment-${u}`, `DTSTART;VALUE=DATE:2026100${i}`, `SUMMARY:Milestone ${i} [${COURSE}]`, 'END:VEVENT'];
+  const feed = ['BEGIN:VCALENDAR', ...ev('c1', 1), ...ev('c2', 2), ...ev('c3', 3), 'END:VCALENDAR'].join('\r\n');
+  const by = (u) => s.state.items.find((t) => t.canvasId === 'event-assignment-' + u);
+
+  const res = importCanvas(feed);
+  check('a course no area is named for lands in the default area, unfiled',
+    res.unfiled.length === 3 && ['c1', 'c2', 'c3'].every((u) => by(u)?.areaId === 'gen'), JSON.stringify(res));
+  check('...remembering the course and where it was put', by('c1').canvasCourse === COURSE && by('c1').canvasArea === 'gen');
+  check('...with no home yet', homeFor(COURSE) === null);
+
+  s.upsertItem({ id: by('c1').id, areaId: 'th' });
+  check('move one and the rest of the course go along', by('c2').areaId === 'th' && by('c3').areaId === 'th');
+  check('...and the course has a home now', homeFor(COURSE) === 'th');
+  s.upsertItem({ id: by('c3').id, areaId: 'gen' });
+  check('moving one again is that one alone', by('c1').areaId === 'th' && by('c2').areaId === 'th' && by('c3').areaId === 'gen');
+  check('...the home is where most of them sit', homeFor(COURSE) === 'th');
+
+  const more = feed.replace('END:VCALENDAR', [...ev('c4', 4), 'END:VCALENDAR'].join('\r\n'));
+  const r2 = importCanvas(more);
+  check('the next one from that course is filed there as it comes in',
+    r2.added === 1 && r2.unfiled.length === 0 && by('c4').areaId === 'th', JSON.stringify({ r2, area: by('c4')?.areaId }));
+  check('...and the one moved by hand stays put, even back where the import had it', by('c3').areaId === 'gen' && by('c3').canvasArea === null);
+
+  const old = by('c2');
+  delete old.canvasCourse; delete old.canvasArea; old.areaId = 'gen';
+  importCanvas(more);
+  check('an older import still in the default area is filed with its course on the next feed',
+    by('c2').areaId === 'th' && by('c2').canvasCourse === COURSE && by('c2').canvasArea === 'th');
+
+  const dup = s.duplicateItem(by('c1').id);
+  check('a copy is not from Canvas', !!dup && !dup.canvasId && !dup.canvasCourse && !dup.canvasArea);
+  for (const t of s.state.items.filter((t) => t.canvasCourse === COURSE || t.id === dup.id)) s.deleteItem(t.id);
+});
+
 /* The feed fetched for you. What has to hold: only a Canvas link is worth
    saving; the fetch goes once a day per device and not again within it; a
    failure leaves no stamp, so the next open tries again; no link saved is

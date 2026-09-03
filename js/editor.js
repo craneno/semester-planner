@@ -3,7 +3,7 @@
 import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
 import {
   state, commit, itemById, upsertItem, deleteItem, ITEM_TYPES, progress,
-  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId
+  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
 import { pushItem } from './gcal.js';
@@ -83,7 +83,7 @@ function render(item) {
     h('span', { class: 'eyebrow' }, item.done ? 'Done' : item.type),
     h('div', { style: { flex: 1 } }),
     (item.gcalId || live.gcalIds) && h('span', { class: 'eyebrow', title: 'On your Google Calendar' }, 'GCAL'),
-    live.canvasId && h('span', { class: 'eyebrow', title: 'From your Canvas feed' }, 'CANVAS'),
+    live.canvasId && h('span', { class: 'eyebrow', title: 'From your Canvas feed' + (live.canvasCourse ? ' · ' + live.canvasCourse : '') }, 'CANVAS'),
     canPush(item) && h('button', {
       class: 'btn ghost sm', title: 'Push to tomorrow',
       onclick: () => pushToTomorrow(item.id, { after: rerender })
@@ -146,7 +146,17 @@ function render(item) {
 
   props.append(prop('Area',
     h('select', {
-      onchange: (e) => { set({ areaId: e.target.value || null }, { resync: true }); rerender(); }
+      onchange: (e) => {
+        // moving a Canvas assignment out of where the import put it takes
+        // the rest of its course along (followCourse in the store); say so
+        const course = live.canvasCourse, teaches = canvasUnmoved(live);
+        set({ areaId: e.target.value || null }, { resync: true });
+        if (teaches) {
+          const n = state.items.filter((t) => t !== live && t.canvasCourse === course && t.areaId === live.areaId).length;
+          if (n) toast(`${n} more from ${course} went along`);
+        }
+        rerender();
+      }
     },
     h('option', { value: '' }, 'Unassigned'),
     ...state.areas.filter((a) => !a.archived).map((a) =>

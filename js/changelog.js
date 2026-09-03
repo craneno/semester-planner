@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v45', date: '2026-09-03',
+    title: 'Move one, the rest follow',
+    notes: [
+      'A Canvas course whose name matches none of your areas used to land in General, every assignment of it, every time. Now move one of them to the right area and the rest of that course go along — and from then on the feed files new ones from that course there as they come in.',
+      'The assignment keeps its Canvas course name (hover the CANVAS tag in the editor). Older imports still sitting in General are filed with their course on the next refresh.'
+    ]
+  },
+  {
     version: 'v44', date: '2026-09-03',
     title: 'Canvas, by itself',
     notes: [

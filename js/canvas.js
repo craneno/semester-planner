@@ -10,7 +10,7 @@
 // one row on the server and the canvas-feed Edge Function reads Canvas for
 // us, once a day per device (refreshIfDue) and whenever asked (refreshFeed).
 
-import { state, commit, upsertItem, areaById } from './store.js';
+import { state, commit, upsertItem, areaById, canvasUnmoved } from './store.js';
 import * as C from './cloud.js';
 
 /* ---------------- the text ---------------- */
@@ -112,6 +112,25 @@ export function matchArea(course, areas = state.areas) {
   return null;
 }
 
+/**
+ * Where a course goes. What a person has taught by moving one of its
+ * assignments comes first — the area most of the moved ones sit in — then
+ * the best match on the name, then null.
+ */
+export function homeFor(course, items = state.items, areas = state.areas) {
+  if (course) {
+    const votes = new Map();
+    for (const t of items) {
+      if (t.canvasCourse !== course || !t.areaId || canvasUnmoved(t)) continue;
+      votes.set(t.areaId, (votes.get(t.areaId) || 0) + 1);
+    }
+    let best = null;
+    for (const [id, n] of votes) if (!best || n > best[1]) best = [id, n];
+    if (best && areas.some((a) => a.id === best[0] && !a.archived)) return best[0];
+  }
+  return matchArea(course, areas);
+}
+
 /** Only what is due. Lectures and office hours come from Google already. */
 export const isAssignment = (ev) => /assignment/i.test(ev.uid || '');
 
@@ -147,17 +166,26 @@ function applyFeed(text) {
       const when = { due: ev.start.date, dueTime: ev.start.time, plan: null };
 
       if (existing) {
-        upsertItem({ id: existing.id, title, ...when });
+        const patch = { id: existing.id, title, ...when };
+        if (course) patch.canvasCourse = course;
+        // still where the import put it, and the course may have found a home since
+        if (canvasUnmoved({ ...existing, canvasCourse: course || existing.canvasCourse })) {
+          const home = homeFor(course);
+          if (home && home !== existing.areaId) { patch.areaId = home; patch.canvasArea = home; }
+          else if (!existing.canvasArea) patch.canvasArea = existing.areaId;
+        }
+        upsertItem(patch);
         res.updated++;
         continue;
       }
 
-      const areaId = matchArea(course);
+      const areaId = homeFor(course);
       const notes = [ev.description?.trim(), ev.url].filter(Boolean).join('\n\n');
-      upsertItem({
+      const made = upsertItem({
         title, type: 'homework', canvasId: ev.uid, areaId,
-        notes, ...when
+        notes, ...when, ...(course ? { canvasCourse: course } : {})
       });
+      made.canvasArea = made.areaId;
       res.added++;
       if (!areaId || !areaById(areaId)) res.unfiled.push(course ? `${title} — ${course}` : title);
     }
