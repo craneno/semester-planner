@@ -11,6 +11,7 @@
 // us, once a day per device (refreshIfDue) and whenever asked (refreshFeed).
 
 import { state, commit, upsertItem, areaById, canvasUnmoved } from './store.js';
+import { addDays } from './util.js';
 import * as C from './cloud.js';
 
 /* ---------------- the text ---------------- */
@@ -134,6 +135,14 @@ export function homeFor(course, items = state.items, areas = state.areas) {
 /** Only what is due. Lectures and office hours come from Google already. */
 export const isAssignment = (ev) => /assignment/i.test(ev.uid || '');
 
+/** Only this term. The feed carries every course you are still enrolled in,
+ *  last term's included, and their old due dates are not work. */
+const TERM_SLACK = 14;   // days either side
+export function inTerm(date, sem = state.semester) {
+  if (!sem?.start || !sem?.end) return true;
+  return date >= addDays(sem.start, -TERM_SLACK) && date <= addDays(sem.end, TERM_SLACK);
+}
+
 /* ---------------- the import ---------------- */
 
 /**
@@ -157,7 +166,7 @@ function applyFeed(text) {
 
   {
     for (const ev of events) {
-      if (!isAssignment(ev) || !ev.start || !ev.uid) { res.skipped++; continue; }
+      if (!isAssignment(ev) || !ev.start || !ev.uid || !inTerm(ev.start.date)) { res.skipped++; continue; }
       if (seen.has(ev.uid)) continue;
       seen.add(ev.uid);
 

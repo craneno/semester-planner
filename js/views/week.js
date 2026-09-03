@@ -221,7 +221,8 @@ export function renderWeek(root, { navigate } = {}) {
     onPick: (range) => newBlockPrompt(range, { onDone: navigate })
   });
 
-  const wrap = h('div', { class: 'week-wrap' }, head, rail, body);
+  // the day heads and the due-date rail stay put while the hours scroll
+  const wrap = h('div', { class: 'week-wrap' }, h('div', { class: 'week-top' }, head, rail), body);
   const scroller = h('div', { class: 'week-scroll' }, wrap);
 
   // now line
@@ -233,9 +234,12 @@ export function renderWeek(root, { navigate } = {}) {
 
   root.append(scroller);
 
-  /* ---- unscheduled tray ---- */
+  /* ---- unscheduled tray ----
+     Work with no block yet: due soon, or with no date at all. Due before the
+     term is not this term's work, however far behind it is. */
   const loose = state.items
-    .filter((t) => !t.done && !t.plan && !t.repeat && (!t.due || t.due <= addDays(days[6], 14)))
+    .filter((t) => !t.done && !t.plan && !t.repeat
+      && (!t.due || (t.due >= state.semester.start && t.due <= addDays(days[6], 14))))
     .sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : 1)
     .slice(0, 24);
 

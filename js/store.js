@@ -540,9 +540,30 @@ export const scheduleZones = () => {
 };
 
 /** External Google events on a date. */
+/* A class on an area's schedule is often on Google too — the schedule was
+   read off Google's recurring events in the first place — and drawing both
+   put every lecture on the week twice. A Google event that starts when a
+   class does that day, and either ends with it or shares a word of its name,
+   is that class, and is left out. */
+const NEAR = 10;   // minutes
+const words = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter((w) => w.length >= 3);
+
+export function shadowsClass(e, classes) {
+  if (e.allDay || !e.start) return false;
+  const s = toMin(e.start), en = e.end ? toMin(e.end) : null;
+  const ew = words(e.title);
+  return classes.some((c) => {
+    if (Math.abs(toMin(c.start) - s) > NEAR) return false;
+    if (en != null && c.end && Math.abs(toMin(c.end) - en) <= NEAR) return true;
+    const cw = words(c.title);
+    return cw.some((w) => ew.includes(w));
+  });
+}
+
 export function eventsOn(date) {
+  const classes = classesOn(date);
   return state.events
-    .filter((e) => e.date === date)
+    .filter((e) => e.date === date && !shadowsClass(e, classes))
     .sort((a, b) => (a.allDay ? -1 : 0) - (b.allDay ? -1 : 0) || toMin(a.start) - toMin(b.start));
 }
 

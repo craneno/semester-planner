@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v47', date: '2026-09-03',
+    title: 'Once on the week, not twice',
+    notes: [
+      'A class on an area’s schedule that is on Google Calendar too was drawn twice on the week, side by side. The Google copy now stays out of the way: an event that starts when a class does and ends with it, or shares a word of its name, is that class.',
+      'The Canvas feed brings in only this term: an assignment due more than two weeks outside the semester is left alone, since the feed carries every course you are still enrolled in. The Unscheduled tray on the week likewise skips anything due before the term.',
+      'The due-date row above the week grid stays put when you scroll the hours.'
+    ]
+  },
+  {
     version: 'v46', date: '2026-09-03',
     title: 'Google, in batches',
     notes: [

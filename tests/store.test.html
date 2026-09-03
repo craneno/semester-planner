@@ -640,6 +640,37 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
   }
 });
 
+/* A schedule read off Google is on Google still. What has to hold: the
+   Google copy of a class is left out of the day; an event at the same time
+   that is neither the same length nor the same name stays; and nothing
+   changes on a day the class does not meet. */
+suite('Events — a class already on the schedule is not drawn twice', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'th', name: 'Thermodynamics', category: 'course', order: 0,
+      schedule: [{ days: [1, 3], start: '10:30', end: '11:35', location: 'Snell 108', tz: 'America/New_York' }] }],
+    items: [], cards: [], notes: {}
+  });
+  const ev = (o) => ({ id: o.id, title: o.title, date: o.date, start: o.start || null, end: o.end || null, allDay: !!o.allDay, location: '' });
+  s.state.events = [
+    ev({ id: 'g1', title: 'MEE 2340 Thermodynamics', date: '2026-09-14', start: '10:30', end: '11:35' }),   // the class, from Google
+    ev({ id: 'g2', title: 'Lecture', date: '2026-09-14', start: '10:35', end: '11:35' }),                    // no shared word, but the same slot
+    ev({ id: 'g3', title: 'Dentist', date: '2026-09-14', start: '10:30', end: '11:00' }),                    // same start only
+    ev({ id: 'g4', title: 'Thermodynamics office hours', date: '2026-09-14', start: '15:00', end: '16:00' }),// same name, other time
+    ev({ id: 'g5', title: 'MEE 2340 Thermodynamics', date: '2026-09-15', start: '10:30', end: '11:35' }),   // no class on Tuesday
+    ev({ id: 'g6', title: 'Career fair', date: '2026-09-14', allDay: true })
+  ];
+  const ids = (d) => s.eventsOn(d).map((e) => e.id).join();
+  check('the Google copy of a class is left out', !ids('2026-09-14').includes('g1'));
+  check('...so is one the same length in the same slot, whatever it is called', !ids('2026-09-14').includes('g2'));
+  check('the same start alone is not enough', ids('2026-09-14').includes('g3'));
+  check('the same name at another time stays', ids('2026-09-14').includes('g4'));
+  check('all-day things are never a class', ids('2026-09-14').includes('g6'));
+  check('a day the class does not meet keeps the event', ids('2026-09-15') === 'g5');
+  check('the topbar sees each class once too', s.dayTimeline('2026-09-14').filter((x) => /thermo/i.test(x.title) && x.start === '10:30').length === 1);
+});
+
 suite('Series — this and after, and a copy', async ({ check }) => {
   const s = await storeWith({
     version: 20,

@@ -140,7 +140,11 @@ change — a drag session hit Google's rate limit when every drop went out at
 once. A 403 `rateLimitExceeded` is a pause (`backoffUntil`, doubling), not an
 error. An all-day plan goes
 as `start`/`end` **dates**, the end being the morning *after*. `ITEM_TYPES` is
-`event`, `task`, `meeting`, `homework`; no area puts it in General. Each *seed*
+`event`, `task`, `meeting`, `homework`; no area puts it in General. `eventsOn`
+drops a Google event that **shadows a class** on the schedule that day (same
+start, and same end or a shared word), since a schedule read off Google is
+on Google still. The Canvas import keeps to the term (`inTerm`, two weeks'
+slack): the feed carries every course still enrolled in. Each *seed*
 is pinned to the version that added it — `if (from < 5)`, never
 `< SCHEMA_VERSION`, or the next bump brings back something deleted on purpose.
 A *rename* (`MERGED_CATEGORY` in `areaCategory()`) is not pinned: a dead id is
@@ -266,7 +270,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1035 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1045 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

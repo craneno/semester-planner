@@ -164,6 +164,18 @@ suite('Canvas — the import', async ({ check }) => {
     check('a feed with the same uid twice is one assignment',
       importCanvas(FEED + '\r\n' + FEED).added === 0 && s.state.items.filter((t) => t.canvasId).length === 2);
   }
+
+  {
+    // last term's course is still in the feed; its due dates are not work
+    const old = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:event-assignment-old', 'DTSTART;VALUE=DATE:20260801',
+      'SUMMARY:Final reflection [ME 2340 Thermodynamics]', 'END:VEVENT', 'BEGIN:VEVENT', 'UID:event-assignment-next',
+      'DTSTART;VALUE=DATE:20270115', 'SUMMARY:Reading [ME 2340 Thermodynamics]', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const res = importCanvas(old);
+    check('an assignment due before the term is left alone', res.added === 0 && res.skipped === 2 && !s.state.items.some((t) => t.canvasId === 'event-assignment-old'));
+    check('...and one due after it', !s.state.items.some((t) => t.canvasId === 'event-assignment-next'));
+    const { inTerm } = await import('../js/canvas.js');
+    check('two weeks either side is still the term', inTerm('2026-08-20') && inTerm('2026-12-24') && !inTerm('2026-08-18') && !inTerm('2026-12-27'));
+  }
 });
 
 /* A course no area is named for. What has to hold: it lands in the default

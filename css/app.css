@@ -315,9 +315,11 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 }
 .week-wrap { position: relative; min-width: 100%; }
 
+/* heads and the due-date rail together, pinned while the hours scroll */
+.week-top { position: sticky; top: 0; z-index: 5; }
 .week-head {
   display: grid; grid-template-columns: var(--gutter-w) repeat(7, minmax(0, 1fr));
-  position: sticky; top: 0; z-index: 5; background: var(--paper);
+  background: var(--paper);
   border-bottom: 1px solid var(--rule);
 }
 .week-head .dhead { padding: 7px 8px 6px; border-left: 1px solid var(--rule-soft); }
