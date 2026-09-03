@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v39', date: '2026-09-02',
+    title: 'The sync a second, for real this time',
+    notes: [
+      'Found it. The server stores each row with its fields in sorted order, so every row came back in a different order than it went up. Since v36 a push reads its rows back, saw each as “changed”, and sent it again on the next sync — and each send woke the next sync. The fingerprint now ignores the order of fields.',
+      'The cloud status line in Settings shows the same text while a sync runs, so the page no longer nudges up and down on a phone. The dot in the top bar is what pulses.'
+    ]
+  },
+  {
     version: 'v38', date: '2026-09-02',
     title: 'A sync that would not stop',
     notes: [

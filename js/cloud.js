@@ -148,9 +148,26 @@ async function adoptSession(session) {
    per row in localStorage, and keeping every row's whole JSON there put a
    phone over its quota: the baseline then failed to save, quietly, so every
    sync pushed the whole store, and every push came back down the channel as
-   one more sync — one a second, for as long as the app was open. cyrb53. */
+   one more sync — one a second, for as long as the app was open. cyrb53.
+
+   Hashed with the keys in sorted order, whatever order they came in. Postgres
+   keeps jsonb with its keys sorted, so every row comes back from the server
+   in an order other than the one we sent. Hashing the bytes as they were,
+   push read a row back, found it "different", adopted the server's copy and
+   recorded its hash; the next sync hashed our own order, saw a change, and
+   pushed the same row again — and each push woke the realtime channel, which
+   scheduled the next sync. One a second, for as long as the app was open. */
+function canon(v) {
+  if (Array.isArray(v)) return '[' + v.map((x) => x === undefined ? 'null' : canon(x)).join(',') + ']';
+  if (v && typeof v === 'object') {
+    const parts = [];
+    for (const k of Object.keys(v).sort()) if (v[k] !== undefined) parts.push(JSON.stringify(k) + ':' + canon(v[k]));
+    return '{' + parts.join(',') + '}';
+  }
+  return JSON.stringify(v) ?? 'null';
+}
 function hash(data) {
-  const str = JSON.stringify(data);
+  const str = canon(data);
   let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
   for (let i = 0; i < str.length; i++) {
     const ch = str.charCodeAt(i);
@@ -204,7 +221,7 @@ function storeBaseline(map) {
 // the schema, and the shape of the hash: a baseline of whole-JSON "hashes"
 // from before h2 would call every row edited, which is the very thing this
 // guards against, so it is thrown away the same as one from an old schema
-const AGREED = `${SCHEMA_VERSION}/h2`;
+const AGREED = `${SCHEMA_VERSION}/h3`;
 const baselineSchema = () => {
   if (!cloud.userId) return null;
   if (mem.uid === cloud.userId && mem.schema) return mem.schema;

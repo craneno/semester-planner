@@ -21,8 +21,14 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const table = seed.slice();
     let clock = 100;
     const stamp = () => new Date(Date.UTC(2026, 0, 1) + (++clock) * 1000).toISOString();
+    // Postgres keeps jsonb with its keys sorted, and hands rows back that way.
+    // The fake has to do the same, or a hash that minds the order passes here
+    // and pushes the same row again for ever against the real thing.
+    const jsonb = (v) => Array.isArray(v) ? v.map(jsonb)
+      : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, jsonb(v[k])]))
+      : v;
     const api = {
-      table,
+      table, writes: 0,
       from() {
         const q = {
           _gt: null, _up: null,
@@ -36,9 +42,11 @@ suite('Cloud sync — delete durability', async ({ check }) => {
               const data = [];
               for (const r of q._up) {
                 const i = table.findIndex((x) => x.kind === r.kind && x.id === r.id);
-                const row = { ...r, synced_at: stamp() };
+                const row = { ...r, data: jsonb(r.data), synced_at: stamp() };
                 if (i >= 0) table[i] = row; else table.push(row);
-                data.push({ synced_at: row.synced_at });
+                api.writes++;
+                // what .select('kind,id,data,deleted,synced_at') answers
+                data.push({ kind: row.kind, id: row.id, data: row.data, deleted: row.deleted, synced_at: row.synced_at });
               }
               res({ data, error: null });
             } else {
@@ -160,6 +168,24 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('...and the row is still here', itemById('fw')?.title === 'freewrite');
   }
 
+  /* A push must settle. The server hands rows back with jsonb's sorted keys;
+     a hash that minded the order read every row back as "changed", adopted
+     the server's copy, recorded the server's hash — and the next sync hashed
+     our own order, saw a change, and sent the same row up again. Every sync,
+     each push waking the next: one a second, for as long as the app was open. */
+  async function tPushSettles() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'ps', title: 'settle', plan: { date: '2026-09-03', start: '09:00', mins: 60 } }); });
+    await C.sync();
+    const after = fake.writes;
+    check('setup: the first sync wrote', after > 0);
+    await C.sync();
+    check('a second sync with nothing edited writes nothing', fake.writes === after, `(wrote ${fake.writes - after} more)`);
+    await C.sync();
+    check('...nor a third', fake.writes === after, `(wrote ${fake.writes - after} more)`);
+    check('...and the row is still here, as it was', itemById('ps')?.plan?.start === '09:00');
+  }
+
   /* The guard has to be the hash, not applyRow: applyRow reports a change for
      any live row, identical or not, which is what made the echo loud. */
   {
@@ -189,7 +215,8 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['delete during push', tDeleteDuringPush],
     ['remote row adopted', tRemoteRowAdopted],
     ['our own echo is quiet', tOwnEchoIsQuiet],
-    ['remote tombstone applied', tRemoteTombstoneApplied]
+    ['remote tombstone applied', tRemoteTombstoneApplied],
+    ['a push settles', tPushSettles]
   ]) {
     await fn();
   }
@@ -230,6 +257,18 @@ suite('Cloud sync — the baseline is small', async ({ check }) => {
   const many = new Set();
   for (let i = 0; i < 5000; i++) many.add(rowHash({ ...row, title: 'Task ' + i }));
   check('five thousand near-identical rows do not collide', many.size === 5000, String(many.size));
+
+  /* Postgres keeps jsonb with its keys sorted, so a row comes back from the
+     server in an order other than the one it went up in. A hash of the bytes
+     as they were called that a change, and push read its own row back as
+     "different" on every sync — for ever, one a second. */
+  check('the order of the keys makes no difference',
+    rowHash({ a: 1, b: 2, c: [1, 2] }) === rowHash({ c: [1, 2], b: 2, a: 1 }));
+  check('...nor nested', rowHash({ plan: { date: 'd', start: 's', mins: 1 } }) === rowHash({ plan: { mins: 1, start: 's', date: 'd' } }));
+  check('the order inside a list still counts', rowHash({ ids: ['a', 'b'] }) !== rowHash({ ids: ['b', 'a'] }));
+  check('a key holding undefined is the same as no key at all', rowHash({ a: 1, b: undefined }) === rowHash({ a: 1 }),
+    'JSON.stringify drops it, and so does the server');
+  check('null is not undefined', rowHash({ a: 1, b: null }) !== rowHash({ a: 1 }));
 });
 </script>
 </body>

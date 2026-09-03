@@ -118,7 +118,7 @@ suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
   check('the hash is short, not the row’s JSON', /Math\.imul\(h1 \^ ch/.test(src) && !/const hash = \(data\) => JSON\.stringify/.test(src),
     'the old baseline was a second copy of the store, and it is what filled the phone');
   check('a baseline of the old shape is thrown away like an old schema',
-    /AGREED = `\$\{SCHEMA_VERSION\}\/h2`/.test(src) && /baselineSchema\(\) !== AGREED/.test(src),
+    /AGREED = `\$\{SCHEMA_VERSION\}\/h3`/.test(src) && /baselineSchema\(\) !== AGREED/.test(src),
     'whole-JSON hashes never match short ones, and every row would look edited');
 });
 

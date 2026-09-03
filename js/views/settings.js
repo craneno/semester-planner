@@ -113,9 +113,12 @@ export function renderSettings(root, { navigate }) {
       ready: (C.cloud.email ? C.cloud.email + ' · ' : '')
         + (cl.lastSync ? 'synced ' + new Date(cl.lastSync).toLocaleTimeString() : 'connected')
         + (C.cloud.live ? ' · live' : ''),
-      // the same shape as ready, so a sync does not take the line from two
-      // rows to one and back on a phone, nudging everything under it
-      syncing: (C.cloud.email ? C.cloud.email + ' · ' : '') + 'syncing…' + (C.cloud.live ? ' · live' : ''),
+      // the very same text as ready: on a phone the ready line wraps and a
+      // shorter one does not, and each sync nudged the whole page up and back.
+      // The LED in the top bar is what pulses while a sync runs.
+      syncing: (C.cloud.email ? C.cloud.email + ' · ' : '')
+        + (cl.lastSync ? 'synced ' + new Date(cl.lastSync).toLocaleTimeString() : 'connected')
+        + (C.cloud.live ? ' · live' : ''),
       error: 'Error: ' + C.cloud.message,
       offline: 'Offline — changes sync when you reconnect'
     };

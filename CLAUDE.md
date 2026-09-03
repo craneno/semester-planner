@@ -82,10 +82,10 @@ know every kind that carries one, and **`migrate()` must carry `updatedAt`
 through** — the area normaliser did not, which left every area with no clock at
 all. Postgres has the last word: `planner_rows_keep_newest` drops a write older
 than the row it lands on (`supabase/upgrade.sql`; a delete still passes, being
-its own decision). **The baseline is a short hash per row** (cyrb53), held in
-memory as well as localStorage: as whole JSON it filled a phone, the write
-failed quietly, and a full push a second followed. `AGREED` is schema *and*
-hash shape, so a baseline of the old shape is thrown away too.
+its own decision). **The baseline is a short hash per row** (cyrb53, keys
+sorted first — jsonb comes back sorted, and a raw-bytes hash had push read its
+own row back as "changed" for ever), held in memory as well as localStorage.
+`AGREED` is schema *and* hash shape, so an old baseline is thrown away too.
 
 **Sync is fan-out, not safety.** An upsert keeps no history and reaches every
 device in seconds. `keepBackups()` copies the raw state *before `migrate()`
@@ -228,7 +228,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no deps, 888 checks, and `tests/` is
+Serve the repo, open `/tests/`. No runner, no deps, 897 checks, and `tests/` is
 left out of the deploy. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one.
 
