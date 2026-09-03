@@ -157,29 +157,29 @@ suite('Focuses and sprints — bands on the chart', async ({ check }) => {
   /* ---- reaching another device ---- */
 
   {
+    // a row each since schema 20 — they rode in meta before, one row with no
+    // clock, and a whole chart could be lost to one stale push
     const s = await storeWith(base({ sprints: [band({ kind: 'sprint' })] }));
     const rows = s.snapshotRows();
 
-    check('bands are not a row kind of their own',
-      !rows.some((r) => r.kind === 'sprint'),
-      'a new kind needs the Supabase CHECK constraint widened by hand');
+    const row = rows.find((r) => r.kind === 'sprint');
+    check('a band is a row of its own', row && row.id === 's1' && row.data.kind === 'sprint');
+    check('...with a clock the sync layer can read', s.rowStamp('sprint', 's1') === s.state.sprints[0].updatedAt);
     const meta = rows.find((r) => r.kind === 'meta');
-    check('they ride in meta, like habits and links',
-      Array.isArray(meta.data.sprints) && meta.data.sprints[0].id === 's1');
-    check('no device credential rides with them',
+    check('meta no longer carries them', meta.data.sprints === undefined);
+    check('no device credential rides in meta',
       meta.data.settings.gcal === undefined && meta.data.settings.cloud === undefined
       && meta.data.settings.cursor === undefined);
 
-    s.applyRow({ kind: 'meta', id: 'meta', data: { sprints: [band({ id: 'sX', title: 'From the phone' })] } });
-    check('an inbound meta row replaces them', s.state.sprints.map((p) => p.id).join() === 'sX');
+    s.applyRow({ kind: 'sprint', id: 'sX', data: band({ id: 'sX', title: 'From the phone' }) });
+    check('an inbound band lands beside the rest', s.state.sprints.map((p) => p.id).join() === 's1,sX');
+    check('...and a tombstone takes one away',
+      s.applyRow({ kind: 'sprint', id: 'sX', deleted: true, data: {} }) === true
+      && s.state.sprints.map((p) => p.id).join() === 's1');
 
-    s.applyRow({ kind: 'meta', id: 'meta', data: { habits: [] } });
-    check('a meta row that mentions no bands leaves them alone',
-      s.state.sprints.length === 1,
-      'a device on an older schema sends none, and absent must not read as empty');
-
-    s.applyRow({ kind: 'meta', id: 'meta', data: { sprints: [] } });
-    check('but one that says none really means none', s.state.sprints.length === 0);
+    // a device still on schema 19 sends them inside meta, empty or not
+    s.applyRow({ kind: 'meta', id: 'meta', data: { habits: [], sprints: [] } });
+    check('an older device’s meta cannot wipe the chart', s.state.sprints.length === 1);
   }
 });
 </script>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Canvas tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* Two halves. The feed is text — folded lines, escaped commas, three shapes
+   of date — and reading it must not depend on any state. The import is what
+   writes: an assignment becomes a deadline in the right course, and bringing
+   the same feed in again must refresh what Canvas owns and leave alone what a
+   person set by hand. */
+import { suite, sharedStoreWith } from './harness.js';
+
+// one folded line in the first DESCRIPTION, an escaped comma, a UTC time, and
+// an office-hours event that is not an assignment at all
+const FEED = [
+  'BEGIN:VCALENDAR',
+  'VERSION:2.0',
+  'PRODID:-//Instructure//Canvas//EN',
+  'BEGIN:VEVENT',
+  'DTSTAMP:20260901T120000Z',
+  'UID:event-assignment-123456',
+  'DTSTART;VALUE=DATE:20260915',
+  'SUMMARY:Problem Set 3 [ME 2340 Thermodynamics]',
+  'DESCRIPTION:Chapters 4-5\\, all pro',
+  ' blems.\\nSubmit as PDF.',
+  'URL:https://x.instructure.com/courses/1/assignments/123456',
+  'END:VEVENT',
+  'BEGIN:VEVENT',
+  'UID:event-assignment-789',
+  'DTSTART:20260920T035900Z',
+  'SUMMARY:Lab report 1 [EECE 2413 Circuits Lab]',
+  'END:VEVENT',
+  'BEGIN:VEVENT',
+  'UID:event-calendar-event-55',
+  'DTSTART:20260910T140000Z',
+  'DTEND:20260910T150000Z',
+  'SUMMARY:Office hours [ME 2340 Thermodynamics]',
+  'END:VEVENT',
+  'END:VCALENDAR'
+].join('\r\n');
+
+suite('Canvas — the feed', async ({ check }) => {
+  const { parseIcs, icsWhen, splitSummary, isAssignment, matchArea } = await import('../js/canvas.js');
+
+  {
+    const evs = parseIcs(FEED);
+    check('every VEVENT is read', evs.length === 3, String(evs.length));
+    const ps = evs[0];
+    check('a folded line is put back together', ps.description === 'Chapters 4-5, all problems.\nSubmit as PDF.',
+      JSON.stringify(ps.description));
+    check('the escaped comma is a comma', ps.description.includes('4-5, all'));
+    check('the summary, the uid and the url come through',
+      ps.summary === 'Problem Set 3 [ME 2340 Thermodynamics]' && ps.uid === 'event-assignment-123456'
+      && ps.url === 'https://x.instructure.com/courses/1/assignments/123456');
+  }
+
+  {
+    check('a whole day is a date with no time',
+      JSON.stringify(icsWhen('20260915', { VALUE: 'DATE' })) === '{"date":"2026-09-15","time":null}');
+    // UTC is turned into the clock here, whatever here is
+    const local = new Date(Date.UTC(2026, 8, 20, 3, 59, 0));
+    const pad = (n) => String(n).padStart(2, '0');
+    const want = {
+      date: `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`,
+      time: `${pad(local.getHours())}:${pad(local.getMinutes())}`
+    };
+    check('a Z time becomes local wall clock', JSON.stringify(icsWhen('20260920T035900Z')) === JSON.stringify(want),
+      JSON.stringify(icsWhen('20260920T035900Z')) + ' vs ' + JSON.stringify(want));
+    check('a zoned wall clock is taken as read',
+      JSON.stringify(icsWhen('20260920T235900', { TZID: 'America/New_York' })) === '{"date":"2026-09-20","time":"23:59"}');
+    check('rubbish is null', icsWhen('next tuesday') === null);
+  }
+
+  {
+    check('the course is the bracket at the end',
+      JSON.stringify(splitSummary('Problem Set 3 [ME 2340 Thermodynamics]'))
+      === '{"title":"Problem Set 3","course":"ME 2340 Thermodynamics"}');
+    check('no bracket, no course', JSON.stringify(splitSummary('Read chapter 2')) === '{"title":"Read chapter 2","course":""}');
+    check('a bracket in the middle is part of the title',
+      splitSummary('Quiz [take-home] [ME 2340]').title === 'Quiz [take-home]');
+  }
+
+  {
+    check('assignments are assignments', isAssignment({ uid: 'event-assignment-1' }));
+    check('a calendar event is not', !isAssignment({ uid: 'event-calendar-event-1' }));
+  }
+
+  {
+    const areas = [
+      { id: 'th', name: 'Thermodynamics' },
+      { id: 'ee', name: 'Electrical Engineering' },
+      { id: 'lab', name: 'EE lab' },
+      { id: 'mm', name: 'Math Methods' },
+      { id: 'old', name: 'Circuits Lab', archived: true }
+    ];
+    check('the whole area name inside the course wins', matchArea('ME 2340 Thermodynamics', areas) === 'th');
+    check('longest name first, so the lab does not take the lecture',
+      matchArea('EECE 2412 Electrical Engineering', areas) === 'ee');
+    check('every real word of the name is enough', matchArea('MATH 2341 Methods for Math', areas) === 'mm');
+    check('an archived area is not a home', matchArea('EECE 2413 Circuits Lab', areas) === null);
+    check('nothing fits, nothing is guessed', matchArea('PHIL 1101 Ethics', areas) === null);
+    check('an empty course is unfiled', matchArea('', areas) === null);
+  }
+});
+
+suite('Canvas — the import', async ({ check }) => {
+  const s = await sharedStoreWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [
+      { id: 'th', name: 'Thermodynamics', category: 'course', order: 0 },
+      { id: 'gen', name: 'General', category: 'personal', order: 1 }
+    ],
+    items: [], cards: [], notes: {}
+  });
+  const { importCanvas } = await import('../js/canvas.js');
+
+  {
+    const res = importCanvas(FEED);
+    check('two assignments came in', res.added === 2, JSON.stringify(res));
+    check('office hours did not', res.skipped === 1 && !s.state.items.some((t) => /office/i.test(t.title)));
+    const ps = s.state.items.find((t) => t.canvasId === 'event-assignment-123456');
+    check('a problem set is homework due that day', ps && ps.type === 'homework' && ps.due === '2026-09-15' && ps.dueTime === null,
+      JSON.stringify(ps && { type: ps.type, due: ps.due, dueTime: ps.dueTime }));
+    check('...filed in Thermodynamics', ps.areaId === 'th');
+    check('...named without the course', ps.title === 'Problem Set 3');
+    check('...with the notes and the link', ps.notes.includes('Submit as PDF') && ps.notes.includes('instructure.com'));
+    check('...and a deadline, never a block', ps.plan === null);
+    const lab = s.state.items.find((t) => t.canvasId === 'event-assignment-789');
+    check('a course nobody has lands in the default area, like anything with no home',
+      lab && lab.areaId === 'gen', String(lab?.areaId));
+    check('...and is named in the result so it can be moved', res.unfiled.length === 1 && /Lab report 1/.test(res.unfiled[0]), JSON.stringify(res.unfiled));
+  }
+
+  {
+    // a person files the lab, ticks the problem set, writes a note — then the
+    // feed comes in again with the problem set moved
+    const ps = s.state.items.find((t) => t.canvasId === 'event-assignment-123456');
+    const lab = s.state.items.find((t) => t.canvasId === 'event-assignment-789');
+    s.upsertItem({ id: lab.id, areaId: 'gen' });
+    s.toggleItem(ps.id, true);
+    s.upsertItem({ id: ps.id, notes: 'my own note' });
+    const moved = FEED.replace('DTSTART;VALUE=DATE:20260915', 'DTSTART;VALUE=DATE:20260917');
+    const res = importCanvas(moved);
+    check('the same feed again adds nothing', res.added === 0 && res.updated === 2, JSON.stringify(res));
+    check('...and makes no copies', s.state.items.filter((t) => t.canvasId).length === 2);
+    check('a moved due date lands', s.itemById(ps.id).due === '2026-09-17');
+    check('the tick stays', s.itemById(ps.id).done === true);
+    check('the note stays', s.itemById(ps.id).notes === 'my own note');
+    check('the hand-filed area stays', s.itemById(lab.id).areaId === 'gen');
+  }
+
+  {
+    check('an empty feed does nothing', JSON.stringify(importCanvas('')) === '{"added":0,"updated":0,"unfiled":[],"skipped":0}');
+    check('a feed with the same uid twice is one assignment',
+      importCanvas(FEED + '\r\n' + FEED).added === 0 && s.state.items.filter((t) => t.canvasId).length === 2);
+  }
+});
+</script>
+</body>
+</html>

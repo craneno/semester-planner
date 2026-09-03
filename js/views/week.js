@@ -10,8 +10,34 @@ import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
 import { dragCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
+import { moveItem } from '../actions.js';
 
 let anchor = today();          // any date inside the shown week
+
+/** Show the week a date falls in, next time the view draws. */
+export function showWeekOf(date) { anchor = date || today(); }
+
+/* The now line. One timer for the page, reset on every draw, so a week left
+   open overnight keeps the line where the clock is. */
+let nowTimer = null;
+function placeNowLine(col, dayStart, hourH) {
+  const line = h('div', { class: 'now-line', 'aria-hidden': 'true' });
+  col.append(line);
+  const move = () => {
+    const d = new Date();
+    const mins = d.getHours() * 60 + d.getMinutes();
+    line.style.top = ((mins - dayStart * 60) / 60) * hourH + 'px';
+    line.hidden = mins < dayStart * 60;
+  };
+  // placed now, while the column is still being built and not yet in the
+  // document — the isConnected check belongs to the ticks, not the first draw
+  move();
+  clearInterval(nowTimer);
+  nowTimer = setInterval(() => {
+    if (!line.isConnected) { clearInterval(nowTimer); nowTimer = null; return; }
+    move();
+  }, 60 * 1000);
+}
 let showExternal = true;
 
 const COMPACT_H = 42;          // below this a block gets one line, not two
@@ -167,6 +193,7 @@ export function renderWeek(root, { navigate } = {}) {
 
     // and now the widths, which only the whole day knows
     applyLanes(col.querySelectorAll('.blk'), packBlocks(laid));
+    if (d === today()) placeNowLine(col, dayStart, hourH);
 
     // double click empty space -> an hour, named the same way a drag is
     col.addEventListener('dblclick', (e) => {
@@ -277,11 +304,7 @@ function wireBlock(el, item, body, days, dayStart, hourH, navigate) {
     hit: (ev) => hit(ev, body, days, dayStart, hourH),
     hourH, origin: dayStart * 60,
     edge: (ev) => edgeScroll(ev, body),
-    onDrop: (plan) => {
-      commit(() => upsertItem({ id: item.id, plan: { ...item.plan, ...plan } }));
-      pushItem(item.id).catch(() => {});
-      navigate();
-    },
+    onDrop: (plan) => moveItem(item.id, plan, { after: navigate }),
     onClick: () => openItem(item.id)
   });
 }

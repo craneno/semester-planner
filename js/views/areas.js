@@ -14,6 +14,7 @@ import { openItem } from '../editor.js';
 import { openSyllabusImport } from '../syllabus.js';
 import { pushItem, recurringSeries, gcal } from '../gcal.js';
 import { noteCard } from '../capture.js';
+import { tickItem, pushToTomorrow, canPush } from '../actions.js';
 
 const PREVIEW = 3;   // deadlines shown under each area before "see all"
 
@@ -120,10 +121,10 @@ function taskRow(t, rerender) {
     h('input', {
       type: 'checkbox', class: 'check', checked: t.done, 'aria-label': `Mark ${t.title} complete`,
       onclick: (e) => e.stopPropagation(),
-      onchange: (e) => { commit(() => toggleItem(t.id, e.target.checked)); pushItem(t.id).catch(() => {}); rerender(); }
+      onchange: (e) => tickItem(t.id, e.target.checked, { after: rerender })
     }),
     h('span', { class: 'title' }, t.title),
-    meta(priorityTag(t.priority), dueChip(t)));
+    meta(priorityTag(t.priority), dueChip(t), pushBtn(t, rerender)));
 }
 
 /* ---------------- one area, everything in it ---------------- */
@@ -331,6 +332,15 @@ function hintFor(area) {
   return clash ? area.name.toLowerCase() : first;
 }
 
+/** One tap to tomorrow. Stops the row's own click, which opens the editor. */
+function pushBtn(t, rerender) {
+  if (!canPush(t)) return null;
+  return h('button', {
+    class: 'push-btn', title: 'Push to tomorrow', 'aria-label': `Push ${t.title} to tomorrow`,
+    onclick: (e) => { e.stopPropagation(); pushToTomorrow(t.id, { after: rerender }); }
+  }, '→');
+}
+
 function linkRow(l, rerender) {
   const row = h('div', { class: 'row link-row' });
   let host = l.url;
@@ -342,7 +352,15 @@ function linkRow(l, rerender) {
       h('a', {
         class: 'title link-title', href: l.url, title: l.url,
         target: '_blank', rel: 'noopener noreferrer'
-      }, l.title),
+      },
+      // the site's own mark, so a pile of links can be read at a glance; the
+      // title is made from the URL and is often not much of one
+      h('img', {
+        class: 'favicon', alt: '', loading: 'lazy',
+        src: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=32`,
+        onerror: (e) => e.target.remove()
+      }),
+      l.title),
       meta(h('span', { class: 'eyebrow' }, host)),
       h('button', {
         class: 'btn sm ghost', 'aria-label': `Rename ${l.title}`, title: 'Rename', onclick: edit

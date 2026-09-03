@@ -5,7 +5,7 @@ import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js
 
 const KEY = 'semesterPlanner.v1';
 const LEGACY_KEYS = ['plannerData', 'semester-planner', 'semesterPlanner', 'planner', 'planner-data'];
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 /* Every area belongs to exactly one category. These are the sidebar's top
    level and the only grouping there is — add one here and it appears in the
@@ -81,6 +81,7 @@ const DEFAULTS = () => {
     sprints: [],        // focuses and sprints — stretches of term drawn on the chart
     habits: [],         // daily habits, ticked per day
     habitLog: {},       // 'YYYY-MM-DD' -> [habitId] ticked that day
+    habitLogAt: {},     // 'YYYY-MM-DD' -> when that day's list last changed; its sync clock
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
     events: [],         // external Google events, read-only mirror
     outbox: [],         // queued Google writes while offline/signed out
@@ -186,9 +187,11 @@ function migrate(raw) {
     name: x.name || 'Untitled habit',
     order: Number.isFinite(x.order) ? x.order : i,
     archived: !!x.archived,
-    createdAt: x.createdAt || new Date().toISOString()
+    createdAt: x.createdAt || new Date().toISOString(),
+    updatedAt: x.updatedAt || x.createdAt || new Date().toISOString()
   }));
   s.habitLog = raw.habitLog && typeof raw.habitLog === 'object' ? raw.habitLog : {};
+  s.habitLogAt = raw.habitLogAt && typeof raw.habitLogAt === 'object' ? raw.habitLogAt : {};
   delete s.sessions;   // study logging was removed in schema 5
 
   // normalise areas
@@ -315,6 +318,7 @@ function migrate(raw) {
       subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
       notes: t.notes || '',
       repeat: isRepeat(t.repeat) ? t.repeat : null,
+      canvasId: t.canvasId || null,   // the Canvas assignment this came from, if any
       gcalId: t.gcalId || null,
       // one Google event per occurrence, so a series needs one id per day it
       // lands on rather than the single `gcalId` a one-off carries
@@ -896,7 +900,7 @@ export function upsertItem(patch) {
       id: uid('t'), title: 'Untitled', areaId: null, type: 'task',
       due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60,
       done: false, doneAt: null, subtasks: [], notes: '', repeat: null,
-      gcalId: null, gcalIds: null, createdAt: now, updatedAt: now, ...patch
+      gcalId: null, gcalIds: null, canvasId: null, createdAt: now, updatedAt: now, ...patch
     };
     if (!item.areaId) item.areaId = defaultAreaId();
     state.items.push(item);
@@ -933,6 +937,45 @@ export function endSeriesBefore(item, key) {
     if (k >= key) delete item.repeat.ex[k];
   }
   item.updatedAt = new Date().toISOString();
+}
+
+/**
+ * Split a series at one occurrence: that one and everything after it become
+ * a series of their own, carrying `patch`, and the old one ends the day
+ * before. This is "this and following" — a lecture that moves rooms from
+ * October, with September left where it was. Exceptions from the split on
+ * go with the new series; a count is what was left of it.
+ */
+export function splitSeriesAt(series, key, patch = {}) {
+  if (!repeats(series)) return null;
+  const rep = series.repeat;
+  const anchor = repeatAnchor(series);
+  const before = rep.count ? repeatDates(rep, anchor, anchor, addDays(key, -1)).length : 0;
+  const ex = {};
+  for (const [k, v] of Object.entries(rep.ex || {})) if (k >= key) ex[k] = v;
+  const { id, gcalId, gcalIds, createdAt, updatedAt, ...rest } = series;
+  const when = series.plan ? { plan: { ...series.plan, date: key } } : { due: key };
+  const next = upsertItem({
+    ...rest, ...when, ...patch,
+    repeat: { ...rep, ex, count: rep.count ? Math.max(1, rep.count - before) : null },
+    done: false, doneAt: null
+  });
+  endSeriesBefore(series, key);
+  return next;
+}
+
+/** A copy of an item — or of the whole series, if given one occurrence of it. */
+export function duplicateItem(id) {
+  const src = seriesById(id);
+  if (!src) return null;
+  const { id: _id, gcalId, gcalIds, canvasId, createdAt, updatedAt, ...rest } = src;
+  return upsertItem({
+    ...rest,
+    title: `${src.title} (copy)`,
+    done: false, doneAt: null,
+    subtasks: (rest.subtasks || []).map((x) => ({ ...x, id: uid('s'), done: false })),
+    repeat: rest.repeat ? { ...rest.repeat, ex: {} } : null
+  });
 }
 
 /* ---------------- sweeping finished work ----------------
@@ -1444,6 +1487,9 @@ export function toggleHabit(date, id, force) {
     const next = list.filter((x) => x !== id);
     if (next.length) state.habitLog[date] = next; else delete state.habitLog[date];
   }
+  // the day's clock, so two devices ticking the same day settle by time
+  if (state.habitLog[date]) state.habitLogAt[date] = new Date().toISOString();
+  else delete state.habitLogAt[date];
   return on;
 }
 
@@ -1706,6 +1752,18 @@ function parseRange(text) {
   return { start: fromMin(start), end: fromMin(end), mins: end - start, consumed: m[0] };
 }
 
+/** The area a #tag or @tag means. Exact first, then a prefix, then a word. */
+export function areaByTag(tag) {
+  const squash = (x) => x.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const t = squash(tag);
+  if (!t) return null;
+  const live = state.areas.filter((a) => !a.archived);
+  return live.find((a) => squash(a.name) === t)
+    || live.find((a) => squash(a.name).startsWith(t))
+    || live.find((a) => a.name.toLowerCase().split(/[^a-z0-9]+/).some((w) => w && w.startsWith(t)))
+    || null;
+}
+
 export function parseQuickAdd(input) {
   let text = ' ' + input.trim() + ' ';
   const out = { title: '', areaId: null, type: 'task', due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60 };
@@ -1732,10 +1790,12 @@ export function parseQuickAdd(input) {
     text = text.replace(dm[0], ' ');
   }
 
-  // area by #tag or exact name match
-  const am = text.match(/\s#([\w-]+)/);
+  // area by #tag or @tag — the whole name run together, or the start of it,
+  // or the start of any word in it: "#thermo", "@thermo", "@methods" all land
+  // — else the area's name written out anywhere in the line
+  const am = text.match(/\s[#@]([\w-]+)/);
   if (am) {
-    const a = state.areas.find((x) => x.name.toLowerCase().replace(/\s+/g, '') === am[1].toLowerCase().replace(/\s+/g, ''));
+    const a = areaByTag(am[1]);
     if (a) out.areaId = a.id;
     text = text.replace(am[0], ' ');
   } else {
@@ -1848,20 +1908,21 @@ export function snapshotRows() {
   for (const [date, n] of Object.entries(state.notes)) {
     if (!emptyNote(n)) rows.push({ kind: 'note', id: date, data: n });
   }
+  /* Each its own row. These used to ride together inside `meta` so that adding
+     one needed no ALTER — and that made the whole pile one row, with no clock,
+     so a clash was settled by whoever pushed last and a loss was the lot.
+     Schema 20 gave them kinds of their own (supabase/upgrade.sql), and a day's
+     habit ticks are a row per day, like a note. */
+  for (const l of state.links) rows.push({ kind: 'link', id: l.id, data: l });
+  for (const w of state.wishlist) rows.push({ kind: 'wish', id: w.id, data: w });
+  for (const p of state.sprints) rows.push({ kind: 'sprint', id: p.id, data: p });
+  for (const x of state.habits) rows.push({ kind: 'habit', id: x.id, data: x });
+  for (const [date, ids] of Object.entries(state.habitLog)) {
+    if (ids?.length) rows.push({ kind: 'habitlog', id: date, data: { ids, updatedAt: state.habitLogAt[date] || null } });
+  }
   const settings = {};
   for (const k of SYNCED_SETTINGS) settings[k] = state.settings[k];
-  // habits and links travel in meta rather than as their own kind: the planner_rows
-  // CHECK constraint only knows the kinds it was created with, and this needs
-  // no migration to reach another device
-  rows.push({
-    kind: 'meta', id: 'meta',
-    data: {
-      semester: state.semester, settings,
-      habits: state.habits, habitLog: state.habitLog,
-      links: state.links, wishlist: state.wishlist,
-      sprints: state.sprints
-    }
-  });
+  rows.push({ kind: 'meta', id: 'meta', data: { semester: state.semester, settings } });
   return rows;
 }
 
@@ -1884,19 +1945,28 @@ export function applyRow({ kind, id, data, deleted }) {
       if (deleted) { if (state.notes[id]) { delete state.notes[id]; return true; } return false; }
       state.notes[id] = data;
       return true;
+    case 'link': return put(state.links, data);
+    case 'wish': return put(state.wishlist, data);
+    case 'sprint': return put(state.sprints, data);
+    case 'habit': return put(state.habits, data);
+    case 'habitlog':
+      if (deleted || !data?.ids?.length) {
+        if (!state.habitLog[id]) return false;
+        delete state.habitLog[id]; delete state.habitLogAt[id];
+        return true;
+      }
+      state.habitLog[id] = data.ids;
+      if (data.updatedAt) state.habitLogAt[id] = data.updatedAt;
+      return true;
     case 'meta':
       if (deleted || !data) return false;
       if (data.semester) Object.assign(state.semester, data.semester);
       if (data.settings) for (const k of SYNCED_SETTINGS) {
         if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
       }
-      if (Array.isArray(data.habits)) state.habits = data.habits;
-      if (data.habitLog && typeof data.habitLog === 'object') state.habitLog = data.habitLog;
-      // absent, not empty: a device on an older schema sends no links at all,
-      // and must not wipe the pile just by pushing its meta row
-      if (Array.isArray(data.links)) state.links = data.links;
-      if (Array.isArray(data.wishlist)) state.wishlist = data.wishlist;
-      if (Array.isArray(data.sprints)) state.sprints = data.sprints;
+      // A device still on schema 19 sends habits, links, the wishlist and the
+      // sprints in here. They are rows of their own now and are not read from
+      // meta any more — taking them would let an old build's empty pile win.
       return true;
     default: return false;
   }
@@ -1908,7 +1978,12 @@ export function rowStamp(kind, id) {
   if (kind === 'card') return cardById(id)?.updatedAt || null;
   if (kind === 'area') return areaById(id)?.updatedAt || null;
   if (kind === 'note') return state.notes[id]?.updatedAt || null;
-  // `meta` still has none: it is a bag of lists, not a row anyone edits. The
+  if (kind === 'link') return linkById(id)?.updatedAt || null;
+  if (kind === 'wish') return wishById(id)?.updatedAt || null;
+  if (kind === 'sprint') return sprintById(id)?.updatedAt || null;
+  if (kind === 'habit') return state.habits.find((x) => x.id === id)?.updatedAt || null;
+  if (kind === 'habitlog') return state.habitLogAt[id] || null;
+  // `meta` is the semester and the synced settings, and has no clock; the
   // guard for it is that a schema bump never pushes — see cloud.js.
   return null;
 }

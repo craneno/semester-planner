@@ -326,16 +326,32 @@ async function push(c) {
   }
   if (!out.length) return { cursor: '', hashes };
 
+  /* Read back what landed, not just that it landed. The database drops a
+     write older than the row it hits (planner_rows_keep_newest) and answers
+     with the row it kept — so a row that comes back different from the one we
+     sent is one the server refused, and the copy it holds is the newer one.
+     Take it, and record its hash rather than ours, or the next diff would
+     push the same stale copy again for ever. */
   let maxSynced = '';
+  let adopted = 0;
   for (let i = 0; i < out.length; i += 200) {
     const { data, error } = await c
       .from(TABLE)
       .upsert(out.slice(i, i + 200), { onConflict: 'user_id,kind,id' })
-      .select('synced_at');
+      .select('kind,id,data,deleted,synced_at');
     if (error) throw error;
-    for (const row of data || []) if (row.synced_at > maxSynced) maxSynced = row.synced_at;
+    for (const row of data || []) {
+      if (row.synced_at > maxSynced) maxSynced = row.synced_at;
+      const k = key(row.kind, row.id);
+      if (row.deleted || hashes[k] === undefined) continue;
+      const kept = hash(row.data);
+      if (kept === hashes[k]) continue;
+      if (applyRow(row)) adopted++;
+      hashes[k] = kept;
+    }
   }
-  return { cursor: maxSynced, hashes };
+  if (adopted) commit(null, { source: 'cloud' });
+  return { cursor: maxSynced, hashes, adopted };
 }
 
 /* ---------------- realtime ---------------- */

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Find tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* One box over everything. What matters is the order — a title that starts
+   with the word ahead of one that merely holds it — and that every kind of
+   thing is searched, notes included, which are the ones people lose. */
+import { suite, sharedStoreWith } from './harness.js';
+
+suite('Find', async ({ check }) => {
+  await sharedStoreWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'th', name: 'Thermodynamics', category: 'course', order: 0 }],
+    items: [
+      { id: 't1', title: 'Battery box drawings', areaId: 'th' },
+      { id: 't2', title: 'Order a battery', areaId: 'th' },
+      { id: 't3', title: 'Thermo problem set', areaId: 'th', done: true }
+    ],
+    cards: [{ id: 'c1', text: 'ask about the battery BMS', areaId: null }],
+    links: [{ id: 'l1', url: 'https://example.com/battery-spec', title: 'spec sheet' }],
+    notes: {
+      '2026-09-01': { focus: 'finish the battery box', text: '', top3: [] },
+      '2026-08-30': { focus: '', text: '', top3: [], journal: { th: 'thought about heat transfer for a while' } }
+    }
+  });
+  const { findAll } = await import('../js/search.js');
+  const group = (q, label) => findAll(q).find((g) => g.label === label);
+
+  {
+    const tasks = group('battery', 'Tasks');
+    check('tasks are found by a word', tasks && tasks.hits.length === 2, String(tasks?.hits.length));
+    check('the one that starts with it comes first', tasks.hits[0].item.id === 't1', tasks.hits[0].item.id);
+    check('case does not matter', group('BATTERY', 'Tasks').hits.length === 2);
+    check('a done task is still found', group('thermo', 'Tasks').hits.some((x) => x.item.id === 't3'));
+  }
+
+  {
+    check('an area is found by its name', group('thermo', 'Areas')?.hits[0].area.id === 'th');
+    check('a card is found by its text', group('BMS', 'Cards')?.hits[0].card.id === 'c1');
+    check('a link is found by its url', group('battery-spec', 'Links')?.hits[0].link.id === 'l1');
+    check('...or by its title', group('spec sheet', 'Links')?.hits[0].link.id === 'l1');
+  }
+
+  {
+    const notes = group('battery', 'Notes');
+    check('a note is found by its focus', notes && notes.hits[0].date === '2026-09-01' && notes.hits[0].field === 'focus',
+      JSON.stringify(notes?.hits[0]));
+    const j = group('heat transfer', 'Notes');
+    check('a journal entry is found, named for its area', j && j.hits[0].field === 'Thermodynamics', JSON.stringify(j?.hits[0]));
+  }
+
+  {
+    check('nothing for an empty query', findAll('   ').length === 0);
+    check('nothing for a word nobody wrote', findAll('zebra').length === 0);
+    check('groups only appear when they have hits', !findAll('heat transfer').some((g) => g.label === 'Tasks'));
+  }
+});
+</script>
+</body>
+</html>

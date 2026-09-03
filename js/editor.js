@@ -2,11 +2,12 @@
 
 import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
 import {
-  state, commit, itemById, upsertItem, deleteItem, toggleItem, ITEM_TYPES, progress,
-  repeatLabel, endSeriesBefore
+  state, commit, itemById, upsertItem, deleteItem, ITEM_TYPES, progress,
+  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
 import { pushItem } from './gcal.js';
+import { tickItem, pushToTomorrow, canPush } from './actions.js';
 
 const syncOut = debounce((id) => pushItem(id).catch(() => {}), 700);
 
@@ -45,6 +46,23 @@ function render(item) {
   const targetId = toSeries ? live.id : item.id;
 
   const set = (patch, { resync = false } = {}) => {
+    /* This and after: the occurrence shown and every one past it become a
+       series of their own, carrying the edit, and the old series ends the day
+       before. From then on the panel is on the new series, editing all of it
+       — which is what "and after" meant. A title being typed is not redrawn
+       under the caret. */
+    if (isOccurrence && scope === 'after') {
+      let made = null;
+      commit(() => { made = splitSeriesAt(live, item.occurrence, patch); }, { source: 'editor' });
+      if (!made) return;
+      pushItem(live.id).catch(() => {});
+      pushItem(made.id).catch(() => {});
+      currentId = occurrenceId(made.id, patch.plan?.date || patch.due || item.occurrence);
+      scope = 'all';
+      const onlyTitle = Object.keys(patch).every((k) => k === 'title');
+      if (!onlyTitle) rerender();
+      return;
+    }
     commit(() => {
       const next = upsertItem({ id: targetId, ...patch });
       // keep the copy this render is holding in step with what was stored
@@ -60,11 +78,24 @@ function render(item) {
     h('input', {
       type: 'checkbox', class: 'check', checked: item.done,
       'aria-label': 'Mark complete',
-      onchange: (e) => { commit(() => toggleItem(item.id, e.target.checked)); syncOut(item.id); rerender(); }
+      onchange: (e) => tickItem(item.id, e.target.checked, { after: rerender })
     }),
     h('span', { class: 'eyebrow' }, item.done ? 'Done' : item.type),
     h('div', { style: { flex: 1 } }),
     (item.gcalId || live.gcalIds) && h('span', { class: 'eyebrow', title: 'On your Google Calendar' }, 'GCAL'),
+    live.canvasId && h('span', { class: 'eyebrow', title: 'From your Canvas feed' }, 'CANVAS'),
+    canPush(item) && h('button', {
+      class: 'btn ghost sm', title: 'Push to tomorrow',
+      onclick: () => pushToTomorrow(item.id, { after: rerender })
+    }, '→'),
+    h('button', {
+      class: 'btn ghost sm', title: isOccurrence ? 'Duplicate the series' : 'Duplicate',
+      onclick: () => {
+        let made = null;
+        commit(() => { made = duplicateItem(item.id); }, { source: 'editor' });
+        if (made) { toast('Copied'); openItem(made.id); }
+      }
+    }, '⧉'),
     h('button', {
       class: 'btn ghost sm', title: 'Delete task',
       onclick: () => (isOccurrence ? removeOccurrence(item, live) : removePlain(item))
@@ -92,6 +123,12 @@ function render(item) {
             onclick: () => { scope = 'one'; rerender(); }
           }, 'This one'),
           h('button', {
+            class: 'mode' + (scope === 'after' ? ' on' : ''), type: 'button',
+            'aria-pressed': String(scope === 'after'),
+            title: 'This one and every one after it',
+            onclick: () => { scope = 'after'; rerender(); }
+          }, 'This and after'),
+          h('button', {
             class: 'mode' + (scope === 'all' ? ' on' : ''), type: 'button',
             'aria-pressed': String(scope === 'all'),
             onclick: () => { scope = 'all'; rerender(); }
@@ -101,7 +138,10 @@ function render(item) {
         scope === 'one'
           ? h('div', { class: 'eyebrow', style: { marginTop: '3px', color: 'var(--ink-3)' } },
             'Area, kind, notes and subtasks belong to the series')
-          : null)));
+          : scope === 'after'
+            ? h('div', { class: 'eyebrow', style: { marginTop: '3px', color: 'var(--ink-3)' } },
+              'The next edit splits the series here')
+            : null)));
   }
 
   props.append(prop('Area',

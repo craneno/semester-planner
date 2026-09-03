@@ -11,14 +11,16 @@
 -- notecards existed still refuses `kind = 'card'`. Cards then fail to push and
 -- the planner reports "Cloud problem — open Settings" on every sync.
 --
--- Habits and saved links deliberately do NOT appear here: they travel inside
--- the `meta` row precisely so that adding them needs no migration.
+-- Schema 20 gave links, the wishlist, sprints, habits and each day's habit
+-- ticks kinds of their own. They used to ride together inside `meta` so that
+-- adding one needed no migration — which made the whole pile one row with no
+-- clock, settled by whoever pushed last, and a loss was the lot of them.
 alter table public.planner_rows
   drop constraint if exists planner_rows_kind_check;
 
 alter table public.planner_rows
   add constraint planner_rows_kind_check
-  check (kind in ('area', 'item', 'note', 'card', 'meta'));
+  check (kind in ('area', 'item', 'note', 'card', 'meta', 'link', 'wish', 'sprint', 'habit', 'habitlog'));
 
 -- Study logging was removed in schema 5. These rows can no longer be read by
 -- any client, so they are dead weight in every pull.

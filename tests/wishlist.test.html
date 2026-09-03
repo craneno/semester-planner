@@ -187,35 +187,31 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
   /* ---- sync, without a new row kind ---- */
 
   {
+    // a row of its own since schema 20 — see links.test.html for why
     const s = await storeWith(base());
-    s.addWish('Calipers $30');
-    const kinds = [...new Set(s.snapshotRows().map((r) => r.kind))];
-    check('the wishlist adds no new row kind', !kinds.includes('wish') && !kinds.includes('wishlist'),
-      'a new kind would need the Supabase CHECK constraint widened');
+    const made = s.addWish('Calipers $30');
+    const row = s.snapshotRows().find((r) => r.kind === 'wish');
+    check('a wish is a row of its own', row && row.id === made.id && row.data.title === made.title);
+    check('...with a clock the sync layer can read', s.rowStamp('wish', made.id) === made.updatedAt);
 
     const meta = s.snapshotRows().find((r) => r.kind === 'meta');
-    check('it rides in the meta row', meta.data.wishlist.length === 1);
-    check('meta still carries everything else it did',
-      !!meta.data.semester && !!meta.data.settings
-      && Array.isArray(meta.data.habits) && Array.isArray(meta.data.links));
+    check('meta no longer carries the list', meta.data.wishlist === undefined);
+    check('...but still the semester and the settings', !!meta.data.semester && !!meta.data.settings);
 
     const applied = s.applyRow({
-      kind: 'meta', id: 'meta',
-      data: {
-        semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [],
-        wishlist: [{ id: 'r1', title: 'From the phone', status: 'ordered', eta: '2026-09-15', price: null, url: null }]
-      }
+      kind: 'wish', id: 'r1',
+      data: { id: 'r1', title: 'From the phone', status: 'ordered', eta: '2026-09-15', price: null, url: null }
     });
-    check('an inbound meta row brings the wishlist with it',
+    check('an inbound wish lands',
       applied === true && s.wishesInFlight().map((w) => w.title).join() === 'From the phone');
 
-    // a device on schema 12 knows nothing about a wishlist and sends none
+    // a device still on schema 19 sends the list inside meta, empty or not
     s.applyRow({
       kind: 'meta', id: 'meta',
-      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [] }
+      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [], wishlist: [] }
     });
-    check('an older device pushing meta does not wipe the list',
-      s.state.wishlist.length === 1, String(s.state.wishlist.length));
+    check('an older device’s meta cannot wipe the list',
+      s.state.wishlist.length === 2, String(s.state.wishlist.length));
   }
 });
 </script>

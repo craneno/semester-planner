@@ -11,7 +11,8 @@ import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
 import { renderSemester } from './views/semester.js';
-import { renderWeek } from './views/week.js';
+import { renderWeek, showWeekOf } from './views/week.js';
+import { openSearch } from './search.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderHabits } from './views/habits.js';
 import { renderWishlist } from './views/wishlist.js';
@@ -407,15 +408,53 @@ function wireQuickAdd() {
 
 /* ---------------- keyboard ---------------- */
 
+/* One key each. None fire while typing, and none need a modifier — the
+   modifier keys are the browser's. `?` lists them. */
+const KEYS = [
+  ['n', 'New — the quick add box'],
+  ['/', 'Find a task, note, card or link'],
+  ['t', 'Today — this week on Week, Overview elsewhere'],
+  ['← →', 'Last week, next week (on Week)'],
+  ['1 2 3', 'Overview, Semester, Week'],
+  ['Esc', 'Close the panel'],
+  ['?', 'This list']
+];
+
+const showDay = (date) => { showWeekOf(date); go('week'); };
+
 function wireKeys() {
   window.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = ['input', 'textarea', 'select'].includes(tag) || e.target.isContentEditable;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape') { closePeek(); closeModal(); return; }
     if (typing) return;
-    if (e.key === '/' || e.key === 'n') { e.preventDefault(); $('#quickadd-input').focus(); return; }
-    const i = +e.key - 1;
-    if (i >= 0 && i < TOP_VIEWS.length) go(TOP_VIEWS[i]);
+    switch (e.key) {
+      case 'n': e.preventDefault(); $('#quickadd-input').focus(); return;
+      case '/': e.preventDefault(); openSearch({ go, showDay }); return;
+      case 't':
+        if (current.kind === 'view' && current.id === 'week') { showWeekOf(today()); navigate(); }
+        else go('overview');
+        return;
+      case 'ArrowLeft':
+      case 'ArrowRight':
+        if (current.kind === 'view' && current.id === 'week') {
+          e.preventDefault();
+          $(`.weekbar [aria-label="${e.key === 'ArrowLeft' ? 'Previous' : 'Next'} week"]`)?.click();
+        }
+        return;
+      case '?':
+        modal({
+          title: 'Keys',
+          body: h('div', { class: 'keys' },
+            ...KEYS.flatMap(([k, what]) => [h('kbd', {}, k), h('span', {}, what)]))
+        });
+        return;
+      default: {
+        const i = +e.key - 1;
+        if (i >= 0 && i < TOP_VIEWS.length) go(TOP_VIEWS[i]);
+      }
+    }
   });
 }
 

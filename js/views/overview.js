@@ -18,6 +18,7 @@ import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
 import { dragCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
+import { tickItem, pushToTomorrow, canPush } from '../actions.js';
 
 export function renderOverview(root, { navigate, go }) {
   clear(root);
@@ -347,12 +348,14 @@ function deadlines(soon, late, { navigate, go }) {
 const check = (t, navigate) => h('input', {
   type: 'checkbox', class: 'check', checked: t.done, 'aria-label': `Mark ${t.title} complete`,
   onclick: (e) => e.stopPropagation(),
-  onchange: (e) => {
-    commit(() => toggleItem(t.id, e.target.checked));
-    pushItem(t.id).catch(() => {});
-    navigate();
-  }
+  onchange: (e) => tickItem(t.id, e.target.checked, { after: navigate })
 });
+
+/** One tap to tomorrow. Stops the row's own click, which opens the editor. */
+const pushBtn = (t, navigate) => (canPush(t) ? h('button', {
+  class: 'push-btn', title: 'Push to tomorrow', 'aria-label': `Push ${t.title} to tomorrow`,
+  onclick: (e) => { e.stopPropagation(); pushToTomorrow(t.id, { after: navigate }); }
+}, '→') : null);
 
 function line(t, navigate) {
   return h('div', {
@@ -362,7 +365,7 @@ function line(t, navigate) {
   },
   check(t, navigate),
   h('span', { class: 'title', style: { fontSize: '13.5px' } }, t.title),
-  meta(dueChip(t)));
+  meta(dueChip(t), pushBtn(t, navigate)));
 }
 
 function row(t, navigate) {
@@ -372,5 +375,6 @@ function row(t, navigate) {
     meta(
       areaTag(t.areaId),
       t.plan?.date ? h('span', { class: 'eyebrow num', title: 'Planned work date' }, '◷ ' + fmtDate(t.plan.date)) : null,
-      dueChip(t)));
+      dueChip(t),
+      pushBtn(t, navigate)));
 }

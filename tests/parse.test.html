@@ -134,6 +134,32 @@ suite('Quick add — dates, ranges and types', async ({ check }) => {
     check('a matched area is not overridden by the default', made.areaId === 'a1');
   }
 });
+
+suite('Quick add — area tags', async ({ check }) => {
+  const s = await storeWith({
+    ...base,
+    areas: [
+      { id: 'th', name: 'Thermodynamics', category: 'course', order: 0 },
+      { id: 'ee', name: 'Electrical Engineering', category: 'course', order: 1 },
+      { id: 'lab', name: 'EE lab', category: 'course', order: 2 },
+      { id: 'mm', name: 'Math Methods', category: 'course', order: 3 },
+      { id: 'gone', name: 'Old course', category: 'course', order: 4, archived: true }
+    ]
+  });
+  const p = (str) => s.parseQuickAdd(str);
+
+  check('#thermo is the start of a name', p('pset 3 #thermo').areaId === 'th');
+  check('@ does the same as #', p('pset 3 @thermo').areaId === 'th');
+  check('the whole name still works', p('pset 3 #thermodynamics').areaId === 'th');
+  check('the start of any word in the name', p('quiz @methods').areaId === 'mm');
+  check('an exact name beats a prefix of a longer one', p('report @eelab').areaId === 'lab');
+  check('a prefix of the name beats a word inside another', p('report @electrical').areaId === 'ee');
+  check('the tag is taken out of the title', p('pset 3 @thermo').title === 'pset 3', JSON.stringify(p('pset 3 @thermo').title));
+  check('an archived area is not a home', p('x @old').areaId === null);
+  check('an unknown tag leaves the area unset', p('x @nothing').areaId === null);
+  check('a tag with no letters is not a tag', p('call at 3 @ 4').areaId === null);
+});
+
 </script>
 </body>
 </html>

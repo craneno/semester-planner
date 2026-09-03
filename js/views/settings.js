@@ -7,6 +7,7 @@ import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
 import { CHANGELOG, APP_VERSION } from '../changelog.js';
 import * as G from '../gcal.js';
 import * as C from '../cloud.js';
+import { importCanvas } from '../canvas.js';
 
 export function renderSettings(root, { navigate }) {
   clear(root);
@@ -310,6 +311,46 @@ export function renderSettings(root, { navigate }) {
         }
       }, 'Erase all data')),
     backupList()
+  ]));
+
+  /* ---------- Canvas ----------
+     Brought in as a file. Instructure sends no CORS headers, so the feed URL
+     cannot be read from here, and the URL carries a token that then never
+     has to be kept anywhere. */
+  const icsInput = h('input', {
+    type: 'file', accept: '.ics,text/calendar', style: { display: 'none' },
+    onchange: async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try {
+        const res = importCanvas(await f.text());
+        navigate();
+        const bits = [];
+        if (res.added) bits.push(`${res.added} new`);
+        if (res.updated) bits.push(`${res.updated} updated`);
+        if (!bits.length) bits.push('nothing new');
+        toast(`Canvas: ${bits.join(', ')}${res.unfiled.length ? ` · ${res.unfiled.length} to file` : ''}`, { ms: 5000 });
+        if (res.unfiled.length) {
+          toast(`Unfiled: ${res.unfiled.slice(0, 3).join(' · ')}${res.unfiled.length > 3 ? ' …' : ''}`, { ms: 8000 });
+        }
+      } catch (err) {
+        toast('That did not read as a calendar file.');
+        console.warn('canvas import', err);
+      }
+      e.target.value = '';
+    }
+  });
+  const fromCanvas = state.items.filter((t) => t.canvasId).length;
+  p.append(section('Canvas', [
+    h('p', { style: { fontSize: '13px', color: 'var(--ink-2)', margin: '0 0 8px' } },
+      'Every assignment in your Canvas feed becomes a deadline in the right course. '
+      + 'Bring the feed in again whenever you like: what you have already filed, ticked or written on stays as it is.'),
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
+      'In Canvas: Calendar → Calendar Feed → open the link → save the .ics file. Then pick it here.'),
+    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+      h('button', { class: 'btn primary', onclick: () => icsInput.click() }, 'Import feed file'),
+      icsInput,
+      fromCanvas ? h('span', { class: 'eyebrow num' }, `${fromCanvas} from Canvas`) : null)
   ]));
 
   /* ---------- version history ----------

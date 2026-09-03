@@ -155,32 +155,37 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
       (s.updateHabit('h1', { archived: true }), s.activeHabits().map((x) => x.name).join()) === 'C,B');
   }
 
-  /* ---- sync, without a new row kind ---- */
+  /* ---- sync: a row each, and a row per day of ticks, since schema 20 ----
+     Habits and the log used to ride inside `meta`. One row, no clock: two
+     devices ticking the same day fought over the whole map, and whoever
+     pushed last won. A habit is a row now, and each day's ticks are a row
+     keyed by the day, like a note. */
 
   {
     const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
     s.toggleHabit('2026-08-28', 'h1', true);
-    const kinds = [...new Set(s.snapshotRows().map((r) => r.kind))];
-    check('habits add no new row kind', !kinds.includes('habit') && !kinds.includes('habitday'),
-      'a new kind would need the Supabase CHECK constraint widened');
+    const rows = s.snapshotRows();
+    check('a habit is a row of its own', rows.some((r) => r.kind === 'habit' && r.id === 'h1'));
+    const day = rows.find((r) => r.kind === 'habitlog');
+    check('a day of ticks is a row keyed by the day', day && day.id === '2026-08-28' && day.data.ids.join() === 'h1');
+    check('...stamped when it was ticked', !!day.data.updatedAt && s.rowStamp('habitlog', '2026-08-28') === day.data.updatedAt);
+    s.toggleHabit('2026-08-28', 'h1', false);
+    check('an empty day is no row at all', !s.snapshotRows().some((r) => r.kind === 'habitlog'));
 
-    const meta = s.snapshotRows().find((r) => r.kind === 'meta');
-    check('habits ride in the meta row', meta.data.habits.length === 1);
-    check('...and so does the log', meta.data.habitLog['2026-08-28'].join() === 'h1');
-    check('meta still carries what it always did',
-      !!meta.data.semester && !!meta.data.settings);
+    const meta = rows.find((r) => r.kind === 'meta');
+    check('meta no longer carries habits', meta.data.habits === undefined && meta.data.habitLog === undefined);
+    check('...but still the semester and the settings', !!meta.data.semester && !!meta.data.settings);
 
-    const applied = s.applyRow({
-      kind: 'meta', id: 'meta',
-      data: {
-        semester: s.state.semester, settings: {},
-        habits: [{ id: 'r1', name: 'From the phone', order: 0 }],
-        habitLog: { '2026-08-20': ['r1'] }
-      }
-    });
-    check('an inbound meta row brings habits with it',
-      applied === true && s.activeHabits().map((x) => x.name).join() === 'From the phone');
-    check('...and their history', s.habitDone('2026-08-20', 'r1') === true);
+    const applied = s.applyRow({ kind: 'habit', id: 'r1', data: { id: 'r1', name: 'From the phone', order: 0 } });
+    check('an inbound habit lands',
+      applied === true && s.activeHabits().map((x) => x.name).join() === 'Steps,From the phone');
+    check('...and so does a day of its history',
+      s.applyRow({ kind: 'habitlog', id: '2026-08-20', data: { ids: ['r1'], updatedAt: '2026-08-20T20:00:00.000Z' } }) === true
+      && s.habitDone('2026-08-20', 'r1') === true);
+
+    // a device still on schema 19 sends habits inside meta, empty or not
+    s.applyRow({ kind: 'meta', id: 'meta', data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {} } });
+    check('an older device’s meta cannot wipe them', s.activeHabits().length === 2 && s.habitDone('2026-08-20', 'r1'));
   }
 });
 </script>

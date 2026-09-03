@@ -193,36 +193,38 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
       s.unfiledLinks().length === 2, String(s.unfiledLinks().length));
   }
 
-  /* ---- sync, without a new row kind ---- */
+  /* ---- sync: a row of its own since schema 20 ----
+     Links used to ride inside `meta` so that adding them needed no ALTER.
+     That made the whole pile one row with no clock, and one device's empty
+     pile won over another's full one. Each link is a row now. */
 
   {
     const s = await storeWith(withAreas());
-    s.addLink('example.com/nozzle', { areaId: 'p2' });
-    const kinds = [...new Set(s.snapshotRows().map((r) => r.kind))];
-    check('links add no new row kind', !kinds.includes('link'),
-      'a new kind would need the Supabase CHECK constraint widened');
+    const made = s.addLink('example.com/nozzle', { areaId: 'p2' });
+    const row = s.snapshotRows().find((r) => r.kind === 'link');
+    check('a link is a row of its own', row && row.id === made.id && row.data.url === made.url);
+    check('...with a clock the sync layer can read', s.rowStamp('link', made.id) === made.updatedAt);
 
     const meta = s.snapshotRows().find((r) => r.kind === 'meta');
-    check('links ride in the meta row', meta.data.links.length === 1);
-    check('meta still carries what it always did',
-      !!meta.data.semester && !!meta.data.settings && Array.isArray(meta.data.habits));
+    check('meta no longer carries the pile', meta.data.links === undefined);
+    check('...but still the semester and the settings', !!meta.data.semester && !!meta.data.settings);
 
     const applied = s.applyRow({
-      kind: 'meta', id: 'meta',
-      data: {
-        semester: s.state.semester, settings: {}, habits: [], habitLog: {},
-        links: [{ id: 'r1', url: 'https://example.com/phone', title: 'From the phone', areaId: 'p1' }]
-      }
+      kind: 'link', id: 'r1',
+      data: { id: 'r1', url: 'https://example.com/phone', title: 'From the phone', areaId: 'p1' }
     });
-    check('an inbound meta row brings links with it',
+    check('an inbound link row lands',
       applied === true && s.linksForArea('p1').map((l) => l.title).join() === 'From the phone');
+    check('...and a tombstone takes it away',
+      s.applyRow({ kind: 'link', id: 'r1', deleted: true, data: {} }) === true && s.linksForArea('p1').length === 0);
 
-    // a device on schema 11 knows nothing about links and sends none
+    // a device still on schema 19 sends the pile inside meta — an empty one,
+    // if that is what it has. That is the write that took a real pile once.
     s.applyRow({
       kind: 'meta', id: 'meta',
-      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {} }
+      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [] }
     });
-    check('an older device pushing meta does not wipe the pile',
+    check('an older device’s meta cannot wipe the pile',
       s.state.links.length === 1, String(s.state.links.length));
   }
 

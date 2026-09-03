@@ -639,6 +639,66 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     check('...and unfiles them', s.itemById('t1').areaId === null);
   }
 });
+
+suite('Series — this and after, and a copy', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-01', end: '2026-12-12' },
+    areas: [{ id: 'th', name: 'Thermodynamics', category: 'course', order: 0 }],
+    items: [{
+      id: 'lec', title: 'Lecture', areaId: 'th', type: 'meeting',
+      plan: { date: '2026-09-07', start: '10:30', mins: 60 },
+      repeat: { freq: 'weekly', every: 1, days: [1], until: null, count: null,
+        ex: { '2026-09-14': { title: 'Guest lecture' }, '2026-10-26': { off: true } } },
+      subtasks: [{ id: 'x1', text: 'bring notes', done: true }],
+      notes: 'room 302', gcalId: 'g1', gcalIds: { '2026-09-07': 'e1' }
+    }],
+    cards: [], notes: {}
+  });
+
+  {
+    // from October 12 the lecture moves to 14:00
+    const old = s.itemById('lec');
+    const made = s.splitSeriesAt(old, '2026-10-12', { plan: { date: '2026-10-12', start: '14:00', mins: 60 } });
+    check('a new series starts at the split', made && made.plan.date === '2026-10-12' && made.plan.start === '14:00',
+      JSON.stringify(made?.plan));
+    check('...with the edit and the rest of the series', made.title === 'Lecture' && made.notes === 'room 302' && made.areaId === 'th');
+    check('...and its own id, no Google ids', made.id !== 'lec' && !made.gcalId && !made.gcalIds);
+    check('the old series ends the day before', s.itemById('lec').repeat.until === '2026-10-11', s.itemById('lec').repeat.until);
+    check('an exception before the split stays with the old', s.itemById('lec').repeat.ex['2026-09-14']?.title === 'Guest lecture');
+    check('...and one after it goes with the new',
+      made.repeat.ex['2026-10-26']?.off === true && s.itemById('lec').repeat.ex['2026-10-26'] === undefined);
+    check('the old series still draws before the split', s.itemsPlannedOn('2026-09-28').some((t) => t.title === 'Lecture'));
+    check('...and not after it', s.itemsPlannedOn('2026-10-19').every((t) => t.plan.start === '14:00'));
+    const newOcc = s.itemsPlannedOn('2026-10-19');
+    check('the new series draws after it, at the new time', newOcc.length === 1 && newOcc[0].plan.start === '14:00',
+      JSON.stringify(newOcc.map((t) => [t.id, t.plan.start])));
+    check('the skip that moved with it still skips', s.itemsPlannedOn('2026-10-26').length === 0);
+    check('and nothing draws twice on the split day', s.itemsPlannedOn('2026-10-12').length === 1);
+  }
+
+  {
+    const before = s.state.items.length;
+    const copy = s.duplicateItem('lec');
+    check('a copy is a new row', copy && copy.id !== 'lec' && s.state.items.length === before + 1);
+    check('...named as one', copy.title === 'Lecture (copy)');
+    check('...not done, not on Google, not from Canvas', !copy.done && !copy.gcalId && !copy.gcalIds && !copy.canvasId);
+    check('...with fresh, unticked subtasks', copy.subtasks.length === 1 && copy.subtasks[0].id !== 'x1' && !copy.subtasks[0].done);
+    check('...and the rule but not its exceptions', copy.repeat?.freq === 'weekly' && Object.keys(copy.repeat.ex).length === 0);
+    check('the copy of an occurrence is a copy of the series',
+      s.duplicateItem('lec@2026-09-07')?.repeat?.freq === 'weekly');
+  }
+
+  {
+    // a counted series splits its count
+    s.upsertItem({ id: 'cnt', title: 'Five', plan: { date: '2026-09-01', start: '09:00', mins: 30 },
+      repeat: { freq: 'daily', every: 1, days: [], until: null, count: 5, ex: {} } });
+    const made = s.splitSeriesAt(s.itemById('cnt'), '2026-09-03', {});
+    check('the new series keeps what was left of the count', made.repeat.count === 3, String(made.repeat.count));
+    check('the old one ends before it', s.itemById('cnt').repeat.until === '2026-09-02' && s.itemById('cnt').repeat.count === null);
+    check('a plain item cannot be split', s.splitSeriesAt(s.upsertItem({ title: 'once' }), '2026-09-03') === null);
+  }
+});
 </script>
 </body>
 </html>

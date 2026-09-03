@@ -20,7 +20,7 @@
 import { suite, storeWith } from './harness.js';
 
 const base = (over = {}) => ({
-  version: 19,
+  version: 20,
   semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
   areas: [], items: [], cards: [], links: [], wishlist: [], sprints: [],
   habits: [], habitLog: {}, notes: {}, ...over
@@ -166,6 +166,82 @@ suite('Safety — a copy this device keeps', async ({ check }) => {
   {
     check('the copies are not in the store, so nothing can sync them away',
       !JSON.stringify(JSON.parse(localStorage.getItem(KEY) || '{}')).includes('backedUpAt'));
+  }
+});
+
+suite('Safety — each thing its own row', async ({ check }) => {
+  // These used to ride together inside `meta`: one row, no clock, and a
+  // clash settled by whoever pushed last — which is how a whole pile of
+  // links went at once. Now each is a row with a clock of its own.
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [], items: [], cards: [], notes: {},
+    links: [{ id: 'l1', url: 'https://a.example', title: 'a', updatedAt: '2026-09-01T00:00:00.000Z' }],
+    wishlist: [{ id: 'w1', title: 'boots', updatedAt: '2026-09-01T00:00:00.000Z' }],
+    sprints: [{ id: 's1', title: 'push', start: '2026-09-07', end: '2026-09-20', updatedAt: '2026-09-01T00:00:00.000Z' }],
+    habits: [{ id: 'h1', name: 'Sunscreen', createdAt: '2026-08-30T00:00:00.000Z' }],
+    habitLog: { '2026-09-01': ['h1'] },
+    habitLogAt: { '2026-09-01': '2026-09-01T09:00:00.000Z' }
+  });
+
+  {
+    const rows = s.snapshotRows();
+    const kinds = (k) => rows.filter((r) => r.kind === k);
+    check('a link is a row', kinds('link').length === 1 && kinds('link')[0].id === 'l1');
+    check('a wish is a row', kinds('wish').length === 1);
+    check('a sprint is a row', kinds('sprint').length === 1);
+    check('a habit is a row', kinds('habit').length === 1);
+    check('a day of ticks is a row, keyed by the day',
+      kinds('habitlog').length === 1 && kinds('habitlog')[0].id === '2026-09-01'
+      && JSON.stringify(kinds('habitlog')[0].data.ids) === '["h1"]');
+    const meta = kinds('meta')[0].data;
+    check('meta carries the semester and the settings and nothing else',
+      meta.semester && meta.settings && meta.links === undefined && meta.habits === undefined && meta.habitLog === undefined,
+      Object.keys(meta).join());
+  }
+
+  {
+    check('a link has its clock', s.rowStamp('link', 'l1') === '2026-09-01T00:00:00.000Z');
+    check('a wish has its clock', s.rowStamp('wish', 'w1') === '2026-09-01T00:00:00.000Z');
+    check('a sprint has its clock', s.rowStamp('sprint', 's1') === '2026-09-01T00:00:00.000Z');
+    check('a habit with no edit yet reads its creation', s.rowStamp('habit', 'h1') === '2026-08-30T00:00:00.000Z',
+      String(s.rowStamp('habit', 'h1')));
+    check('a day of ticks has the time of its last tick', s.rowStamp('habitlog', '2026-09-01') === '2026-09-01T09:00:00.000Z');
+    s.toggleHabit('2026-09-02', 'h1', true);
+    check('a tick stamps its day', s.rowStamp('habitlog', '2026-09-02') > '2026-09-01T09:00:00.000Z');
+    s.toggleHabit('2026-09-02', 'h1', false);
+    check('unticking the last one drops the day and its clock',
+      !s.state.habitLog['2026-09-02'] && !s.state.habitLogAt['2026-09-02']);
+  }
+
+  {
+    check('a link from the cloud lands', s.applyRow({ kind: 'link', id: 'l2', data: { id: 'l2', url: 'https://b.example', title: 'b' } })
+      && s.state.links.some((l) => l.id === 'l2'));
+    check('...and a tombstone takes it away', s.applyRow({ kind: 'link', id: 'l2', deleted: true, data: {} })
+      && !s.state.links.some((l) => l.id === 'l2'));
+    check('a day of ticks from the cloud lands with its clock',
+      s.applyRow({ kind: 'habitlog', id: '2026-09-03', data: { ids: ['h1'], updatedAt: '2026-09-03T08:00:00.000Z' } })
+      && JSON.stringify(s.state.habitLog['2026-09-03']) === '["h1"]' && s.state.habitLogAt['2026-09-03'] === '2026-09-03T08:00:00.000Z');
+    check('...and an empty one clears the day', s.applyRow({ kind: 'habitlog', id: '2026-09-03', data: { ids: [] } })
+      && !s.state.habitLog['2026-09-03']);
+    // the case that took the links: an old build's meta with an empty pile
+    const before = s.state.links.length;
+    s.applyRow({ kind: 'meta', id: 'meta', data: { semester: s.state.semester, settings: {}, links: [], wishlist: [], habits: [] } });
+    check('an old build’s empty pile inside meta is ignored', s.state.links.length === before && s.state.wishlist.length === 1 && s.state.habits.length === 1);
+  }
+
+  {
+    const src = await fetch('../js/cloud.js').then((r) => r.text());
+    check('a push reads back what the server kept', /\.select\('kind,id,data,deleted,synced_at'\)/.test(src));
+    check('...and takes a row that came back different', /kept === hashes\[k\]\) continue;[\s\S]{0,80}applyRow\(row\)/.test(src),
+      'the server refused our copy; its copy is the newer one');
+    check('...recording the server’s hash, not ours', /hashes\[k\] = kept;/.test(src),
+      'or the same stale copy would be pushed again on every sync');
+    for (const f of ['schema.sql', 'upgrade.sql']) {
+      const sql = await fetch('../supabase/' + f).then((r) => r.text());
+      check(`${f} allows the new kinds`, /'link', 'wish', 'sprint', 'habit', 'habitlog'/.test(sql));
+    }
   }
 });
 </script>

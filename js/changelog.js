@@ -9,6 +9,20 @@
 
 export const CHANGELOG = [
   {
+    version: 'v36', date: '2026-09-02',
+    title: 'Canvas, find, and a way back',
+    notes: [
+      'Canvas. Settings → Canvas takes the .ics feed file Canvas gives you (Calendar → Calendar Feed) and turns every assignment into a deadline in the right course. Bring it in again any time; what you have filed, ticked or written on is left alone.',
+      'Find. Press / anywhere — tasks, notes, cards, links and areas in one box, Enter opens the first hit. Press ? for the other keys: n to add, t for today, arrows to move weeks, Esc to close.',
+      'Undo, for the small things too. A tick, a dragged block, a push to tomorrow — each gets the same Undo a delete has had.',
+      'Push to tomorrow. The → on any row moves it a day: a block keeps its time, a deadline moves, a thing with no date gets tomorrow.',
+      'This and after. A repeating event can now be changed from one occurrence on — the room moves in October, September stays put. And any task can be duplicated from its panel.',
+      '@thermo files it. An area tag in quick add now takes the start of a name or of any word in it, with @ as well as #.',
+      'A red line on the week grid for now, favicons on saved links, and on a phone the quick add box sits above the tabs where your thumb is.',
+      'Under the hood: links, the wishlist, sprints, habits and each day’s ticks are now rows of their own in the cloud rather than one bag, each with its own clock — run supabase/upgrade.sql once more. And after every push the app reads back what the server actually kept, so a write the database refused is taken up here rather than pushed again for ever.'
+    ]
+  },
+  {
     version: 'v35', date: '2026-09-02',
     title: 'Nothing older wins',
     notes: [

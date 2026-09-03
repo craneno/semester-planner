@@ -1233,3 +1233,70 @@ details.history > summary {
   font-size: calc(13px * var(--scale)); margin-top: 4px;
 }
 details.history[open] > summary { margin-bottom: 10px; }
+
+/* ---------- the now line ---------- */
+/* Drawn only in today's column, moved once a minute. The dot hangs off the
+   gutter side so the line reads as "here", not as another gridline. */
+.now-line {
+  position: absolute; left: 0; right: 0; height: 0; z-index: 4; pointer-events: none;
+  border-top: 2px solid var(--accent);
+}
+.now-line::before {
+  content: ''; position: absolute; left: -5px; top: -5px; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--accent);
+}
+
+/* ---------- links ---------- */
+.favicon { width: 16px; height: 16px; border-radius: 3px; flex: none; vertical-align: -3px; margin-right: 7px; }
+
+/* ---------- push to tomorrow ---------- */
+.push-btn {
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 3px 5px; border-radius: 6px;
+  opacity: 0; transition: opacity .12s;
+}
+.row:hover .push-btn, .row:focus-within .push-btn { opacity: 1; }
+.push-btn:hover { background: var(--accent-soft); color: var(--accent); }
+@media (hover: none) { .push-btn { opacity: .7; } }
+
+/* ---------- find ---------- */
+.search { display: flex; flex-direction: column; gap: 10px; min-height: 40vh; }
+.search-input {
+  width: 100%; font-size: calc(15px * var(--scale)); padding: 10px 12px;
+  border: 1px solid var(--rule); border-radius: var(--r); background: var(--surface); color: var(--ink);
+}
+.search-input:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-results { display: flex; flex-direction: column; overflow: auto; max-height: 60vh; }
+.search-group { margin: 8px 0 3px; color: var(--ink-3); }
+.search-hit {
+  display: block; width: 100%; text-align: left; border: 0; background: transparent;
+  padding: 7px 8px; border-radius: 6px; cursor: pointer; color: var(--ink); font: inherit;
+}
+.search-hit:hover, .search-hit:focus-visible { background: var(--accent-soft); outline: 0; }
+.search-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.search-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-title.done { text-decoration: line-through; color: var(--ink-3); }
+.search-meta { display: flex; gap: 6px; align-items: center; flex: none; }
+.search-empty { color: var(--ink-3); padding: 12px 8px; }
+
+/* ---------- keyboard help ---------- */
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; }
+.keys kbd {
+  font-family: var(--font-mono); font-size: 11px; padding: 2px 6px; border-radius: 4px;
+  border: 1px solid var(--rule); background: var(--surface-2, var(--surface)); color: var(--ink-2);
+}
+
+/* ---------- quick add within thumb reach ---------- */
+/* On a phone the box leaves the top bar and sits just above the tabs, where a
+   thumb already is. It is the same input — nothing in the JS knows it moved. */
+@media (max-width: 860px) {
+  .quickadd {
+    position: fixed; left: 8px; right: 8px; z-index: 46;
+    bottom: calc(52px + env(safe-area-inset-bottom) + 8px);
+    background: var(--surface); box-shadow: var(--shadow-2);
+  }
+  .topbar h1 { flex: 1; }
+  .main { padding-bottom: calc(52px + 58px + env(safe-area-inset-bottom)); }
+  .tray { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .push-btn { opacity: .7; }
+}

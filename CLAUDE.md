@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **19**, service worker **planner-v35**.
+Schema **20**, service worker **planner-v36**.
 
 ## Working with me
 
@@ -13,9 +13,7 @@ all at once, and only about what changes the work. Small calls are still yours.
 **Small words beat big ones.** Say it the short way — here, in commits, in code
 comments. Keep the real names exact (`syncToken`, tombstone, occurrence) and
 drop the dress-up around them. This file may run to **250 lines**; past that,
-cut something and say what went. Rewording will not help — the file is
-hard-wrapped, so only cutting sentences or re-wrapping a whole block moves the
-count.
+cut a sentence and say what went.
 
 ## Working on it
 
@@ -61,8 +59,7 @@ is the pull cursor). **No book-keeping per change** — never add dirty flags or
 **Redraw for news, not for every sync.** `pull()` drops a row that hashes to
 what we already hold — our own write, come back down the realtime channel —
 since `applyRow` calls any live row a change, and the redraw takes the caret out
-of the box being typed in. `gcal.js` tags its commit `gcal` only when something
-did arrive, for the same reason.
+of the box being typed in. `gcal.js` tags `gcal` only when something arrived.
 
 **The baseline is what we last *pushed*, not what state holds now.** Both ways
 round have been bugs we shipped: a row missing here is "new from the cloud"
@@ -70,25 +67,25 @@ round have been bugs we shipped: a row missing here is "new from the cloud"
 and the baseline must be the hashes `push()` sent, never a snapshot taken after,
 or a delete made mid-trip is lost.
 
-**A migration is not an edit, and this one cost real data.** The baseline
-hashes each row, so a migration that adds a field — `tz` on every class meeting
-— makes every row it touched look edited, and the first device to open the new
-build pushes its whole copy over everyone else's. A freewrite went that way. So
-`cloud.js` records the schema its baseline was built under, and a bump throws
-the baseline away: with none, the cloud wins every row, and the new shape goes
-up only once we agree with the server. `push()` sends `rowStamp()`, never the
-clock at send; `rowStamp()` must know every kind that carries one, and
-**`migrate()` must carry `updatedAt` through** — the area normaliser did not,
-which left every area with no clock at all. Postgres has the last word:
-`planner_rows_keep_newest` drops a write older than the row it lands on
-(`supabase/upgrade.sql`; a delete still passes, being its own decision).
+**A migration is not an edit, and this one cost real data.** The baseline hashes
+each row, so a migration that adds a field — `tz` on every class meeting — makes
+every row it touched look edited, and the first device to open the new build
+pushes its whole copy over everyone else's. So `cloud.js` records the schema its
+baseline was built under, and a bump throws the baseline away: with none, the
+cloud wins every row, and the new shape goes up only once we agree with the
+server. `push()` sends `rowStamp()`, never the clock at send; `rowStamp()` must
+know every kind that carries one, and **`migrate()` must carry `updatedAt`
+through** — the area normaliser did not, which left every area with no clock at
+all. Postgres has the last word: `planner_rows_keep_newest` drops a write older
+than the row it lands on (`supabase/upgrade.sql`; a delete still passes, being
+its own decision).
 
 **Sync is fan-out, not safety.** An upsert keeps no history and reaches every
 device in seconds. `keepBackups()` copies the raw state *before `migrate()`
 reads it* — one a day, five kept, plus one named `before-v<n>` the moment an
 upgrade is about to run. `events`/`outbox` are left out (rebuilt from Google,
 and most of the bytes), and the copies sit under their own keys so nothing
-syncable can reach them. Settings → Data lists them.
+syncable can reach them.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
@@ -96,10 +93,13 @@ anything off the list stays on the device — that is how `railHidden` and
 `tzSeen` stay put. Postgres only allows the row kinds it was built with —
 `area, item, note, card, meta` — so **a new kind needs an `ALTER` the user has
 to run** (`supabase/upgrade.sql`, safe to run twice, named by
-`describeSyncError()`). Which is why habits, links, the wishlist and the chart's
-bands all ride inside `meta`, and why `applyRow` takes `data.links`,
-`data.wishlist` and `data.sprints` only when they are **there**: an old device
-sends none, and missing is not the same as empty.
+`describeSyncError()`). Links, the wishlist, sprints, habits and each day's
+ticks (`habitlog:<date>`) are rows of their own since schema 20, each with a
+clock in `rowStamp()`; `meta` is only the semester and `SYNCED_SETTINGS`, and
+`applyRow` **ignores** the lists an old device still sends in it. `push()`
+reads back what the server kept: a row that comes back different was refused
+by the trigger, and is taken up here, its hash recorded, or it would be pushed
+again for ever.
 
 ## Data model
 
@@ -108,7 +108,7 @@ sends none, and missing is not the same as empty.
 | `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series |
 | `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite`, and a `schedule` of meetings, each stamped with the `tz` it is written in |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
-| `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they turn into; focuses and sprints on the chart. All three ride in `meta` |
+| `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they turn into; focuses and sprints on the chart |
 | `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror and writes waiting to go |
 
 **Only a `plan` block goes to Google Calendar.** A due date on its own is never
@@ -121,6 +121,12 @@ A *rename* is the other way round (`MERGED_CATEGORY`, not pinned, in
 `areaCategory()`): a dead id has to be turned into a live one every time it is
 read.
 
+**The small edits live in `js/actions.js`** — tick, move, push to tomorrow —
+each with an Undo that puts the old *when* back through `upsertItem`. A Canvas
+assignment is a deadline with `canvasId` (`js/canvas.js`, brought in as a file:
+Instructure sends no CORS headers); a re-import refreshes the date and title and
+leaves the area, the tick and the notes alone.
+
 **A repeat is a rule, never copies.** `repeat` sits on the item (`js/repeat.js`
 is the plain date maths); the screens draw **occurrences**, made on the spot and
 named `<id>@<the day the rule gave it>`. A series never draws itself, or its
@@ -132,7 +138,8 @@ selectors (`itemsPlannedOn`, `itemsDueOn`, `upcoming`) rather than filter
 `state.items`, which holds only the rule. Google gets **one plain event per
 occurrence** — `gcalIds` maps the rule's day to its event id, `pushSeries()`
 works out the difference, and the term is the far end, since a repeat with no
-end has no last one. The sweep drops an exception that is nothing but an old tick.
+end has no last one. **This and after** is `splitSeriesAt()`: the old series
+ends the day before, a new one starts at the occurrence with the edit.
 
 ## Routing and views
 
@@ -173,9 +180,9 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Things that bit us
 
-- `restoreDayScroll()` runs **right after append, in the same tick**: `scrollTop`
-  does nothing before layout, and rAF never fires in a background tab, which is
-  exactly when a restored session draws. `ui.js` keeps one modal at a time.
+- `restoreDayScroll()` runs **right after append, in the same tick**:
+  `scrollTop` does nothing before layout, and rAF never fires in a background
+  tab, which is exactly when a restored session draws.
 - Both drags — `dragCreate()`, `dragSpan()` — fire only on the **empty grid
   itself**, never on a block in it, never on touch (there the drag scrolls);
   `pointercancel` and Escape must not open the prompt. `dragBlock()` is the
@@ -220,10 +227,10 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no deps, 743 checks, and `tests/` is
-left out of the deploy. A file holds several suites, each named for what it
-covers and headed by why, and it reports to `tests/index.html` **once the last
-one has finished** — taking the first hid a failure in a later one.
+Serve the repo, open `/tests/`. No runner, no deps, 852 checks, and `tests/` is
+left out of the deploy. A file holds several suites, and reports to
+`tests/index.html` **once the last one has finished** — taking the first hid a
+failure in a later one.
 
 Suites drive the real modules and wipe app state, so **both guards must stay**:
 refuse to run anywhere but localhost, and put `localStorage` back afterwards,
