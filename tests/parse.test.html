@@ -135,6 +135,48 @@ suite('Quick add — dates, ranges and types', async ({ check }) => {
   }
 });
 
+suite('Quick add — more ways to say when, and repeats', async ({ check }) => {
+  const s = await storeWith(base);
+  const p = (str) => s.parseQuickAdd(str);
+  const { today, addDays } = await import('../js/util.js');
+  const dow = (d) => new Date(d + 'T00:00:00').getDay();
+
+  check('"tmrw" is tomorrow', p('call advisor tmrw').due === addDays(today(), 1));
+  check('"in 3 days" counts from today', p('renew pass in 3 days').due === addDays(today(), 3));
+  check('...and leaves a clean title', p('renew pass in 3 days').title === 'renew pass');
+  check('"in a week" is seven days', p('follow up in a week').due === addDays(today(), 7));
+  check('"in 2 weeks" is fourteen', p('follow up in 2 weeks').due === addDays(today(), 14));
+  check('"next week" is a week from today', p('draft next week').due === addDays(today(), 7));
+  {
+    const d = p('rent in a month').due;
+    const [y, m] = today().split('-').map(Number);
+    check('"in a month" lands a month on', d && d.slice(0, 7) === `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}`, String(d));
+  }
+  check('"this fri" is the coming Friday, and "this" goes with it',
+    p('gym this fri').title === 'gym' && dow(p('gym this fri').due) === 5);
+
+  {
+    const r = p('gym every mon');
+    check('"every mon" makes a weekly rule on Monday', r.repeat?.freq === 'weekly' && r.repeat.days.join() === '1', JSON.stringify(r.repeat));
+    check('...anchored on a Monday', dow(r.due) === 1 && r.due >= today(), r.due);
+    check('...with the word gone from the title', r.title === 'gym');
+    check('...and an empty exception list to write into', r.repeat.ex && Object.keys(r.repeat.ex).length === 0);
+  }
+  {
+    const r = p('lab every tue and thu 2-4pm');
+    check('two days and a range make a weekly block', r.repeat?.days.join() === '2,4' && r.plan?.start === '14:00' && r.plan.mins === 120, JSON.stringify(r));
+    check('...on the first of those days', [2, 4].includes(dow(r.plan.date)) && r.plan.date >= today(), r.plan.date);
+  }
+  check('"every other week" doubles the interval', p('laundry every other week').repeat?.every === 2);
+  check('"every weekday" is Monday to Friday', p('standup every weekday 9am').repeat?.days.join() === '1,2,3,4,5');
+  check('"daily" is a daily rule due today', p('vitamins daily').repeat?.freq === 'daily' && p('vitamins daily').due === today());
+  check('"monthly" is monthly', p('rent monthly').repeat?.freq === 'monthly');
+  check('a named day still wins as the anchor', p('reading every mon fri').due && dow(p('reading every mon fri').due) === 5,
+    '"every mon" then "fri": the rule is Mondays, the first one is set by the date word');
+  check('"every monitor" is not a repeat', p('check every monitor').repeat === undefined && p('check every monitor').title === 'check every monitor');
+  check('a line with no repeat has no rule', p('read ch 3 fri').repeat === undefined);
+});
+
 suite('Quick add — area tags', async ({ check }) => {
   const s = await storeWith({
     ...base,

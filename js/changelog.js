@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v43', date: '2026-09-03',
+    title: 'Say when, say how often',
+    notes: [
+      'Quick add reads more: “tmrw”, “in 3 days”, “in a week”, “next week”, “in a month”, “this fri”.',
+      'And repeats: “gym every mon”, “lab every tue and thu 2-4pm”, “laundry every other week”, “standup every weekday 9am”, “vitamins daily”. The rule goes on the task; the first one lands on the nearest day it fits.',
+      'Coming back to the app after hours no longer starts with a sync error: the session is refreshed first, and a sync that meets an expired token refreshes it and goes once more.'
+    ]
+  },
+  {
     version: 'v42', date: '2026-09-03',
     title: 'Undo, and a tap',
     notes: [

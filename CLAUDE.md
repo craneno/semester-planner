@@ -63,7 +63,10 @@ clash goes to whoever wrote last, row by row (`updated_at` decides, `synced_at`
 is the pull cursor). **No book-keeping per change** — never add dirty flags or
 `markChanged()`.
 
-**Sync watches itself.** `cloud.log` is the last thirty syncs (Settings → Sync
+**Back from the background, ask for the session first** (`resume()`): an iOS
+app that slept wakes with an expired token, and a sync fired straight away got
+a 401 before supabase-js had refreshed it. A sync that meets one refreshes and
+goes once more, once (`authRetried`). **Sync watches itself.** `cloud.log` is the last thirty syncs (Settings → Sync
 log); the loop breaker halts after `LOOP_MAX` pushes in a row with nothing
 edited here, and `sync({ manual })` starts it again. `pull()` hands `push()` the
 hashes it took, or every row from another device went straight back up. The
@@ -228,7 +231,9 @@ is on the calendar — `kind` decides whether we ask for deliverables.
   `body.rail-hidden` makes `#app` **one column**, or main sits in a zero-wide one.
 - Quick add checks `parseLinkAdd()` **first** (a URL at the front is a bookmark)
   and `parseRange()` before `parseWhen()`, or half of "12-7" becomes a due time.
-  Only `http`/`https` are stored, or a saved `javascript:` URL would run as the app.
+  A repeat ("every mon", "daily") is taken out *before* the date words, or "mon"
+  reads as one next Monday; its first day is settled last, after them. Only
+  `http`/`https` are stored, or a saved `javascript:` URL would run as the app.
 - **A wall-clock time needs the zone it was written in.** Every `area.schedule`
   slot carries `tz`; `scheduleDrift()` spots a device that has moved and
   `shiftSchedules()` rewrites the times, carrying the weekday across midnight.
@@ -244,7 +249,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 959 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 987 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

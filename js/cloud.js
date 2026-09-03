@@ -278,6 +278,30 @@ function currentHashes() {
 
 let syncing = false;
 let pending = false;
+let authRetried = false;
+const isAuthError = (e) => e?.code === 'PGRST301' || e?.status === 401
+  || /jwt.*expired|expired.*jwt|invalid.*jwt|not authenticated/i.test(e?.message || '');
+
+/**
+ * Back from the background. An iOS app that slept for hours wakes with an
+ * expired token, and a sync fired straight away got a 401 before supabase-js
+ * had refreshed it — so ask for the session first, which refreshes it on the
+ * way, and sync after.
+ */
+export async function resume() {
+  if (!cfg().enabled || !isConfigured() || !isSignedIn()) return;
+  try {
+    const c = await client();
+    if (c.auth?.getSession) {
+      const { data } = await c.auth.getSession();
+      if (!data?.session) { cloud.userId = null; setStatus('signed-out', 'Sign in to sync.'); return; }
+    }
+  } catch (err) {
+    setStatus('error', err.message || String(err));
+    return;
+  }
+  return sync();
+}
 
 export async function sync({ full = false, manual = false } = {}) {
   if (!cfg().enabled || !isConfigured() || !isSignedIn()) return;
@@ -316,6 +340,7 @@ export async function sync({ full = false, manual = false } = {}) {
     storeSchema();
     save();
 
+    authRetried = false;
     quietPushes = pushed.sent && !edits && !entry.full ? quietPushes + 1 : 0;
     if (quietPushes >= LOOP_MAX) {
       cloud.halted = true;
@@ -326,9 +351,18 @@ export async function sync({ full = false, manual = false } = {}) {
       setStatus('ready');
     }
   } catch (err) {
-    console.warn('cloud sync', err);
-    entry.error = describeSyncError(err);
-    setStatus('error', entry.error);
+    // A token that expired while the app slept: refresh it and go once more.
+    // Once — a refresh that does not help is an error like any other.
+    if (isAuthError(err) && !authRetried) {
+      authRetried = true;
+      try { await (await client()).auth?.refreshSession?.(); } catch { /* the retry will say */ }
+      entry.error = 'token expired — refreshed, trying again';
+      pending = true;
+    } else {
+      console.warn('cloud sync', err);
+      entry.error = describeSyncError(err);
+      setStatus('error', entry.error);
+    }
   } finally {
     entry.ms = Date.now() - t0;
     logSync(entry);
@@ -586,9 +620,9 @@ subscribe((meta) => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && cfg().enabled && isSignedIn()) sync();
+  if (document.visibilityState === 'visible') resume();
 });
-window.addEventListener('online', () => { if (cfg().enabled && isSignedIn()) sync(); });
+window.addEventListener('online', () => { resume(); });
 window.addEventListener('offline', () => {
   if (cfg().enabled) setStatus('offline', 'Offline — changes sync when you reconnect.');
 });

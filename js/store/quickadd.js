@@ -4,7 +4,7 @@
 // !priority, #area. parseWhen and parseRange are pure; the two that look up
 // an area take the state as their first argument, and store.js binds them.
 
-import { today, addDays, fromMin, diffDays } from '../util.js';
+import { today, addDays, fromMin, diffDays, ymd } from '../util.js';
 import { ITEM_TYPES } from './constants.js';
 
 const DOW_WORDS = { sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2, wed: 3, weds: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6 };
@@ -16,21 +16,50 @@ function nextDow(dow, from = today()) {
   return addDays(from, delta);
 }
 
+/** The same day n months on, or the last day of that month when it is shorter. */
+function addMonths(from, n) {
+  const d = new Date(from + 'T00:00:00');
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, last));
+  return ymd(d);
+}
+
+/** A weekday word, and only a weekday word: "mon" but not "monitor". */
+const DOW_WORD = '(?:sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)(?:day|s|nesday|rsday|urday)?';
+
 /** @returns {{date, time, consumed: string[]}|null} */
 export function parseWhen(text) {
   const t = text.toLowerCase();
   const consumed = [];
   let date = null, time = null;
 
-  let m = t.match(/\b(today|tonight|tomorrow|tmr)\b/);
+  let m = t.match(/\b(today|tonight|tomorrow|tmr|tmrw|tmw|tomorow)\b/);
   if (m) { date = m[1] === 'today' || m[1] === 'tonight' ? today() : addDays(today(), 1); consumed.push(m[0]); }
 
+  if (!date) {
+    // "in 3 days", "in 2 weeks", "in a week", "in a month"
+    m = t.match(/\bin\s+(a|an|\d+)\s+(day|week|month)s?\b/);
+    if (m) {
+      const n = /^\d/.test(m[1]) ? +m[1] : 1;
+      date = m[2] === 'day' ? addDays(today(), n) : m[2] === 'week' ? addDays(today(), 7 * n) : addMonths(today(), n);
+      consumed.push(m[0]);
+    }
+  }
+  if (!date) {
+    // "next week" is a week from today; "next month" a month
+    m = t.match(/\bnext\s+(week|month)\b/);
+    if (m) { date = m[1] === 'week' ? addDays(today(), 7) : addMonths(today(), 1); consumed.push(m[0]); }
+  }
   if (!date) {
     m = t.match(/\bnext\s+(sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)[a-z]*\b/);
     if (m) { date = addDays(nextDow(DOW_WORDS[m[1]]), 0); consumed.push(m[0]); }
   }
   if (!date) {
-    m = t.match(/\b(sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)(day|s|nesday|rsday|urday)?\b/);
+    // "fri", "this fri", "friday"
+    m = t.match(/\b(?:this\s+)?(sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)(day|s|nesday|rsday|urday)?\b/);
     if (m) { date = nextDow(DOW_WORDS[m[1]]); consumed.push(m[0]); }
   }
   if (!date) {
@@ -133,6 +162,33 @@ export function parseQuickAdd(s, input) {
   const allDay = allDayRe.test(text);
   if (allDay) text = text.replace(allDayRe, ' ');
 
+  // A repeat: "every mon", "every mon and wed", "every other week", "every
+  // weekday", "daily", "weekly". The rule sits on the item; its first day is
+  // worked out at the end, once the date words have had their say. Taken out
+  // of the text here, or "mon" would be read as a one-off next Monday.
+  const everyRe = new RegExp(
+    `\\bevery\\s+(other\\s+)?(weekdays?|day|week|month|year|${DOW_WORD}(?:\\s*(?:,|and|&|\\/)\\s*${DOW_WORD})*)\\b`, 'i');
+  let repeat = null;
+  let rm = text.match(everyRe);
+  if (rm) {
+    const every = rm[1] ? 2 : 1;
+    const what = rm[2].toLowerCase();
+    if (what === 'day') repeat = { freq: 'daily', every };
+    else if (what.startsWith('weekday')) repeat = { freq: 'weekly', every, days: [1, 2, 3, 4, 5] };
+    else if (what === 'week') repeat = { freq: 'weekly', every };
+    else if (what === 'month') repeat = { freq: 'monthly', every };
+    else if (what === 'year') repeat = { freq: 'yearly', every };
+    else {
+      const days = [...what.matchAll(/\b(sun|mon|tue|wed|thu|fri|sat)/g)].map((x) => DOW_WORDS[x[1]]);
+      repeat = { freq: 'weekly', every, days: [...new Set(days)].sort((a, b) => a - b) };
+    }
+    text = text.replace(rm[0], ' ');
+  } else if ((rm = text.match(/\b(daily|weekly|monthly|yearly|annually)\b/i))) {
+    const w = rm[1].toLowerCase();
+    repeat = { freq: w === 'daily' ? 'daily' : w === 'weekly' ? 'weekly' : w === 'monthly' ? 'monthly' : 'yearly', every: 1 };
+    text = text.replace(rm[0], ' ');
+  }
+
   // duration
   const dm = text.match(/\s(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?)\b/i);
   if (dm) {
@@ -189,10 +245,12 @@ export function parseQuickAdd(s, input) {
   const planIdx = text.search(/\b(plan|work on|work|start)\b/i);
   const dueIdx = text.search(/\bdue\b/i);
 
+  let dated = false;   // a day was named, as against defaulted to today
   const grab = (from) => {
     const seg = text.slice(from);
     const w = parseWhen(seg);
     if (!w) return null;
+    if (w.date) dated = true;
     for (const c of w.consumed) {
       const i = text.toLowerCase().indexOf(c, from);
       if (i >= 0) text = text.slice(0, i) + ' '.repeat(c.length) + text.slice(i + c.length);
@@ -229,6 +287,21 @@ export function parseQuickAdd(s, input) {
     out.due = null;
     out.dueTime = null;
     if (!hinted) out.type = 'event';
+  }
+
+  if (repeat) {
+    out.repeat = { until: null, count: null, ex: {}, ...repeat };
+    // the first day: the one named, else today if the rule lands on it, else
+    // the nearest day it does — "every mon" typed on a Wednesday starts Monday
+    const first = () => {
+      const t0 = today();
+      if (repeat.freq !== 'weekly' || !repeat.days?.length) return t0;
+      const dow = new Date(t0 + 'T00:00:00').getDay();
+      if (repeat.days.includes(dow)) return t0;
+      return repeat.days.map((d) => nextDow(d, t0)).sort()[0];
+    };
+    if (out.plan) { if (!dated) out.plan.date = first(); }
+    else if (!out.due) out.due = first();
   }
 
   out.title = text.replace(/\s+/g, ' ').trim().replace(/^[-–—:]\s*/, '') || 'Untitled';

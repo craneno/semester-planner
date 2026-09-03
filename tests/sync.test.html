@@ -30,6 +30,12 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const api = {
       table, writes: 0,
       history: [],       // what .from('planner_rows_history') answers
+      failNext: null,    // an error the next query answers with, once
+      auth: {
+        sessions: 0, refreshes: 0,
+        async getSession() { api.auth.sessions++; return { data: { session: api.auth.none ? null : { user: { id: USER } } } }; },
+        async refreshSession() { api.auth.refreshes++; return { data: { session: { user: { id: USER } } } }; }
+      },
       from(name) {
         const q = {
           _table: name,
@@ -40,6 +46,7 @@ suite('Cloud sync — delete durability', async ({ check }) => {
           limit() { return q; },
           upsert(list) { q._up = list; return q; },
           then(res) {
+            if (api.failNext) { const err = api.failNext; api.failNext = null; res({ data: null, error: err }); return; }
             if (q._up) {
               const data = [];
               for (const r of q._up) {
@@ -259,6 +266,41 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('...so it goes up on the next sync', fake.writes > before && serverRow(fake, 'rs').data.title === 'old draft');
   }
 
+  /* An iOS app that slept for hours wakes with an expired token. A sync fired
+     straight away got a 401 before supabase-js had refreshed it, and the
+     first thing the phone showed after waking was an error. */
+  async function tResume() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'rs1', title: 'resume' }); });
+    await C.resume();
+    check('resume asks for the session first', fake.auth.sessions === 1, String(fake.auth.sessions));
+    check('...then syncs', fake.writes > 0 && C.cloud.status === 'ready');
+
+    fake.auth.none = true;
+    await C.resume();
+    check('no session on waking means signed out, not an error', C.cloud.status === 'signed-out');
+    fake.auth.none = false;
+  }
+
+  async function tExpiredToken() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'jw1', title: 'expired' }); });
+    fake.failNext = { code: 'PGRST301', message: 'JWT expired' };
+    await C.sync();
+    await new Promise((r) => setTimeout(r, 400));   // the retry runs 250ms after
+    check('an expired token is refreshed', fake.auth.refreshes === 1, String(fake.auth.refreshes));
+    check('...and the sync tried once more, and got through', C.cloud.status === 'ready' && !!serverRow(fake, 'jw1'));
+    check('...noted in the log', C.cloud.log.some((e) => /refreshed/.test(e.error || '')));
+
+    // and when the refresh does not help: the retry fails the same way
+    fake.failNext = { code: 'PGRST301', message: 'JWT expired' };
+    await C.sync();                                  // fails, refreshes, schedules the retry
+    fake.failNext = { code: 'PGRST301', message: 'JWT expired' };
+    await new Promise((r) => setTimeout(r, 400));   // the retry meets it again
+    check('a refresh that does not help ends as an error, not a loop',
+      C.cloud.status === 'error' && fake.auth.refreshes === 2, `${C.cloud.status} after ${fake.auth.refreshes} refreshes`);
+  }
+
   /* The guard has to be the hash, not applyRow: applyRow reports a change for
      any live row, identical or not, which is what made the echo loud. */
   {
@@ -292,7 +334,9 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['a push settles', tPushSettles],
     ['the sync log', tSyncLog],
     ['the loop breaker', tLoopBreaker],
-    ['history and restore', tRestore]
+    ['history and restore', tRestore],
+    ['resume refreshes first', tResume],
+    ['an expired token', tExpiredToken]
   ]) {
     await fn();
   }
