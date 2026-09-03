@@ -125,10 +125,78 @@ export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 
 /** Mutate + persist + notify. */
 export function commit(fn, meta = {}) {
+  if (FOREIGN.has(meta.source) || meta.external) forget();
+  else if (typeof fn === 'function') remember(meta);
   if (typeof fn === 'function') fn(state);
   save();
   for (const s of subs) s(meta);
 }
+
+/* ---------------- undo ----------------
+   Every local commit is preceded by a copy of what it is about to change,
+   kept here, ten deep. Undo puts a copy back and stamps every row that
+   differs with the clock now: a row put back with its old updatedAt would be
+   refused by the server as stale, and the undo quietly undone by the next
+   sync. Commits close together are one step, the way an editor groups
+   keystrokes. A change from outside — the cloud, another tab, Google, a
+   restore — clears the stack: history from before the world moved is not
+   safe to replay over it. */
+const UNDO_KEYS = ['semester', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
+const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone']);
+export const undoSettings = { max: 10, coalesceMs: 800 };
+let undoStack = [], redoStack = [], lastLocalAt = 0;
+
+const snapshot = () => structuredClone(Object.fromEntries(UNDO_KEYS.map((k) => [k, state[k]])));
+
+function remember(meta) {
+  const at = Date.now();
+  if (undoStack.length && at - lastLocalAt < undoSettings.coalesceMs) { lastLocalAt = at; return; }
+  lastLocalAt = at;
+  undoStack.push({ label: meta.label || '', copy: snapshot() });
+  if (undoStack.length > undoSettings.max) undoStack.shift();
+  redoStack.length = 0;
+}
+
+function forget() { undoStack.length = 0; redoStack.length = 0; }
+
+/** The clock on one row, whatever its kind. The mirror of rowStamp(). */
+function stampRow(kind, id, now) {
+  const inList = (arr) => { const r = arr.find((x) => x.id === id); if (r) r.updatedAt = now; };
+  switch (kind) {
+    case 'item': return inList(state.items);
+    case 'card': return inList(state.cards);
+    case 'area': return inList(state.areas);
+    case 'link': return inList(state.links);
+    case 'wish': return inList(state.wishlist);
+    case 'sprint': return inList(state.sprints);
+    case 'habit': return inList(state.habits);
+    case 'note': if (state.notes[id]) state.notes[id].updatedAt = now; return;
+    case 'habitlog': if (state.habitLog[id]) state.habitLogAt[id] = now; return;
+    default: return;
+  }
+}
+
+function swap(from, to, source) {
+  const step = from.pop();
+  if (!step) return null;
+  to.push({ label: step.label, copy: snapshot() });
+  const was = new Map(snapshotRows().map((r) => [r.kind + ':' + r.id, JSON.stringify(r.data)]));
+  Object.assign(state, structuredClone(step.copy));
+  const now = new Date().toISOString();
+  for (const r of snapshotRows()) {
+    if (was.get(r.kind + ':' + r.id) !== JSON.stringify(r.data)) stampRow(r.kind, r.id, now);
+  }
+  // no fn, and a source of its own, so this commit is neither remembered
+  // nor taken for a change from outside
+  commit(null, { source });
+  return step.label || 'the last change';
+}
+
+export const canUndo = () => undoStack.length > 0;
+export const canRedo = () => redoStack.length > 0;
+/** @returns {string|null} what was undone, or null when there was nothing */
+export function undo() { return swap(undoStack, redoStack, 'undo'); }
+export function redo() { return swap(redoStack, undoStack, 'redo'); }
 
 // cross-tab / cross-window coherence
 window.addEventListener('storage', (e) => {
@@ -136,6 +204,7 @@ window.addEventListener('storage', (e) => {
   try {
     const next = migrate(JSON.parse(e.newValue));
     Object.assign(state, next);
+    forget();
     for (const s of subs) s({ external: true });
   } catch { /* ignore */ }
 });

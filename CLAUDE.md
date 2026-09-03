@@ -137,8 +137,14 @@ is pinned to the version that added it — `if (from < 5)`, never
 A *rename* (`MERGED_CATEGORY` in `areaCategory()`) is not pinned: a dead id is
 turned into a live one every time it is read.
 
-**The small edits live in `js/actions.js`** — tick, move, push to tomorrow —
-each with an Undo that puts the old *when* back through `upsertItem`. A Canvas
+**Undo is in the store**: `commit(fn)` keeps a copy of the tracked keys first
+(`UNDO_KEYS`, ten deep, commits within 800ms as one step), and `undo()` puts
+one back and **stamps every row that differs with now**, or the server refuses
+the old clock as stale and the next sync undoes the undo. A commit from outside
+(`FOREIGN`, `external`) clears the stack. `undo`/`redo` are sources of their
+own: redrawn, pushed, never remembered. **The small edits live in
+`js/actions.js`** — tick, move, push to tomorrow — each with an Undo of its
+own that puts the old *when* back through `upsertItem`. A Canvas
 assignment is a deadline with `canvasId` (`js/canvas.js`, brought in as a file:
 Instructure sends no CORS headers); a re-import refreshes the date and title and
 leaves the area, the tick and the notes alone.
@@ -238,7 +244,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 939 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 959 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

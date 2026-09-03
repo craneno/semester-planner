@@ -419,6 +419,34 @@ export function dragCreate(host, { only, hit, hourH, origin = 0, onPick, edge })
   });
 }
 
+/**
+ * On touch there is no drag to draw a block with — the drag scrolls — and no
+ * double-click either. A tap on the empty grid is the way in: a finger that
+ * lands and lifts within TAP_MS, having moved less than a few px, asks for a
+ * block of an hour at that time. Anything longer or further is a scroll, or
+ * a press on a block, and is left alone.
+ */
+const TAP_MS = 350;
+export function tapCreate(host, { only, hit, onPick }) {
+  let t0 = 0, x0 = 0, y0 = 0, target = null;
+  host.addEventListener('touchstart', (e) => {
+    target = null;
+    if (e.touches.length !== 1) return;
+    if (only && !e.target.matches(only)) return;
+    const t = e.touches[0];
+    t0 = Date.now(); x0 = t.clientX; y0 = t.clientY; target = e.target;
+  }, { passive: true });
+  host.addEventListener('touchend', (e) => {
+    if (!target || e.changedTouches.length !== 1) return;
+    const t = e.changedTouches[0];
+    const was = target; target = null;
+    if (Date.now() - t0 > TAP_MS || Math.hypot(t.clientX - x0, t.clientY - y0) > 8) return;
+    const at = hit({ clientX: t.clientX, clientY: t.clientY, target: was });
+    if (!at) return;
+    onPick({ date: at.date, start: fromMin(at.mins), mins: 60 });
+  }, { passive: true });
+}
+
 const TYPE_LABEL = {
   event: 'Event', meeting: 'Meeting', task: 'Work block', homework: 'Homework'
 };

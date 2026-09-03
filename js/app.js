@@ -4,7 +4,8 @@ import { h, $, clear, fmtDate, fmtTime, today, debounce, tz, zoneLabel, fmtDurat
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
-  reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules
+  reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules,
+  undo, redo
 } from './store.js';
 import { toast, closePeek, reorderable, modal, closeModal, navSlide, navSettle } from './ui.js';
 import { applyAppearance } from './appearance.js';
@@ -455,6 +456,7 @@ const KEYS = [
   ['t', 'Today — this week on Week, Overview elsewhere'],
   ['← →', 'Last week, next week (on Week)'],
   ['1 2 3', 'Overview, Semester, Week'],
+  ['Ctrl+Z', 'Undo the last change — Ctrl+Shift+Z or Ctrl+Y redoes'],
   ['Esc', 'Close the panel'],
   ['?', 'This list']
 ];
@@ -465,6 +467,15 @@ function wireKeys() {
   window.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName || '').toLowerCase();
     const typing = ['input', 'textarea', 'select'].includes(tag) || e.target.isContentEditable;
+    // Ctrl+Z outside a box is the app's undo; inside one it is the browser's
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
+      e.preventDefault();
+      const back = e.key.toLowerCase() === 'z' && !e.shiftKey;
+      const label = back ? undo() : redo();
+      if (!label) toast(back ? 'Nothing to undo.' : 'Nothing to redo.');
+      else toast(`${back ? 'Undone' : 'Redone'}: ${label}.`, { action: back ? 'Redo' : 'Undo', onAction: () => (back ? redo() : undo()) });
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') { closePeek(); closeModal(); return; }
     if (typing) return;
@@ -585,7 +596,8 @@ function boot() {
     // including a block planned from a panel that must not repaint the view
     paintNextUp();
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
-      || meta?.source === 'editor' || meta?.source === 'restore') navigate();
+      || meta?.source === 'editor' || meta?.source === 'restore'
+      || meta?.source === 'undo' || meta?.source === 'redo') navigate();
   });
 
   navigate();

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Undo tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* One undo for everything, in the store. What has to hold: a step goes back
+   and forward; a burst of commits is one step; a row put back carries the
+   clock now, or the server refuses it as stale and the next sync undoes the
+   undo; and a change from outside clears the stack, since replaying history
+   over the world as it is now would lose someone else's edit. */
+import { suite, storeWith } from './harness.js';
+
+const base = () => ({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'a1', name: 'Thermo', category: 'course', order: 0 }],
+  items: [], cards: [], links: [], wishlist: [], sprints: [], habits: [], habitLog: {}, notes: {}
+});
+
+const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+
+suite('Undo — back and forward', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 0;   // every commit its own step, for the test's sake
+
+  check('nothing to undo on a fresh store', s.canUndo() === false && s.undo() === null);
+
+  s.commit(() => s.upsertItem({ id: 'u1', title: 'Read chapter 3' }), { label: 'add a task' });
+  check('a commit can be undone', s.canUndo() === true);
+  check('undo says what it undid', s.undo() === 'add a task');
+  check('...and the task is gone', s.itemById('u1') === null);
+  check('...and can be redone', s.canRedo() === true && s.redo() === 'add a task' && s.itemById('u1')?.title === 'Read chapter 3');
+
+  s.commit(() => { s.itemById('u1').title = 'Read chapter 4'; });
+  s.commit(() => { s.itemById('u1').title = 'Read chapter 5'; });
+  s.undo();
+  check('one step back is one commit', s.itemById('u1').title === 'Read chapter 4');
+  s.undo();
+  check('...and another is the one before', s.itemById('u1').title === 'Read chapter 3');
+  s.commit(() => { s.itemById('u1').title = 'Something new'; });
+  check('a new edit after an undo drops the redo', s.canRedo() === false);
+});
+
+suite('Undo — a burst is one step', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 300;
+  s.commit(() => s.upsertItem({ id: 'b1', title: 'a' }));
+  s.commit(() => { s.itemById('b1').title = 'ab'; });
+  s.commit(() => { s.itemById('b1').title = 'abc'; });
+  await tick(350);
+  s.commit(() => { s.itemById('b1').title = 'abcd'; });
+  s.undo();
+  check('the last commit, alone after a pause, is its own step', s.itemById('b1')?.title === 'abc');
+  s.undo();
+  check('the three typed close together go as one', s.itemById('b1') === null);
+});
+
+suite('Undo — a row put back is stamped now', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => s.upsertItem({ id: 'r1', title: 'kept' }));
+  s.commit(() => { s.itemById('r1').updatedAt = '2026-01-01T00:00:00.000Z'; });
+  s.commit(() => s.deleteItem('r1'));
+  check('setup: deleted', s.itemById('r1') === null);
+  s.undo();
+  const back = s.itemById('r1');
+  check('the row is back', !!back && back.title === 'kept');
+  check('...with the clock now, not the one it had', back.updatedAt > '2026-06-01', back.updatedAt);
+  check('sync will read that clock', s.rowStamp('item', 'r1') === back.updatedAt);
+
+  s.toggleHabit('2026-09-01', 'h1', true);
+  s.commit(() => {}, {});
+  s.commit(() => { s.state.habitLogAt['2026-09-01'] = '2026-01-01T00:00:00.000Z'; });
+  s.commit(() => s.toggleHabit('2026-09-01', 'h1', false));
+  s.undo();
+  check('a day of ticks put back gets its clock too', s.habitDone('2026-09-01', 'h1') && s.state.habitLogAt['2026-09-01'] > '2026-06-01');
+});
+
+suite('Undo — the world moving clears it', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => s.upsertItem({ id: 'c1', title: 'mine' }));
+  check('setup: undoable', s.canUndo());
+  s.commit(null, { source: 'cloud' });
+  check('a change from the cloud clears the stack', s.canUndo() === false, 'replaying history over it would lose the other device’s edit');
+
+  s.commit(() => s.upsertItem({ id: 'c2', title: 'mine too' }));
+  let seen = null;
+  const off = s.subscribe((meta) => { seen = meta?.source; });
+  s.undo();
+  off();
+  check('an undo tells the page with a source of its own', seen === 'undo');
+  check('...and is not itself remembered as a step', s.canUndo() === false && s.canRedo() === true);
+  s.redo();
+  check('...nor a redo', s.canRedo() === false && s.itemById('c2')?.title === 'mine too');
+});
+</script>
+</body>
+</html>

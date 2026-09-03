@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v42', date: '2026-09-03',
+    title: 'Undo, and a tap',
+    notes: [
+      'Ctrl+Z undoes the last change, whatever it was: an edit, a delete, a drag, a tick. Ctrl+Shift+Z or Ctrl+Y redoes. Ten steps deep; typing close together counts as one. A change that arrives from another device clears it.',
+      'On a phone, a tap on empty grid — the day clock on Overview, or a column on Week — asks for an hour-long block at that time. The drag still scrolls.'
+    ]
+  },
+  {
     version: 'v41', date: '2026-09-03',
     title: 'The store in pieces',
     notes: [

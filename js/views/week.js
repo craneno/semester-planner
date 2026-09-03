@@ -8,7 +8,7 @@ import {
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
-import { dragCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
+import { dragCreate, tapCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 import { moveItem } from '../actions.js';
 
@@ -212,6 +212,12 @@ export function renderWeek(root, { navigate } = {}) {
     hit: (ev) => hit(ev, body, days, dayStart, hourH),
     hourH, origin: dayStart * 60,
     edge: (ev) => edgeScroll(ev, body),
+    onPick: (range) => newBlockPrompt(range, { onDone: navigate })
+  });
+  // and on a phone, where the drag scrolls, a tap on empty grid asks for an hour
+  tapCreate(body, {
+    only: '.daycol',
+    hit: (ev) => hit(ev, body, days, dayStart, hourH),
     onPick: (range) => newBlockPrompt(range, { onDone: navigate })
   });
 

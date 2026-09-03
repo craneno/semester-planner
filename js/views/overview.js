@@ -16,7 +16,7 @@ import {
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
-import { dragCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
+import { dragCreate, tapCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
 import { tickItem, pushToTomorrow, canPush } from '../actions.js';
 
@@ -232,6 +232,8 @@ function todayColumn(day, { navigate, go }) {
     if (ev.target !== lanes) return;
     newBlockPrompt({ date: day, start: fromMin(at(ev).mins), mins: 60 }, { onDone: navigate });
   });
+  // a phone has no double-click; a tap on the empty clock is the same ask
+  tapCreate(lanes, { only: '.day-lanes', hit: at, onPick: (range) => newBlockPrompt(range, { onDone: navigate }) });
 
   return col;
 }
