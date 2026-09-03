@@ -6,7 +6,7 @@ import {
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
   reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules
 } from './store.js';
-import { toast, closePeek, reorderable, modal, closeModal } from './ui.js';
+import { toast, closePeek, reorderable, modal, closeModal, navSlide, navSettle } from './ui.js';
 import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
@@ -261,32 +261,58 @@ function sweep() {
 const EDGE = 26;      // how far in from the left a swipe may start
 const SWIPE = 52;     // how far it must travel to count
 
+/* The menu follows the finger. Until the swipe has shown itself to be one
+   — sideways, and past a few px — nothing moves, so a scroll down the page
+   is still a scroll; after that the sidebar is dragged by the px, with its
+   transition off, and the scrim fades in step. On release it settles: past
+   halfway, or a flick past SWIPE, and the transition takes it the rest of
+   the way. */
 function wireNavSwipe() {
   const phone = () => matchMedia('(max-width: 860px)').matches;
-  let x0 = 0, y0 = 0, job = null;
+  const side = $('#sidebar'), scrim = $('#nav-scrim');
+  let x0 = 0, y0 = 0, job = null, live = false, w = 0, dx = 0;
+
+  const settle = () => {
+    if (job && live) {
+      side.classList.remove('dragging');
+      document.body.classList.remove('nav-dragging');
+      side.style.transform = '';
+      scrim.style.opacity = '';
+      setSidebar(navSettle(job, dx, w, SWIPE));
+    }
+    job = null; live = false;
+  };
 
   document.addEventListener('touchstart', (e) => {
-    job = null;
+    job = null; live = false; dx = 0;
     if (!phone() || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (sidebarOpen()) job = 'close';
     else if (t.clientX <= EDGE) job = 'open';
     else return;
     x0 = t.clientX; y0 = t.clientY;
+    w = side.getBoundingClientRect().width || Math.min(innerWidth * 0.82, 300);
   }, { passive: true });
 
   document.addEventListener('touchmove', (e) => {
     if (!job || e.touches.length !== 1) return;
-    const dx = e.touches[0].clientX - x0, dy = e.touches[0].clientY - y0;
-    // scrolling down the menu is not a swipe out of it
-    if (Math.abs(dy) > Math.abs(dx)) { job = null; return; }
-    if (job === 'open' && dx > SWIPE) { setSidebar(true); job = null; }
-    else if (job === 'close' && dx < -SWIPE) { setSidebar(false); job = null; }
+    dx = e.touches[0].clientX - x0;
+    const dy = e.touches[0].clientY - y0;
+    if (!live) {
+      // scrolling down the menu is not a swipe out of it
+      if (Math.abs(dy) > Math.abs(dx)) { job = null; return; }
+      if (Math.abs(dx) < 6) return;
+      live = true;
+      side.classList.add('dragging');
+      document.body.classList.add('nav-dragging');
+    }
+    const { x, t } = navSlide(job, dx, w);
+    side.style.transform = `translateX(${x}px)`;
+    scrim.style.opacity = String(t);
   }, { passive: true });
 
-  const done = () => { job = null; };
-  document.addEventListener('touchend', done, { passive: true });
-  document.addEventListener('touchcancel', done, { passive: true });
+  document.addEventListener('touchend', settle, { passive: true });
+  document.addEventListener('touchcancel', settle, { passive: true });
 }
 
 /* ---------------- what's on now ----------------

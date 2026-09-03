@@ -364,7 +364,13 @@ async function subscribeLive(c) {
   channel = c.channel('planner-' + cloud.userId)
     .on('postgres_changes',
       { event: '*', schema: 'public', table: TABLE, filter: `user_id=eq.${cloud.userId}` },
-      () => pullSoon())
+      (payload) => {
+        // our own write coming back down the channel is not news, and a
+        // sync for it is a round trip plus a status flicker for nothing
+        const r = payload?.new;
+        if (r && !r.deleted && r.kind && currentHashes()[key(r.kind, r.id)] === hash(r.data)) return;
+        pullSoon();
+      })
     .subscribe((s) => {
       cloud.live = s === 'SUBSCRIBED';
       emit();
@@ -419,9 +425,14 @@ export function resetLocalSyncState() {
   resetClient();
 }
 
-// local edits schedule a push; cloud-driven edits must not bounce straight back
+// Local edits schedule a push; cloud-driven edits must not bounce straight
+// back. Nor may a save seen from another tab: that tab pushes its own edits,
+// and every sync here writes `lastSync`, which the other tab sees as a save
+// of ours, pushes, writes its own `lastSync`... two tabs of the planner on
+// one device kept each other syncing every couple of seconds, and Settings
+// twitched with each round.
 subscribe((meta) => {
-  if (meta?.source === 'cloud') return;
+  if (meta?.source === 'cloud' || meta?.external) return;
   if (cfg().enabled && isSignedIn()) pushSoon();
 });
 

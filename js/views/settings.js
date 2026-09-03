@@ -113,7 +113,9 @@ export function renderSettings(root, { navigate }) {
       ready: (C.cloud.email ? C.cloud.email + ' · ' : '')
         + (cl.lastSync ? 'synced ' + new Date(cl.lastSync).toLocaleTimeString() : 'connected')
         + (C.cloud.live ? ' · live' : ''),
-      syncing: 'Syncing…',
+      // the same shape as ready, so a sync does not take the line from two
+      // rows to one and back on a phone, nudging everything under it
+      syncing: (C.cloud.email ? C.cloud.email + ' · ' : '') + 'syncing…' + (C.cloud.live ? ' · live' : ''),
       error: 'Error: ' + C.cloud.message,
       offline: 'Offline — changes sync when you reconnect'
     };

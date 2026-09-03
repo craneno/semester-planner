@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v37', date: '2026-09-02',
+    title: 'The menu follows your finger',
+    notes: [
+      'On a phone the sidebar now slides in as you swipe, and slides the rest of the way when you let go. It used to snap.',
+      '“Everything today” stays open. It was rebuilt closed every time a sync brought news, which on a busy day was every few seconds.',
+      'Two tabs of the planner on one device no longer sync each other for ever. Each sync wrote a time the other tab took for an edit and pushed, round and round, and Settings twitched with every round.'
+    ]
+  },
+  {
     version: 'v36', date: '2026-09-02',
     title: 'Canvas, find, and a way back',
     notes: [

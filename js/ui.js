@@ -3,6 +3,27 @@
 import { h, $, clear, hexAlpha, fmtDate, diffDays, today } from './util.js';
 import { areaById } from './store.js';
 
+/* ---------------- the sidebar swipe ----------------
+   Where the menu should be while a finger drags it. Pure, so it can be
+   tested without a finger. `job` is what the swipe is for — 'open' starts
+   with the menu parked off-screen, 'close' with it in place — `dx` how far
+   the finger has moved since it landed, `w` the menu's width. */
+
+/** @returns {{x:number, t:number}} x in px from its open place (0 open, -w closed); t 0..1 how much is showing */
+export function navSlide(job, dx, w) {
+  if (!w) return { x: 0, t: 0 };
+  const from = job === 'open' ? -w : 0;
+  const x = Math.max(-w, Math.min(0, from + dx));
+  return { x, t: 1 + x / w };
+}
+
+/** Where it should end up when the finger lifts: past halfway, or a flick past `min`. */
+export function navSettle(job, dx, w, min) {
+  const { t } = navSlide(job, dx, w);
+  if (job === 'open') return dx > min || t > 0.5;
+  return !(dx < -min || t < 0.5);
+}
+
 /* ---------------- toasts ---------------- */
 
 export function toast(msg, { action, onAction, ms = 3200 } = {}) {

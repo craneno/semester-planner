@@ -83,6 +83,10 @@ const HOURS = 24;
 
 /** Survives a re-render, so ticking a box does not throw away where you were. */
 let dayScroll = null;
+/* So does this. The page is rebuilt whenever a sync brings news, and a
+   <details> built fresh is a closed one — the list snapped shut by itself a
+   few seconds after being opened. The answer lives out here, not in the DOM. */
+let everythingOpen = false;
 let trackScroll = false;
 
 const hourHeight = () => {
@@ -267,7 +271,10 @@ function decisionColumn(day, { navigate, go, soon }) {
   for (const t of three) focus.append(line(t, navigate));
 
   if (candidates.length > three.length) {
-    focus.append(h('details', { style: { marginTop: '8px' } },
+    focus.append(h('details', {
+      style: { marginTop: '8px' }, open: everythingOpen ? true : null,
+      ontoggle: (e) => { everythingOpen = e.target.open; }
+    },
       h('summary', { class: 'eyebrow', style: { cursor: 'pointer' } },
         `Everything today (${candidates.length})`),
       ...candidates.slice(three.length).map((t) => line(t, navigate))));

@@ -96,6 +96,16 @@ suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
       'a tombstone is a real decision');
   }
   log('The trigger is the only guard a bad build cannot get past.');
+
+  // A save seen from another tab is not an edit either. The other tab pushes
+  // its own; and every sync writes `lastSync`, so a push for it would have
+  // two tabs on one device syncing each other for ever.
+  check('a save from another tab does not schedule a push',
+    /subscribe\(\(meta\) => \{\s*if \(meta\?\.source === 'cloud' \|\| meta\?\.external\) return;/.test(src),
+    'two open tabs kept each other syncing every couple of seconds');
+  check('our own write coming down the channel does not start a sync',
+    /payload\?\.new[\s\S]{0,200}currentHashes\(\)\[key\(r\.kind, r\.id\)\] === hash\(r\.data\)\) return;/.test(src),
+    'a round trip and a status flicker for nothing');
 });
 
 suite('Safety — a copy this device keeps', async ({ check }) => {
@@ -243,6 +253,60 @@ suite('Safety — each thing its own row', async ({ check }) => {
       check(`${f} allows the new kinds`, /'link', 'wish', 'sprint', 'habit', 'habitlog'/.test(sql));
     }
   }
+});
+suite('Safety — a row that lands comes back out the same', async ({ check }) => {
+  /* Two devices must agree on a row's bytes, or each push comes straight
+     back: A sends, B keeps it in a different shape, B's next snapshot no
+     longer matches what it received, B pushes, A keeps that in *its* shape...
+     a ping-pong on every push, for ever. The hash is the JSON, so key order
+     counts, and so does a field one side fills in and the other leaves out. */
+  const a = await storeWith(base({
+    areas: [{
+      id: 'c1', name: 'Thermo', category: 'course', order: 0, freewrite: 'hi',
+      schedule: [{ day: 1, start: '10:30', end: '11:35', tz: 'America/New_York' }]
+    }],
+    items: [
+      {
+        id: 'i1', areaId: 'c1', title: 'Read', type: 'task',
+        plan: { date: '2026-09-03', start: '09:00', mins: 60 },
+        repeat: { freq: 'weekly', ex: {} }, subtasks: [{ id: 's1', text: 'p1', done: false }]
+      },
+      { id: 'i2', areaId: 'c1', title: 'PS1', type: 'homework', due: '2026-09-10', dueTime: '23:59', estMins: 90 }
+    ],
+    cards: [{ id: 'k1', areaId: null, text: 'a card' }],
+    links: [{ id: 'l1', url: 'https://x.y/z', title: 'x', areaId: null }],
+    wishlist: [{ id: 'w1', title: 'Calipers', price: 30, status: 'wanted' }],
+    sprints: [{
+      id: 'p1', areaId: 'c1', kind: 'sprint', title: 'Hot', start: '2026-09-07', end: '2026-09-20',
+      deliverables: [{ id: 'd1', text: 'x', done: false }]
+    }],
+    habits: [{ id: 'h1', name: 'Steps', order: 0 }],
+    habitLog: { '2026-09-01': ['h1'] },
+    notes: { '2026-09-01': { focus: 'f', text: 't', tomorrow: '', top3: [], journal: { c1: 'j' } } }
+  }));
+  const sent = a.snapshotRows();
+  const hash = (d) => JSON.stringify(d);
+  const key = (r) => r.kind + ':' + r.id;
+  const KINDS = ['area', 'item', 'card', 'note', 'link', 'wish', 'sprint', 'habit', 'habitlog', 'meta'];
+  check('there is a row of every kind to try', KINDS.every((k) => sent.some((r) => r.kind === k)),
+    KINDS.filter((k) => !sent.some((r) => r.kind === k)).join());
+
+  // The other device takes them as they came. Same module, wiped, and a
+  // copy of the rows, so nothing passes by being the very same object —
+  // and one store instance fewer on a page that already has many.
+  for (const k of ['areas', 'items', 'cards', 'links', 'wishlist', 'sprints', 'habits']) a.state[k].length = 0;
+  for (const k of ['notes', 'habitLog', 'habitLogAt']) for (const d of Object.keys(a.state[k])) delete a.state[k][d];
+  for (const r of JSON.parse(JSON.stringify(sent))) a.applyRow(r);
+  const got = new Map(a.snapshotRows().map((r) => [key(r), hash(r.data)]));
+  const bad = sent.filter((r) => got.get(key(r)) !== hash(r.data));
+  check('every row is the same bytes on the device it lands on', bad.length === 0, bad.map(key).join());
+
+  // ...and still after that device has been reloaded, since migrate() rebuilds every row
+  const c = await storeWith(JSON.parse(JSON.stringify(a.state)));
+  const again = new Map(c.snapshotRows().map((r) => [key(r), hash(r.data)]));
+  const drift = sent.filter((r) => again.get(key(r)) !== hash(r.data));
+  check('...and after a reload, or every restart would push the whole store', drift.length === 0,
+    drift.map(key).join());
 });
 </script>
 </body>

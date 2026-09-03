@@ -566,16 +566,24 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 @media (max-width: 860px) {
   :root { --hour-h: 46px; --gutter-w: 42px; }
   #app { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
-  .sidebar.open {
+  /* Always there, parked just off the left edge, so a swipe has something to
+     drag: the menu follows the finger, and on release it slides the rest of
+     the way. `dragging` turns the transition off while the finger is down. */
+  .sidebar {
     display: flex; position: fixed; inset: 0 auto 0 0; width: 82vw; max-width: 300px; z-index: 55;
-    box-shadow: var(--shadow-2);
+    transform: translateX(-100%); transition: transform .22s ease;
   }
+  .sidebar.open { transform: none; }
+  .sidebar.open, .sidebar.dragging { box-shadow: var(--shadow-2); }
+  .sidebar.dragging { transition: none; }
   /* Somewhere to tap that means "not that" — without it the only way back out
-     of the menu is to pick something from it. */
-  body.nav-open .nav-scrim {
+     of the menu is to pick something from it. Fades with the slide. */
+  .nav-scrim {
     display: block; position: fixed; inset: 0; z-index: 54; background: rgba(0, 0, 0, .38);
+    opacity: 0; pointer-events: none; transition: opacity .22s ease;
   }
+  body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+  body.nav-dragging .nav-scrim { transition: none; pointer-events: auto; }
   .main { padding-bottom: calc(52px + env(safe-area-inset-bottom)); }
   .topbar { padding: 10px 12px; gap: 8px; }
   .topbar h1 { font-size: calc(17px * var(--scale)); }

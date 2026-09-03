@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar swipe tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* The menu used to snap open once a swipe was long enough, which felt like a
+   glitch. Now it follows the finger. The maths is out on its own in ui.js so
+   it can be checked without a finger: where the menu sits for a given drag,
+   and where it ends up when the finger lifts. */
+import { suite } from './harness.js';
+
+suite('Sidebar swipe — following the finger', async ({ check }) => {
+  const { navSlide, navSettle } = await import('../js/ui.js');
+  const W = 300, MIN = 52;
+
+  /* ---- where it sits ---- */
+
+  {
+    check('closed, before the finger moves, it is parked off-screen',
+      navSlide('open', 0, W).x === -W && navSlide('open', 0, W).t === 0);
+    check('a finger 100px in brings it 100px in',
+      navSlide('open', 100, W).x === -200);
+    check('...and a third of it is showing', Math.abs(navSlide('open', 100, W).t - 1 / 3) < 1e-9);
+    check('it cannot be dragged past its open place',
+      navSlide('open', 500, W).x === 0 && navSlide('open', 500, W).t === 1);
+    check('nor pushed further off than closed',
+      navSlide('open', -40, W).x === -W);
+  }
+
+  {
+    check('open, before the finger moves, it is in place',
+      navSlide('close', 0, W).x === 0 && navSlide('close', 0, W).t === 1);
+    check('dragging left takes it out by the px', navSlide('close', -120, W).x === -120);
+    check('dragging right does nothing', navSlide('close', 60, W).x === 0);
+  }
+
+  {
+    check('no width, no movement', JSON.stringify(navSlide('open', 100, 0)) === '{"x":0,"t":0}',
+      'the width is read from the element and could be 0 before layout');
+  }
+
+  /* ---- where it ends up ---- */
+
+  {
+    check('a short drag in falls back closed', navSettle('open', 30, W, MIN) === false);
+    check('a flick past the minimum opens, even if most of it is still off-screen',
+      navSettle('open', MIN + 1, W, MIN) === true);
+    check('past halfway opens regardless', navSettle('open', W / 2 + 1, 4 * W, MIN * 20) === false
+      && navSettle('open', W * 0.6, W, MIN * 20) === true,
+      'halfway is judged against the width, not against the flick distance');
+  }
+
+  {
+    check('a short drag out falls back open', navSettle('close', -30, W, MIN) === true);
+    check('a flick out past the minimum closes', navSettle('close', -(MIN + 1), W, MIN) === false);
+    check('dragged past halfway out, it closes', navSettle('close', -(W * 0.6), W, MIN * 20) === false);
+    check('dragged the wrong way, it stays open', navSettle('close', 80, W, MIN) === true);
+  }
+});
+</script>
+</body>
+</html>

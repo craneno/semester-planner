@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v36**.
+Schema **20**, service worker **planner-v37**.
 
 ## Working with me
 
@@ -60,6 +60,10 @@ is the pull cursor). **No book-keeping per change** — never add dirty flags or
 what we already hold — our own write, come back down the realtime channel —
 since `applyRow` calls any live row a change, and the redraw takes the caret out
 of the box being typed in. `gcal.js` tags `gcal` only when something arrived.
+**A save seen from another tab is not an edit either**: the cloud subscriber
+skips `external`, or two tabs on one device push each other's `lastSync` for
+ever, and Settings twitches with every round. A `<details>` a view builds must
+keep its open state outside the DOM (`everythingOpen`), or a sync shuts it.
 
 **The baseline is what we last *pushed*, not what state holds now.** Both ways
 round have been bugs we shipped: a row missing here is "new from the cloud"
@@ -207,30 +211,26 @@ is on the calendar — `kind` decides whether we ask for deliverables.
   would leave main in the zero-wide column and draw a blank page.
 - Quick add checks `parseLinkAdd()` **first** — a URL at the front is a bookmark
   — and `parseRange()` before `parseWhen()`, or half of "12-7" becomes a due time
-  and the rest is stuck in the title. A link's title comes from its URL alone and
-  is meant to be fixed by hand; only `http`/`https` are stored, or a saved
+  and the rest is stuck in the title. Only `http`/`https` are stored, or a saved
   `javascript:` URL would run as the app.
 - **A wall-clock time needs the zone it was written in.** Every `area.schedule`
   slot carries `tz`; `scheduleDrift()` spots a device that has moved and
   `shiftSchedules()` rewrites the times, carrying the weekday across midnight.
-  The stamp is the answer as well as the question — it stops a second device
-  asking the same thing. `state.events` holds wall clock worked out at fetch
-  time, so a move (`settings.tzSeen`, device-only) drops the sync token.
+  `state.events` holds wall clock worked out at fetch time, so a move
+  (`settings.tzSeen`, device-only) drops the sync token.
 - **Blocks that overlap share the width**, or the later one is drawn flat over
   the earlier. `packBlocks()` is plain maths — clumps of things that touch, a
   column each, `LAP` running all but the last under its neighbour; `applyLanes()`
-  writes it as `--lane-x/w/z`. Too narrow for both, a short block keeps its name,
-  not its time.
+  writes it as `--lane-x/w/z`.
 - Capture's **Enter must stay the shortest way out** — an unfiled note, never a
   question. There is no Notes page: `unfiledQueue()` on Overview, `noteCard()` on
   the area's page; delete either and captures have nowhere to show.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no deps, 852 checks, and `tests/` is
-left out of the deploy. A file holds several suites, and reports to
-`tests/index.html` **once the last one has finished** — taking the first hid a
-failure in a later one.
+Serve the repo, open `/tests/`. No runner, no deps, 873 checks, and `tests/` is
+left out of the deploy. A file reports to `tests/index.html` **once its last
+suite has finished** — taking the first hid a failure in a later one.
 
 Suites drive the real modules and wipe app state, so **both guards must stay**:
 refuse to run anywhere but localhost, and put `localStorage` back afterwards,
@@ -241,7 +241,7 @@ and ask for few, since each instance sets off a `save()` that lands on the next
 one's fixture. A fresh instance has its own `state`, so a suite that pokes state
 *and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` — once per page,
 since `import()` caches. To add a field to a task: `upsertItem()`, a fallback in
-`migrate()`, a row in `js/editor.js`. Sync ships whatever shape it finds.
+`migrate()`, a row in `js/editor.js`.
 
 ## House rules
 
