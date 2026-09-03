@@ -64,7 +64,7 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     Object.assign(state.settings.cloud, {
       url: 'https://fake.supabase.co', anonKey: 'anon', enabled: true, cursor: '', lastSync: null
     });
-    localStorage.removeItem(`semesterPlanner.cloudBase.${USER}`);
+    C.resetLocalSyncState();   // the key on disk, and the copy cloud.js keeps in memory
   }
 
   function fresh(seed) {
@@ -211,6 +211,25 @@ suite('Cloud sync — delete durability', async ({ check }) => {
   // stand down before the harness restores localStorage
   state.settings.cloud.enabled = false;
   C.stop();
+});
+
+suite('Cloud sync — the baseline is small', async ({ check }) => {
+  /* The baseline used to keep every row's whole JSON as its "hash", one
+     copy of the store beside the store. On a phone that ran localStorage
+     out of room, the baseline stopped saving, and every sync pushed
+     everything. A hash is a few characters now. */
+  const { rowHash } = await import('../js/cloud.js');
+  const row = { id: 'i1', title: 'Read chapter 3', plan: { date: '2026-09-03', start: '09:00', mins: 60 }, notes: 'x'.repeat(2000) };
+
+  check('a hash is short', rowHash(row).length < 24, rowHash(row));
+  check('...whatever the row holds', rowHash({ ...row, notes: 'y'.repeat(50000) }).length < 24);
+  check('the same row hashes the same', rowHash(row) === rowHash(JSON.parse(JSON.stringify(row))));
+  check('one changed letter is a different hash', rowHash(row) !== rowHash({ ...row, title: 'Read chapter 4' }));
+  check('a tick is a different hash', rowHash({ ...row, done: false }) !== rowHash({ ...row, done: true }));
+  check('an empty row still has one', typeof rowHash({}) === 'string' && rowHash({}).length > 0);
+  const many = new Set();
+  for (let i = 0; i < 5000; i++) many.add(rowHash({ ...row, title: 'Task ' + i }));
+  check('five thousand near-identical rows do not collide', many.size === 5000, String(many.size));
 });
 </script>
 </body>

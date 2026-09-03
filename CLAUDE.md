@@ -82,28 +82,28 @@ know every kind that carries one, and **`migrate()` must carry `updatedAt`
 through** — the area normaliser did not, which left every area with no clock at
 all. Postgres has the last word: `planner_rows_keep_newest` drops a write older
 than the row it lands on (`supabase/upgrade.sql`; a delete still passes, being
-its own decision).
+its own decision). **The baseline is a short hash per row** (cyrb53), held in
+memory as well as localStorage: as whole JSON it filled a phone, the write
+failed quietly, and a full push a second followed. `AGREED` is schema *and*
+hash shape, so a baseline of the old shape is thrown away too.
 
 **Sync is fan-out, not safety.** An upsert keeps no history and reaches every
 device in seconds. `keepBackups()` copies the raw state *before `migrate()`
 reads it* — one a day, five kept, plus one named `before-v<n>` the moment an
-upgrade is about to run. `events`/`outbox` are left out (rebuilt from Google,
-and most of the bytes), and the copies sit under their own keys so nothing
-syncable can reach them.
+upgrade is about to run. `events`/`outbox` are left out, and the copies sit
+under their own keys, out of sync's reach.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
-anything off the list stays on the device — that is how `railHidden` and
-`tzSeen` stay put. Postgres only allows the row kinds it was built with —
-`area, item, note, card, meta` — so **a new kind needs an `ALTER` the user has
-to run** (`supabase/upgrade.sql`, safe to run twice, named by
-`describeSyncError()`). Links, the wishlist, sprints, habits and each day's
-ticks (`habitlog:<date>`) are rows of their own since schema 20, each with a
-clock in `rowStamp()`; `meta` is only the semester and `SYNCED_SETTINGS`, and
-`applyRow` **ignores** the lists an old device still sends in it. `push()`
-reads back what the server kept: a row that comes back different was refused
-by the trigger, and is taken up here, its hash recorded, or it would be pushed
-again for ever.
+anything off the list stays on the device. Postgres only allows the row kinds
+it was built with, so **a new kind needs an `ALTER` the user has to run**
+(`supabase/upgrade.sql`, safe to run twice, named by `describeSyncError()`).
+Links, the wishlist, sprints, habits and each day's ticks (`habitlog:<date>`)
+are rows of their own since schema 20, each with a clock in `rowStamp()`;
+`meta` is only the semester and `SYNCED_SETTINGS`, and `applyRow` **ignores**
+the lists an old device still sends in it. `push()` reads back what the server
+kept: a row that comes back different was refused by the trigger, and is taken
+up here, its hash recorded, or it would be pushed again for ever.
 
 ## Data model
 
@@ -186,7 +186,9 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 - `restoreDayScroll()` runs **right after append, in the same tick**:
   `scrollTop` does nothing before layout, and rAF never fires in a background
-  tab, which is exactly when a restored session draws.
+  tab, which is exactly when a restored session draws. **A redraw under a
+  finger loses the touch**: the node it began on is gone, so `navigate()`
+  waits while `body.nav-dragging`, and a stuck menu settles on the next touch.
 - Both drags — `dragCreate()`, `dragSpan()` — fire only on the **empty grid
   itself**, never on a block in it, never on touch (there the drag scrolls);
   `pointercancel` and Escape must not open the prompt. `dragBlock()` is the
@@ -197,14 +199,12 @@ is on the calendar — `kind` decides whether we ask for deliverables.
   `HOLD_MS` picks it up, and moving before that hands the touch back to the
   scroller — so `.blk` keeps `touch-action: pan-x pan-y` (`none` would let a
   block eat the scroll) and `dragBlock` takes it, with `preventDefault()` on
-  `touchmove`, only once the hold is out. On touch the mode is always `move`: an
-  8px resize edge is finer than a fingertip, and the sidebar's swipe stays at the
-  left edge for the same reason.
+  `touchmove`, only once the hold is out. On touch the mode is always `move`:
+  an 8px resize edge is finer than a fingertip.
 - **Pixels per hour come from CSS, never a number in the JS.** `--hour-h` and
-  `--day-hour-h` draw the gridlines; `cssPx()` places the blocks. A hard-coded 52
-  put every block most of an hour below its own line on a phone, where the media
-  query makes the hour 46. Crossing that breakpoint redraws, or the layout maths
-  stays that of the size it was born in.
+  `--day-hour-h` draw the gridlines; `cssPx()` places the blocks. A hard-coded
+  52 put every block an hour off on a phone, where the hour is 46. Crossing
+  that breakpoint redraws, or the maths stays that of the size it was born in.
 - **Never size a textarea that has no width.** One measured at zero wraps every
   word onto its own line and reports tens of thousands of pixels; `fitBoxes()`
   watches width only. `body.rail-hidden` makes `#app` **one column** — `0 1fr`
@@ -228,7 +228,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no deps, 873 checks, and `tests/` is
+Serve the repo, open `/tests/`. No runner, no deps, 888 checks, and `tests/` is
 left out of the deploy. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one.
 

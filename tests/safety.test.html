@@ -106,6 +106,20 @@ suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
   check('our own write coming down the channel does not start a sync',
     /payload\?\.new[\s\S]{0,200}currentHashes\(\)\[key\(r\.kind, r\.id\)\] === hash\(r\.data\)\) return;/.test(src),
     'a round trip and a status flicker for nothing');
+
+  // The baseline must survive localStorage refusing it. On a full phone the
+  // write failed quietly, every sync then pushed the whole store, and each
+  // push came back down the channel as the next sync — one a second.
+  check('the baseline is held in memory as well as on disk',
+    /mem\.uid === cloud\.userId && mem\.has\) return mem\.base/.test(src),
+    'a baseline that did not save turns one push into a push a second');
+  check('...and a write that fails says so', /cloud\.storageFull = true/.test(src),
+    'so Settings can say why the device is busy');
+  check('the hash is short, not the row’s JSON', /Math\.imul\(h1 \^ ch/.test(src) && !/const hash = \(data\) => JSON\.stringify/.test(src),
+    'the old baseline was a second copy of the store, and it is what filled the phone');
+  check('a baseline of the old shape is thrown away like an old schema',
+    /AGREED = `\$\{SCHEMA_VERSION\}\/h2`/.test(src) && /baselineSchema\(\) !== AGREED/.test(src),
+    'whole-JSON hashes never match short ones, and every row would look edited');
 });
 
 suite('Safety — a copy this device keeps', async ({ check }) => {

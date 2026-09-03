@@ -66,7 +66,13 @@ export function go(key) {
 
 const isCurrent = (kind, id) => current.kind === kind && current.id === id;
 
+/* A redraw under a finger that is dragging the menu replaces the node the
+   touch began on, and the browser sends no more of that touch to a node that
+   is gone — the menu was left stuck halfway. So a redraw waits for the
+   finger to lift; settle() runs the one that was held. */
+let redrawHeld = false;
 export function navigate() {
+  if (document.body.classList.contains('nav-dragging')) { redrawHeld = true; return; }
   sweep();
   current = route();
   paintChrome();
@@ -270,9 +276,10 @@ const SWIPE = 52;     // how far it must travel to count
 function wireNavSwipe() {
   const phone = () => matchMedia('(max-width: 860px)').matches;
   const side = $('#sidebar'), scrim = $('#nav-scrim');
-  let x0 = 0, y0 = 0, job = null, live = false, w = 0, dx = 0;
+  let x0 = 0, y0 = 0, job = null, live = false, w = 0, dx = 0, stale = null;
 
   const settle = () => {
+    clearTimeout(stale);
     if (job && live) {
       side.classList.remove('dragging');
       document.body.classList.remove('nav-dragging');
@@ -281,9 +288,14 @@ function wireNavSwipe() {
       setSidebar(navSettle(job, dx, w, SWIPE));
     }
     job = null; live = false;
+    if (redrawHeld) { redrawHeld = false; navigate(); }
   };
+  // the end of a touch can go missing (see navigate), so a menu left
+  // mid-way settles on the next touch, or on its own after a moment
+  const arm = () => { clearTimeout(stale); stale = setTimeout(settle, 2500); };
 
   document.addEventListener('touchstart', (e) => {
+    if (live) settle();
     job = null; live = false; dx = 0;
     if (!phone() || e.touches.length !== 1) return;
     const t = e.touches[0];
@@ -309,6 +321,7 @@ function wireNavSwipe() {
     const { x, t } = navSlide(job, dx, w);
     side.style.transform = `translateX(${x}px)`;
     scrim.style.opacity = String(t);
+    arm();
   }, { passive: true });
 
   document.addEventListener('touchend', settle, { passive: true });

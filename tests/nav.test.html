@@ -60,6 +60,20 @@ suite('Sidebar swipe — following the finger', async ({ check }) => {
     check('dragged past halfway out, it closes', navSettle('close', -(W * 0.6), W, MIN * 20) === false);
     check('dragged the wrong way, it stays open', navSettle('close', 80, W, MIN) === true);
   }
+
+  /* ---- a redraw under the finger ---- */
+
+  {
+    // A sync's redraw replaced the node the touch began on, and the browser
+    // sends no more of that touch to a node that is gone: the menu stuck
+    // halfway. Checked where it lives, in app.js.
+    const src = await fetch('../js/app.js').then((r) => r.text());
+    check('a redraw waits while a finger holds the menu',
+      /nav-dragging'\)\) \{ redrawHeld = true; return; \}/.test(src));
+    check('...and runs once the finger lifts', /if \(redrawHeld\) \{ redrawHeld = false; navigate\(\); \}/.test(src));
+    check('a menu left mid-way settles on the next touch', /if \(live\) settle\(\);/.test(src));
+    check('...or on its own after a moment', /stale = setTimeout\(settle, 2500\)/.test(src));
+  }
 });
 </script>
 </body>

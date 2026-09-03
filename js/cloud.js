@@ -33,7 +33,8 @@ export const cloud = {
   message: '',
   email: null,
   userId: null,
-  live: false         // realtime channel is subscribed
+  live: false,        // realtime channel is subscribed
+  storageFull: false  // the baseline could not be written to localStorage
 };
 
 const listeners = new Set();
@@ -143,20 +144,52 @@ async function adoptSession(session) {
 
 /* ---------------- baseline ---------------- */
 
-const hash = (data) => JSON.stringify(data);
+/* A short hash of a row's JSON, never the JSON itself. The baseline keeps one
+   per row in localStorage, and keeping every row's whole JSON there put a
+   phone over its quota: the baseline then failed to save, quietly, so every
+   sync pushed the whole store, and every push came back down the channel as
+   one more sync — one a second, for as long as the app was open. cyrb53. */
+function hash(data) {
+  const str = JSON.stringify(data);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(36) + '.' + (h1 >>> 0).toString(36);
+}
+export { hash as rowHash };
 const key = (kind, id) => `${kind}:${id}`;
 
 function loadBaseline() {
   if (!cloud.userId) return null;
+  if (mem.uid === cloud.userId && mem.has) return mem.base;
   try {
     const raw = localStorage.getItem(BASE_KEY(cloud.userId));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
+/* The baseline lives here as well as in localStorage. A write there can fail
+   — a full phone — and a baseline that did not save is what turns one push
+   into a push a second. Here it holds for the session at least, and
+   `storageFull` lets Settings say why. */
+let mem = { uid: null, has: false, base: null, schema: null };
+
 function storeBaseline(map) {
   if (!cloud.userId) return;
-  try { localStorage.setItem(BASE_KEY(cloud.userId), JSON.stringify(map)); } catch { /* quota */ }
+  mem = { ...mem, uid: cloud.userId, has: true, base: map };
+  try {
+    if (map) localStorage.setItem(BASE_KEY(cloud.userId), JSON.stringify(map));
+    else localStorage.removeItem(BASE_KEY(cloud.userId));
+    cloud.storageFull = false;
+  } catch (e) {
+    cloud.storageFull = true;
+    console.warn('cloud: the baseline did not save', e);
+  }
 }
 
 /* An upgrade is not an edit.
@@ -168,13 +201,19 @@ function storeBaseline(map) {
    under is recorded, and when it moves we throw the baseline away: with none,
    the cloud wins every row, and the new shape goes up only after we have
    agreed with the server about what it holds. */
+// the schema, and the shape of the hash: a baseline of whole-JSON "hashes"
+// from before h2 would call every row edited, which is the very thing this
+// guards against, so it is thrown away the same as one from an old schema
+const AGREED = `${SCHEMA_VERSION}/h2`;
 const baselineSchema = () => {
   if (!cloud.userId) return null;
-  try { return Number(localStorage.getItem(SCHEMA_KEY(cloud.userId))) || null; } catch { return null; }
+  if (mem.uid === cloud.userId && mem.schema) return mem.schema;
+  try { return localStorage.getItem(SCHEMA_KEY(cloud.userId)) || null; } catch { return null; }
 };
 function storeSchema() {
   if (!cloud.userId) return;
-  try { localStorage.setItem(SCHEMA_KEY(cloud.userId), String(SCHEMA_VERSION)); } catch { /* quota */ }
+  mem = { ...mem, uid: cloud.userId, schema: AGREED };
+  try { localStorage.setItem(SCHEMA_KEY(cloud.userId), AGREED); } catch { /* storeBaseline has said so */ }
 }
 
 function currentHashes() {
@@ -198,7 +237,7 @@ export async function sync({ full = false } = {}) {
   try {
     const c = await client();
     // an upgrade since the last sync counts as a full one: adopt, then send
-    const upgraded = baselineSchema() !== SCHEMA_VERSION;
+    const upgraded = baselineSchema() !== AGREED;
     if (full || upgraded) { cfg().cursor = ''; storeBaseline(null); }
 
     const cursorAfterPull = await pull(c);
@@ -420,6 +459,7 @@ export function stop() {
 /** Forget this device's sync bookkeeping without touching the data itself. */
 export function resetLocalSyncState() {
   if (cloud.userId) { try { localStorage.removeItem(BASE_KEY(cloud.userId)); } catch { /* ignore */ } }
+  mem = { uid: null, has: false, base: null, schema: null };
   cfg().cursor = '';
   save();
   resetClient();

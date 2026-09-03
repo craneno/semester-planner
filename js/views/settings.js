@@ -393,9 +393,22 @@ function release(r) {
    which is when every row changes shape at once. They never leave the device
    and nothing that syncs can reach them. */
 
+/** Bytes this origin holds in localStorage — a phone's quota is about 5 MB. */
+function storageUsed() {
+  let n = 0;
+  try {
+    for (const k of Object.keys(localStorage)) n += (k.length + (localStorage.getItem(k) || '').length) * 2;
+  } catch { /* blocked */ }
+  return n;
+}
+
 function backupList() {
   const backups = listBackups();
-  if (!backups.length) return null;
+  const mb = (storageUsed() / 1048576).toFixed(1);
+  const room = h('p', { style: { fontSize: '12.5px', color: C.cloud.storageFull ? 'var(--danger)' : 'var(--ink-3)', margin: '6px 0 0' } },
+    `${mb} MB held on this device.`
+    + (C.cloud.storageFull ? ' That is all it will hold: sync cannot remember what it sent, so it sends everything. Save a copy, then free some space.' : ''));
+  if (!backups.length) return room;
 
   const rows = backups.map((b) => {
     const pre = b.label.startsWith('before-');
@@ -421,7 +434,7 @@ function backupList() {
     h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 6px' } },
       'Taken before anything is read, so a bad sync cannot reach them. Save one, '
       + 'then Restore from file to put it back.'),
-    ...rows);
+    ...rows, room);
 }
 
 /* The zone a class schedule is written in.

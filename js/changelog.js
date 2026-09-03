@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v38', date: '2026-09-02',
+    title: 'A sync that would not stop',
+    notes: [
+      'Sync remembered what it had sent by keeping every row’s whole text on the device. On a phone that ran the device out of room, the memory quietly failed to save, every sync sent everything, and every send came back as one more sync — one a second. It keeps a short fingerprint per row now, holds it in memory as well, and Settings says how much room the app is using.',
+      'The sidebar no longer sticks halfway if the page is redrawn under your finger. A redraw waits until you let go, and a menu left mid-way settles on the next touch or after a moment.'
+    ]
+  },
+  {
     version: 'v37', date: '2026-09-02',
     title: 'The menu follows your finger',
     notes: [
