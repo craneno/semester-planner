@@ -88,6 +88,10 @@ export function describeSyncError(err) {
       + 'and run supabase/upgrade.sql from the repo, then sync again.';
   }
   // 42P01 is undefined_table: the history table is newer than the database
+  if (/planner_feeds/.test(text)) {
+    return 'This database has no room for a feed link yet. Open the Supabase SQL editor '
+      + 'and run supabase/upgrade.sql from the repo.';
+  }
   if (err?.code === '42P01' || /planner_rows_history/.test(text)) {
     return 'This database keeps no history yet. Open the Supabase SQL editor '
       + 'and run supabase/upgrade.sql from the repo.';
@@ -595,6 +599,47 @@ export function restore(row) {
   if (!applyRow({ kind: row.kind, id: row.id, data, deleted: false })) return false;
   commit(null, { source: 'restore' });
   return true;
+}
+
+/* ---------------- the Canvas feed ----------------
+   The feed link carries a per-user token, so it is kept in one row on the
+   server (planner_feeds) and never in state or localStorage. The canvas-feed
+   Edge Function fetches it as you, since Instructure sends no CORS headers
+   and a page here cannot (supabase/functions/canvas-feed). */
+const FEEDS = 'planner_feeds';
+
+/** When the saved link was last set, or null with none saved. */
+export async function feedSaved() {
+  const c = await client();
+  const { data, error } = await c.from(FEEDS).select('updated_at').eq('user_id', cloud.userId).maybeSingle();
+  if (error) throw error;
+  return data?.updated_at || null;
+}
+
+/** Save the link; with none, forget it. */
+export async function saveFeedUrl(url) {
+  const c = await client();
+  const q = url
+    ? c.from(FEEDS).upsert({ user_id: cloud.userId, url, updated_at: new Date().toISOString() })
+    : c.from(FEEDS).delete().eq('user_id', cloud.userId);
+  const { error } = await q;
+  if (error) throw error;
+}
+
+/** The feed's text, or null when no link is saved. Throws when the function is not there or Canvas will not answer. */
+export async function fetchFeed() {
+  const c = await client();
+  const { data } = await c.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('Sign in first.');
+  const res = await fetch(cfg().url.replace(/\/+$/, '') + '/functions/v1/canvas-feed', {
+    headers: { Authorization: 'Bearer ' + token, apikey: cfg().anonKey }
+  });
+  if (res.status === 204) return null;
+  const text = await res.text();
+  if (res.status === 404) throw new Error('The canvas-feed function is not deployed yet. From the repo: supabase functions deploy canvas-feed');
+  if (!res.ok) throw new Error(text || `Canvas feed: ${res.status}`);
+  return text;
 }
 
 /** Forget this device's sync bookkeeping without touching the data itself. */

@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v44', date: '2026-09-03',
+    title: 'Canvas, by itself',
+    notes: [
+      'Paste your Canvas calendar feed link under Settings → Canvas and the app brings your assignments in by itself: once a day on each device, and whenever you press Refresh now. The link is kept in your own row on the server, never on the device, and a small function there does the fetching, since Canvas will not talk to a page directly.',
+      'Needs supabase/upgrade.sql run once more, and the function deployed once: supabase functions deploy canvas-feed. The file import still works as before.'
+    ]
+  },
+  {
     version: 'v43', date: '2026-09-03',
     title: 'Say when, say how often',
     notes: [

@@ -4,12 +4,14 @@
 // assignment becomes a deadline in the right course. The parser is plain
 // text work with no state in it; the import is the only part that writes.
 //
-// The feed is brought in as a file rather than fetched: Instructure sends no
-// CORS headers, so a page on another origin cannot read the URL directly.
-// The URL also carries a per-user token, and a file is a thing that never has
-// to be stored anywhere.
+// The feed comes in two ways. As a file, which needs nothing stored anywhere.
+// Or by itself: Instructure sends no CORS headers, so a page here cannot read
+// the feed URL, and the URL carries a per-user token — so the link is kept in
+// one row on the server and the canvas-feed Edge Function reads Canvas for
+// us, once a day per device (refreshIfDue) and whenever asked (refreshFeed).
 
 import { state, commit, upsertItem, areaById } from './store.js';
+import * as C from './cloud.js';
 
 /* ---------------- the text ---------------- */
 
@@ -122,12 +124,19 @@ export const isAssignment = (ev) => /assignment/i.test(ev.uid || '');
  *
  * @returns {{added:number, updated:number, unfiled:string[], skipped:number}}
  */
-export function importCanvas(text) {
+export function importCanvas(text, meta) {
+  let res;
+  commit(() => { res = applyFeed(text); }, meta);
+  return res;
+}
+
+/** The import itself, inside whatever commit the caller is in. */
+function applyFeed(text) {
   const events = parseIcs(text);
   const res = { added: 0, updated: 0, unfiled: [], skipped: 0 };
   const seen = new Set();
 
-  commit(() => {
+  {
     for (const ev of events) {
       if (!isAssignment(ev) || !ev.start || !ev.uid) { res.skipped++; continue; }
       if (seen.has(ev.uid)) continue;
@@ -152,6 +161,53 @@ export function importCanvas(text) {
       res.added++;
       if (!areaId || !areaById(areaId)) res.unfiled.push(course ? `${title} — ${course}` : title);
     }
-  });
+  }
   return res;
+}
+
+/* ---------------- by itself ---------------- */
+
+export const FEED_EVERY = 24 * 60 * 60 * 1000;
+
+/** Only a Canvas feed link is worth saving: https, on a Canvas host. The function checks the same. */
+export function isFeedUrl(raw) {
+  let u;
+  try { u = new URL(String(raw || '').trim()); } catch { return false; }
+  if (u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase();
+  return host.endsWith('.instructure.com') || host.startsWith('canvas.') || host.includes('.canvas.');
+}
+
+/** A day since this device last brought the feed in, or never. */
+export function feedDue(now = Date.now()) {
+  const at = state.settings.canvasFeedAt;
+  return !at || !(now - Date.parse(at) < FEED_EVERY);
+}
+
+let inFlight = null;
+
+/**
+ * Fetch the feed and bring it in: one commit, tagged `canvas`, so the page
+ * redraws once and it is not an undo step. Resolves to the import's result,
+ * or null when no link is saved. A second call while one is out joins it.
+ */
+export function refreshFeed({ fetch = C.fetchFeed, now = Date.now() } = {}) {
+  if (inFlight) return inFlight;
+  inFlight = (async () => {
+    const text = await fetch();
+    let res = null;
+    commit(() => {
+      if (text != null) res = applyFeed(text);
+      state.settings.canvasFeedAt = new Date(now).toISOString();
+    }, { source: 'canvas' });
+    return res;
+  })().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+/** Once a day, when signed in. A failure is logged and nothing is stamped, so the next open tries again. */
+export async function refreshIfDue(opts = {}) {
+  if (!C.isSignedIn() || !feedDue(opts.now)) return null;
+  try { return await refreshFeed(opts); }
+  catch (err) { console.warn('canvas feed', err); return null; }
 }

@@ -124,3 +124,22 @@ create trigger planner_rows_keep_history
   after update or delete on public.planner_rows
   for each row
   execute function public.planner_rows_keep_history();
+
+-- Your Canvas calendar feed link, so the app can bring assignments in by
+-- itself. The link carries a per-user token, so it lives here, in your own
+-- row, and never on a device; only the canvas-feed Edge Function reads it,
+-- as you (supabase/functions/canvas-feed).
+create table if not exists public.planner_feeds (
+  user_id    uuid        primary key references auth.users(id) on delete cascade,
+  url        text        not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.planner_feeds enable row level security;
+
+drop policy if exists "planner_feeds owner" on public.planner_feeds;
+create policy "planner_feeds owner"
+  on public.planner_feeds
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

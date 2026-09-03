@@ -142,7 +142,7 @@ export function commit(fn, meta = {}) {
    restore — clears the stack: history from before the world moved is not
    safe to replay over it. */
 const UNDO_KEYS = ['semester', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
-const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone']);
+const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas']);
 export const undoSettings = { max: 10, coalesceMs: 800 };
 let undoStack = [], redoStack = [], lastLocalAt = 0;
 

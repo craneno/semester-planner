@@ -10,7 +10,7 @@
 import { suite } from './harness.js';
 
 suite('Cloud sync — delete durability', async ({ check }) => {
-  const { state, commit, subscribe, upsertItem, deleteItem, itemById, applyRow } = await import('../js/store.js');
+  const { state, commit, subscribe, upsertItem, deleteItem, itemById, applyRow, snapshotRows } = await import('../js/store.js');
   const C = await import('../js/cloud.js');
 
   /* A stand-in for Supabase: one in-memory table that stamps synced_at on write,
@@ -30,24 +30,32 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const api = {
       table, writes: 0,
       history: [],       // what .from('planner_rows_history') answers
+      feed: null,        // the one planner_feeds row, if saved
       failNext: null,    // an error the next query answers with, once
       auth: {
         sessions: 0, refreshes: 0,
-        async getSession() { api.auth.sessions++; return { data: { session: api.auth.none ? null : { user: { id: USER } } } }; },
+        async getSession() { api.auth.sessions++; return { data: { session: api.auth.none ? null : { user: { id: USER }, access_token: 'tok' } } }; },
         async refreshSession() { api.auth.refreshes++; return { data: { session: { user: { id: USER } } } }; }
       },
       from(name) {
         const q = {
           _table: name,
-          _gt: null, _up: null,
+          _gt: null, _up: null, _del: false,
           select() { return q; },
           gt(_col, val) { q._gt = val; return q; },
+          eq() { return q; },
           order() { return q; },
           limit() { return q; },
+          maybeSingle() { return q; },
+          delete() { q._del = true; return q; },
           upsert(list) { q._up = list; return q; },
           then(res) {
             if (api.failNext) { const err = api.failNext; api.failNext = null; res({ data: null, error: err }); return; }
-            if (q._up) {
+            if (q._table === 'planner_feeds') {
+              if (q._up) api.feed = { ...q._up };
+              else if (q._del) api.feed = null;
+              res({ data: q._up || q._del ? null : (api.feed ? { updated_at: api.feed.updated_at } : null), error: null });
+            } else if (q._up) {
               const data = [];
               for (const r of q._up) {
                 const i = table.findIndex((x) => x.kind === r.kind && x.id === r.id);
@@ -325,6 +333,43 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('remote tombstone deletes locally', !itemById('gone'), '(still here)');
   }
 
+  /* The Canvas feed link carries a token, so it is one row of its own on
+     the server, never in state or a snapshot; the canvas-feed function is
+     what reads it. */
+  async function tFeedRow() {
+    const fake = fresh();
+    check('no link saved reads as none', (await C.feedSaved()) === null);
+    await C.saveFeedUrl('https://x.instructure.com/feeds/calendars/user_1.ics');
+    check('the link goes to its own row, as this user', fake.feed?.user_id === USER && /instructure/.test(fake.feed.url), JSON.stringify(fake.feed));
+    check('...and reads back as saved', typeof (await C.feedSaved()) === 'string');
+    check('...and is nowhere in a snapshot', !JSON.stringify(snapshotRows()).includes('instructure'));
+
+    const real = globalThis.fetch;
+    const calls = [];
+    let answer = { status: 204, body: '' };
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, init });
+      return { status: answer.status, ok: answer.status < 300, text: async () => answer.body };
+    };
+    const fails = async () => { try { await C.fetchFeed(); return null; } catch (e) { return e; } };
+    try {
+      check('no link on the server is 204, and null here', (await C.fetchFeed()) === null);
+      check('...asked of the function, as this user',
+        /\/functions\/v1\/canvas-feed$/.test(calls[0]?.url) && calls[0].init.headers.Authorization === 'Bearer tok', JSON.stringify(calls[0]));
+      answer = { status: 200, body: 'BEGIN:VCALENDAR' };
+      check('the feed text comes through', (await C.fetchFeed()) === 'BEGIN:VCALENDAR');
+      answer = { status: 404, body: '{"code":"NOT_FOUND"}' };
+      check('a function not deployed says how to deploy it', /deploy canvas-feed/.test((await fails())?.message));
+      answer = { status: 502, body: 'Canvas answered 500' };
+      check('any other failure comes through as the function said it', (await fails())?.message === 'Canvas answered 500');
+    } finally { globalThis.fetch = real; }
+
+    await C.saveFeedUrl('');
+    check('forgetting the link deletes the row', fake.feed === null && (await C.feedSaved()) === null);
+    check('a missing feeds table names the file to run',
+      /upgrade\.sql/.test(C.describeSyncError({ code: '42P01', message: 'relation "public.planner_feeds" does not exist' })));
+  }
+
   for (const [name, fn] of [
     ['delete beats a live pull', tDeleteBeatsLivePull],
     ['delete during push', tDeleteDuringPush],
@@ -336,7 +381,8 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['the loop breaker', tLoopBreaker],
     ['history and restore', tRestore],
     ['resume refreshes first', tResume],
-    ['an expired token', tExpiredToken]
+    ['an expired token', tExpiredToken],
+    ['the feed row', tFeedRow]
   ]) {
     await fn();
   }

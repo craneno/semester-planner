@@ -44,6 +44,9 @@ export const DEFAULTS = () => {
       // the zone this device last opened in. Device-local by staying out of
       // SYNCED_SETTINGS: a phone that has travelled is not news for the laptop
       tzSeen: '',
+      // when this device last brought the Canvas feed in. Device-only too:
+      // each device fetches for itself, once a day
+      canvasFeedAt: '',
       gcal: {
         clientId: '',
         calendarId: 'primary',

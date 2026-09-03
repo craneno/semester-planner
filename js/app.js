@@ -20,6 +20,7 @@ import { renderWishlist } from './views/wishlist.js';
 import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
 import * as C from './cloud.js';
+import { refreshIfDue } from './canvas.js';
 
 /* Plain views. Categories and single areas are routed separately — they are
    data, not screens, so they cannot be listed here. */
@@ -597,7 +598,8 @@ function boot() {
     paintNextUp();
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
       || meta?.source === 'editor' || meta?.source === 'restore'
-      || meta?.source === 'undo' || meta?.source === 'redo') navigate();
+      || meta?.source === 'undo' || meta?.source === 'redo'
+      || meta?.source === 'canvas') navigate();
   });
 
   navigate();
@@ -605,6 +607,9 @@ function boot() {
   // Google Calendar and Supabase, each only if the user has set it up
   G.start().catch((e) => console.warn('gcal', e));
   C.start().catch((e) => console.warn('cloud', e));
+  // the Canvas feed, once a day: after any sync that ends well, so a device
+  // that has just woken or just signed in gets its turn
+  C.onCloud((c) => { if (c.status === 'ready') refreshIfDue(); });
 
   askAboutZone();
 

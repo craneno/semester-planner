@@ -165,6 +165,57 @@ suite('Canvas — the import', async ({ check }) => {
       importCanvas(FEED + '\r\n' + FEED).added === 0 && s.state.items.filter((t) => t.canvasId).length === 2);
   }
 });
+
+/* The feed fetched for you. What has to hold: only a Canvas link is worth
+   saving; the fetch goes once a day per device and not again within it; a
+   failure leaves no stamp, so the next open tries again; no link saved is
+   nothing to do, but the day is stamped; signed out, nothing goes out; and
+   what came in is not an undo step. */
+suite('Canvas — by itself, once a day', async ({ check }) => {
+  const { refreshIfDue, refreshFeed, feedDue, isFeedUrl, FEED_EVERY } = await import('../js/canvas.js');
+  const C = await import('../js/cloud.js');
+
+  check('a feed link is https on a Canvas host',
+    isFeedUrl('https://northeastern.instructure.com/feeds/calendars/user_abc.ics') && isFeedUrl('https://canvas.school.edu/feeds/x.ics'));
+  check('...and nothing else', !isFeedUrl('http://northeastern.instructure.com/x.ics') && !isFeedUrl('https://evil.com/?instructure.com')
+    && !isFeedUrl('https://instructure.com.evil.com/x') && !isFeedUrl('javascript:alert(1)') && !isFeedUrl(''));
+  check('the day stamp stays on the device', !s.SYNCED_SETTINGS.includes('canvasFeedAt'), 'each device fetches for itself');
+
+  for (const t of s.state.items.filter((t) => t.canvasId)) s.deleteItem(t.id);
+  s.commit(() => { s.state.settings.canvasFeedAt = ''; });
+  let calls = 0;
+  const fetch = async () => { calls++; return FEED; };
+  const t0 = Date.parse('2026-09-03T12:00:00Z');
+
+  check('signed out, nothing goes out', (await refreshIfDue({ fetch, now: t0 })) === null && calls === 0);
+
+  C._setClient({}, { userId: 'u-canvas', email: 't@x' });
+  check('due when never fetched', feedDue(t0));
+  const res = await refreshIfDue({ fetch, now: t0 });
+  check('signed in and due, it fetches and brings the feed in', calls === 1 && res?.added === 2, JSON.stringify(res));
+  check('...and stamps the time', s.state.settings.canvasFeedAt === new Date(t0).toISOString());
+  check('an hour later it does nothing', (await refreshIfDue({ fetch, now: t0 + 3600e3 })) === null && calls === 1);
+  check('a day later it goes again', (await refreshIfDue({ fetch, now: t0 + FEED_EVERY }))?.updated === 2 && calls === 2);
+
+  s.commit(() => { s.state.settings.canvasFeedAt = ''; });
+  const bad = async () => { throw new Error('502'); };
+  check('a failure is swallowed and leaves no stamp, so the next open tries again',
+    (await refreshIfDue({ fetch: bad, now: t0 })) === null && s.state.settings.canvasFeedAt === '');
+  const none = async () => null;
+  check('no link saved is nothing to bring in, but the day is stamped',
+    (await refreshIfDue({ fetch: none, now: t0 })) === null && s.state.settings.canvasFeedAt !== '');
+
+  s.commit(() => { s.state.settings.canvasFeedAt = ''; });
+  check('setup: something to undo', s.canUndo());
+  let src = null;
+  const off = s.subscribe((m) => { src = m?.source; });
+  const [a, b] = await Promise.all([refreshFeed({ fetch, now: t0 }), refreshFeed({ fetch, now: t0 })]);
+  off();
+  check('what came in tells the page as canvas, in one commit', src === 'canvas');
+  check('...and is not an undo step', !s.canUndo(), 'undoing an import the app made by itself would only come back tomorrow');
+  check('two asks at once are one fetch', a === b && calls === 3);
+  C.cloud.userId = null;
+});
 </script>
 </body>
 </html>

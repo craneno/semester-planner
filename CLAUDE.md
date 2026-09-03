@@ -148,9 +148,14 @@ the old clock as stale and the next sync undoes the undo. A commit from outside
 own: redrawn, pushed, never remembered. **The small edits live in
 `js/actions.js`** — tick, move, push to tomorrow — each with an Undo of its
 own that puts the old *when* back through `upsertItem`. A Canvas
-assignment is a deadline with `canvasId` (`js/canvas.js`, brought in as a file:
-Instructure sends no CORS headers); a re-import refreshes the date and title and
-leaves the area, the tick and the notes alone.
+assignment is a deadline with `canvasId` (`js/canvas.js`); a re-import
+refreshes the date and title and leaves the area, the tick and the notes alone.
+The feed comes in as a file, or by itself: Instructure sends no CORS headers
+and the link carries a token, so the link lives in `planner_feeds` on the
+server, **never in state**, and the `canvas-feed` Edge Function
+(`supabase/functions/`) fetches it. `refreshIfDue()` runs after any sync that
+ends `ready`, once a day per device (`canvasFeedAt`, off `SYNCED_SETTINGS`),
+in one commit tagged `canvas` — redrawn, `FOREIGN` to undo.
 
 **A repeat is a rule, never copies.** `repeat` sits on the item (`js/repeat.js`
 is the plain date maths); the screens draw **occurrences**, made on the spot and
@@ -249,7 +254,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 987 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1013 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their
