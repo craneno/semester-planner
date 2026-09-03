@@ -585,7 +585,7 @@ function boot() {
     // including a block planned from a panel that must not repaint the view
     paintNextUp();
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
-      || meta?.source === 'editor') navigate();
+      || meta?.source === 'editor' || meta?.source === 'restore') navigate();
   });
 
   navigate();

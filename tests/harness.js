@@ -11,21 +11,33 @@ const LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 let nonce = 0;
 export const freshStore = () => import(`../js/store.js?t=${++nonce}`);
 
-/* A file holds as many suites as it has things to say, and they are started
-   together — so the page is not finished until the last of them is. Counted
-   rather than guessed: every suite() registers before any of them can await,
-   which is the only moment at which the number is known. Without this the
-   runner took the first suite to finish as the file's whole answer, and a
-   failure in a later one went unseen. */
+/* A file holds as many suites as it has things to say, and the page is not
+   finished until the last of them is. Counted rather than guessed: every
+   suite() registers before any of them can await, which is the only moment
+   at which the number is known. Without this the runner took the first suite
+   to finish as the file's whole answer, and a failure in a later one went
+   unseen.
+
+   They run one at a time. Started together, each suite's storeWith() seeded
+   localStorage while another's instance still had a save() in flight, and
+   the seed was clobbered — the suite passed alone and failed in the runner,
+   now and then, for months. */
 let pending = 0;
+let queue = Promise.resolve();
 const totals = { failed: 0, passed: 0 };
 
 /**
  * @param {string} title   shown at the top of the page
  * @param {(t) => Promise<void>} body  receives { check, log, freshStore }
  */
-export async function suite(title, body) {
+export function suite(title, body) {
   pending++;
+  const turn = queue.then(() => runSuite(title, body));
+  queue = turn.catch(() => {});
+  return turn;
+}
+
+async function runSuite(title, body) {
   const out = document.createElement('div');
   document.body.append(out);
   const line = (msg, cls = '') => {

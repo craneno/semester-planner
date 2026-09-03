@@ -64,3 +64,63 @@ create trigger planner_rows_keep_newest
   before update on public.planner_rows
   for each row
   execute function public.planner_rows_keep_newest();
+
+
+-- Every version a row has had, kept 30 days. An upsert keeps no history of
+-- its own, and a bad sync reaches every device in seconds; this is the way
+-- back. The app lists the last of these under Settings and can put one back.
+create table if not exists public.planner_rows_history (
+  hid bigint generated always as identity primary key,
+  user_id uuid not null,
+  kind text not null,
+  id text not null,
+  data jsonb not null,
+  deleted boolean not null default false,
+  updated_at timestamptz,
+  replaced_at timestamptz not null default now()
+);
+
+create index if not exists planner_rows_history_user_time
+  on public.planner_rows_history (user_id, replaced_at desc);
+
+alter table public.planner_rows_history enable row level security;
+
+drop policy if exists "planner_rows_history owner" on public.planner_rows_history;
+create policy "planner_rows_history owner"
+  on public.planner_rows_history
+  for select
+  using (auth.uid() = user_id);
+
+-- Runs as the table owner: the policy above lets a user read, never write,
+-- and the trigger is the only thing that writes.
+create or replace function public.planner_rows_keep_history()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- the same bytes again is not a version (a stale write that
+  -- planner_rows_keep_newest turned into a no-op lands here too)
+  if TG_OP = 'UPDATE'
+     and OLD.data = NEW.data
+     and OLD.deleted is not distinct from NEW.deleted then
+    return null;
+  end if;
+  insert into public.planner_rows_history (user_id, kind, id, data, deleted, updated_at)
+    values (OLD.user_id, OLD.kind, OLD.id, OLD.data, coalesce(OLD.deleted, false), OLD.updated_at);
+  -- now and then, sweep what is older than 30 days
+  if random() < 0.02 then
+    delete from public.planner_rows_history
+      where user_id = OLD.user_id and replaced_at < now() - interval '30 days';
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists planner_rows_keep_history on public.planner_rows;
+
+create trigger planner_rows_keep_history
+  after update or delete on public.planner_rows
+  for each row
+  execute function public.planner_rows_keep_history();

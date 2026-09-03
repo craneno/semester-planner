@@ -43,6 +43,20 @@ const FEED = [
   'END:VCALENDAR'
 ].join('\r\n');
 
+/* Seeded before either suite starts. canvas.js imports the one store, and
+   store.js reads localStorage the moment it loads — so the seed has to be in
+   place before the first suite's import() of canvas.js, or the import suite
+   below finds a store built from whatever the page held. */
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [
+    { id: 'th', name: 'Thermodynamics', category: 'course', order: 0 },
+    { id: 'gen', name: 'General', category: 'personal', order: 1 }
+  ],
+  items: [], cards: [], notes: {}
+});
+
 suite('Canvas — the feed', async ({ check }) => {
   const { parseIcs, icsWhen, splitSummary, isAssignment, matchArea } = await import('../js/canvas.js');
 
@@ -108,15 +122,6 @@ suite('Canvas — the feed', async ({ check }) => {
 });
 
 suite('Canvas — the import', async ({ check }) => {
-  const s = await sharedStoreWith({
-    version: 20,
-    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
-    areas: [
-      { id: 'th', name: 'Thermodynamics', category: 'course', order: 0 },
-      { id: 'gen', name: 'General', category: 'personal', order: 1 }
-    ],
-    items: [], cards: [], notes: {}
-  });
   const { importCanvas } = await import('../js/canvas.js');
 
   {

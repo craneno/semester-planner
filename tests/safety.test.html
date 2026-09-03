@@ -97,6 +97,20 @@ suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
   }
   log('The trigger is the only guard a bad build cannot get past.');
 
+  // An upsert has no undo. A history table filled by a trigger is the way
+  // back from a bad sync — the backups on one device are not, since the
+  // bad sync reaches every device in seconds.
+  for (const [name, sql] of [['schema.sql', schema], ['upgrade.sql', upgrade]]) {
+    check(`${name} keeps a history of every row`, /create table if not exists public\.planner_rows_history/.test(sql));
+    check(`...filled after update or delete in ${name}`,
+      /after update or delete on public\.planner_rows[\s\S]{0,80}planner_rows_keep_history/.test(sql));
+    check(`...that a user can read but never write in ${name}`,
+      /"planner_rows_history owner"[\s\S]{0,120}for select/.test(sql) && /security definer/.test(sql));
+  }
+  check('the app can read history and put a version back', /export async function history/.test(src) && /export function restore/.test(src));
+  check('...stamping it now, or the trigger would drop it as stale',
+    /data\.updatedAt = new Date\(\)\.toISOString\(\)/.test(src));
+
   // A save seen from another tab is not an edit either. The other tab pushes
   // its own; and every sync writes `lastSync`, so a push for it would have
   // two tabs on one device syncing each other for ever.

@@ -12,28 +12,27 @@ all at once, and only about what changes the work. Small calls are still yours.
 
 **Small words beat big ones.** Say it the short way — here, in commits, in code
 comments. Keep the real names exact (`syncToken`, tombstone, occurrence) and
-drop the dress-up around them. This file may run to **250 lines**; past that,
+drop the dress-up around them. This file may run to **300 lines**; past that,
 cut a sentence and say what went.
 
 ## Working on it
 
 The repo *is* the site — no build, no install: `python3 -m http.server 8000`.
-Before you push, click through the app and open **`/tests/`**; the Deploy job
-only runs `node --check`, which proves the files *parse* and nothing more.
+Before you push, click through the app and open **`/tests/`**. The Deploy job
+runs the same page headless (`tests/run.mjs`, Playwright) and stops on any
+failure, so a red suite means no deploy until it is green.
 **Bump `VERSION` in `sw.js` whenever a file in its `SHELL` changes**, add new
 modules to `SHELL`, **and add the release to `js/changelog.js` in the same
 commit**. The newest changelog entry *is* the version; `version.test.html` fails
 when it and `sw.js` disagree, or when a module we import is not cached. Install
-fetches with `cache: 'reload'`, or Pages' `max-age=600` fills the new cache with
-the very files it is meant to replace. **The fetch handler never writes to the
-cache**, so a page runs one whole deploy — refreshing file by file once ran one
-version's JS against another's CSS.
+fetches with `cache: 'reload'` (Pages' `max-age=600` would fill the new cache
+with the old files) and **the fetch handler never writes to the cache**, so a
+page runs one whole deploy, never one version's JS against another's CSS.
 
 **When a change seems not to land**, it is nearly always a cache. A hash-only
 move does not reload — `#/overview` when you are already there keeps the same
-module instances, so `location.reload()`. `http.server` sends no `Cache-Control`
-and Chrome makes up its own freshness, so serve `no-store` on a new port (a new
-origin is a clean cache). **Never check with a cache-busting query string** —
+module instances, so `location.reload()`. Serve `no-store` on a new port: a new
+origin is a clean cache. **Never check with a cache-busting query string** —
 `sw.js` matches with `ignoreSearch: true` and `fetch(cache:'reload')` still goes
 through the worker, so both only *look* like reads off the network. The truth is
 DevTools → **Bypass for network**, `await caches.keys()`, or `curl` from outside.
@@ -45,7 +44,7 @@ per-view copies: views change it in place inside `commit(() => { … })`, which
 saves (waits 120ms) and tells subscribers. Use the selectors that are already
 there (`itemById`, `itemsDueOn`, `upcoming`, `classesOn`, `dayTimeline`, …)
 instead of filtering by hand again. `commit(fn, { source })` — `app.js` redraws
-only for `external`, `gcal`, `cloud`, `editor`; tag a commit made from a
+only for `external`, `gcal`, `cloud`, `editor`, `restore`; tag one made from a
 floating panel, or the view under it will not repaint.
 
 ## Cloud sync
@@ -55,6 +54,13 @@ last good sync. Changed rows push, rows that went away leave a tombstone, and a
 clash goes to whoever wrote last, row by row (`updated_at` decides, `synced_at`
 is the pull cursor). **No book-keeping per change** — never add dirty flags or
 `markChanged()`.
+
+**Sync watches itself.** `cloud.log` is the last thirty syncs (Settings → Sync
+log); the loop breaker halts after `LOOP_MAX` pushes in a row with nothing
+edited here, and `sync({ manual })` starts it again. `pull()` hands `push()` the
+hashes it took, or every row from another device went straight back up. The
+server keeps replaced rows thirty days (`planner_rows_history`); `restore()`
+stamps a version now so the trigger takes it.
 
 **Redraw for news, not for every sync.** `pull()` drops a row that hashes to
 what we already hold — our own write, come back down the realtime channel —
@@ -89,9 +95,8 @@ own row back as "changed" for ever), held in memory as well as localStorage.
 
 **Sync is fan-out, not safety.** An upsert keeps no history and reaches every
 device in seconds. `keepBackups()` copies the raw state *before `migrate()`
-reads it* — one a day, five kept, plus one named `before-v<n>` the moment an
-upgrade is about to run. `events`/`outbox` are left out, and the copies sit
-under their own keys, out of sync's reach.
+reads it* — one a day, five kept, plus `before-v<n>` as an upgrade runs;
+`events`/`outbox` left out, and under their own keys, out of sync's reach.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
@@ -116,14 +121,13 @@ up here, its hash recorded, or it would be pushed again for ever.
 | `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror and writes waiting to go |
 
 **Only a `plan` block goes to Google Calendar.** A due date on its own is never
-pushed — the top source of "why isn't it on my calendar". An all-day plan does
-go, as `start`/`end` **dates**, the end being the morning *after*. `ITEM_TYPES`
-is four: `event`, `task`, `meeting`, `homework`; no area puts it in General.
-Each *seed* is pinned to the version that added it — `if (from < 5)`, never
+pushed — the top source of "why isn't it on my calendar". An all-day plan goes
+as `start`/`end` **dates**, the end being the morning *after*. `ITEM_TYPES` is
+`event`, `task`, `meeting`, `homework`; no area puts it in General. Each *seed*
+is pinned to the version that added it — `if (from < 5)`, never
 `< SCHEMA_VERSION`, or the next bump brings back something deleted on purpose.
-A *rename* is the other way round (`MERGED_CATEGORY`, not pinned, in
-`areaCategory()`): a dead id has to be turned into a live one every time it is
-read.
+A *rename* (`MERGED_CATEGORY` in `areaCategory()`) is not pinned: a dead id is
+turned into a live one every time it is read.
 
 **The small edits live in `js/actions.js`** — tick, move, push to tomorrow —
 each with an Undo that puts the old *when* back through `upsertItem`. A Canvas
@@ -205,14 +209,12 @@ is on the calendar — `kind` decides whether we ask for deliverables.
   `--day-hour-h` draw the gridlines; `cssPx()` places the blocks. A hard-coded
   52 put every block an hour off on a phone, where the hour is 46. Crossing
   that breakpoint redraws, or the maths stays that of the size it was born in.
-- **Never size a textarea that has no width.** One measured at zero wraps every
-  word onto its own line and reports tens of thousands of pixels; `fitBoxes()`
-  watches width only. `body.rail-hidden` makes `#app` **one column** — `0 1fr`
-  would leave main in the zero-wide column and draw a blank page.
-- Quick add checks `parseLinkAdd()` **first** — a URL at the front is a bookmark
-  — and `parseRange()` before `parseWhen()`, or half of "12-7" becomes a due time
-  and the rest is stuck in the title. Only `http`/`https` are stored, or a saved
-  `javascript:` URL would run as the app.
+- **Never size a textarea that has no width.** Measured at zero it wraps every
+  word and reports tens of thousands of pixels; `fitBoxes()` watches width only.
+  `body.rail-hidden` makes `#app` **one column**, or main sits in a zero-wide one.
+- Quick add checks `parseLinkAdd()` **first** (a URL at the front is a bookmark)
+  and `parseRange()` before `parseWhen()`, or half of "12-7" becomes a due time.
+  Only `http`/`https` are stored, or a saved `javascript:` URL would run as the app.
 - **A wall-clock time needs the zone it was written in.** Every `area.schedule`
   slot carries `tz`; `scheduleDrift()` spots a device that has moved and
   `shiftSchedules()` rewrites the times, carrying the weekday across midnight.
@@ -228,17 +230,18 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner, no deps, 897 checks, and `tests/` is
-left out of the deploy. A file reports to `tests/index.html` **once its last
-suite has finished** — taking the first hid a failure in a later one.
+Serve the repo, open `/tests/`. No runner in the page, no deps, 920 checks, and
+`tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
+suite has finished** — taking the first hid a failure in a later one — and its
+suites **run one at a time** (`queue` in `suite()`): started together, their
+`storeWith` seeds clobbered each other, now and then, for months.
 
 Suites drive the real modules and wipe app state, so **both guards must stay**:
 refuse to run anywhere but localhost, and put `localStorage` back afterwards,
 waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once, at import, so `migrate()` needs a fresh instance —
-`storeWith(raw)`, which **checks** its seed rather than sleeping and hoping —
-and ask for few, since each instance sets off a `save()` that lands on the next
-one's fixture. A fresh instance has its own `state`, so a suite that pokes state
+`storeWith(raw)`, which **checks** its seed rather than sleeping and hoping.
+A fresh instance has its own `state`, so a suite that pokes state
 *and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` — once per page,
 since `import()` caches. To add a field to a task: `upsertItem()`, a fallback in
 `migrate()`, a row in `js/editor.js`.

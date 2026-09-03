@@ -34,8 +34,38 @@ export const cloud = {
   email: null,
   userId: null,
   live: false,        // realtime channel is subscribed
-  storageFull: false  // the baseline could not be written to localStorage
+  storageFull: false, // the baseline could not be written to localStorage
+  halted: false,      // the loop breaker tripped; a manual sync starts it again
+  log: []             // the last LOG_MAX syncs, newest first — see logSync()
 };
+
+/* ---------------- the sync log ----------------
+   What each sync did, kept on this device: how many rows went up, came
+   down, were adopted from the read-back, and how long it took. A loop of
+   the kind we shipped three times shows here in the first minute — a
+   column of "up 40" with nothing edited — where the status line only ever
+   said "synced". Device-only, small, and survives a reload. */
+const LOG_KEY = 'semesterPlanner.cloudLog';
+const LOG_MAX = 30;
+function loadLog() {
+  try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); } catch { return []; }
+}
+function logSync(entry) {
+  cloud.log.unshift(entry);
+  cloud.log.length = Math.min(cloud.log.length, LOG_MAX);
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(cloud.log)); } catch { /* it is only a log */ }
+}
+cloud.log = loadLog();
+
+/* ---------------- the loop breaker ----------------
+   A push with nothing edited here since the last sync is legitimate once or
+   twice — the first sync after an upgrade, a tombstone — never five times
+   running. Five is a loop, and a loop is stopped rather than let run all
+   night: status goes to `error`, the timers and the channel stay up but
+   sync() refuses until someone presses Sync now. */
+const LOOP_MAX = 5;
+let editsSinceSync = 0;   // local commits since the last sync began
+let quietPushes = 0;      // syncs in a row that pushed with no local edit
 
 const listeners = new Set();
 export const onCloud = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
@@ -56,6 +86,11 @@ export function describeSyncError(err) {
   if (err?.code === '23514' || /planner_rows_kind_check/.test(text)) {
     return 'This database is older than the app. Open the Supabase SQL editor '
       + 'and run supabase/upgrade.sql from the repo, then sync again.';
+  }
+  // 42P01 is undefined_table: the history table is newer than the database
+  if (err?.code === '42P01' || /planner_rows_history/.test(text)) {
+    return 'This database keeps no history yet. Open the Supabase SQL editor '
+      + 'and run supabase/upgrade.sql from the repo.';
   }
   return text;
 }
@@ -244,23 +279,35 @@ function currentHashes() {
 let syncing = false;
 let pending = false;
 
-export async function sync({ full = false } = {}) {
+export async function sync({ full = false, manual = false } = {}) {
   if (!cfg().enabled || !isConfigured() || !isSignedIn()) return;
   if (!navigator.onLine) { setStatus('offline', 'Offline — changes sync when you reconnect.'); return; }
+  if (cloud.halted && !manual) return;
   if (syncing) { pending = true; return; }
 
   syncing = true;
+  if (manual) { cloud.halted = false; quietPushes = 0; }
+  const edits = editsSinceSync;
+  editsSinceSync = 0;
+  const t0 = Date.now();
+  const entry = { at: new Date().toISOString(), ms: 0, up: 0, down: 0, adopted: 0, full: !!full, error: null };
   setStatus('syncing');
   try {
     const c = await client();
     // an upgrade since the last sync counts as a full one: adopt, then send
     const upgraded = baselineSchema() !== AGREED;
-    if (full || upgraded) { cfg().cursor = ''; storeBaseline(null); }
+    if (full || upgraded) { cfg().cursor = ''; storeBaseline(null); entry.full = true; }
 
-    const cursorAfterPull = await pull(c);
-    const pushed = await push(c);
+    const pulled = await pull(c);
+    // What came down is what the server holds: push must judge against
+    // that, or every row another device sent goes straight back up — a
+    // wasted write, and an echo down the channel for it.
+    const base = { ...(loadBaseline() || {}) };
+    for (const [k, v] of Object.entries(pulled.took)) { if (v === null) delete base[k]; else base[k] = v; }
+    const pushed = await push(c, base);
+    entry.down = pulled.applied; entry.up = pushed.sent; entry.adopted = pushed.adopted || 0;
 
-    cfg().cursor = [cfg().cursor, cursorAfterPull, pushed.cursor].filter(Boolean).sort().pop() || cfg().cursor;
+    cfg().cursor = [cfg().cursor, pulled.cursor, pushed.cursor].filter(Boolean).sort().pop() || cfg().cursor;
     cfg().lastSync = new Date().toISOString();
     // Record what push saw, not what state holds now: an edit or delete made
     // while the round trip was in flight has not been sent yet, and baking it
@@ -268,11 +315,23 @@ export async function sync({ full = false } = {}) {
     storeBaseline(pushed.hashes);
     storeSchema();
     save();
-    setStatus('ready');
+
+    quietPushes = pushed.sent && !edits && !entry.full ? quietPushes + 1 : 0;
+    if (quietPushes >= LOOP_MAX) {
+      cloud.halted = true;
+      entry.error = 'loop';
+      setStatus('error', `Sync stopped itself: it sent rows on ${quietPushes} syncs in a row with nothing edited here. `
+        + 'That is a loop, not sync. Press Sync now to try once more.');
+    } else {
+      setStatus('ready');
+    }
   } catch (err) {
     console.warn('cloud sync', err);
-    setStatus('error', describeSyncError(err));
+    entry.error = describeSyncError(err);
+    setStatus('error', entry.error);
   } finally {
+    entry.ms = Date.now() - t0;
+    logSync(entry);
     syncing = false;
     if (pending) { pending = false; setTimeout(() => sync(), 250); }
   }
@@ -285,6 +344,8 @@ async function pull(c) {
   let cursor = cfg().cursor || EPOCH;
   let maxSynced = '';
   let changed = false;
+  let applied = 0;
+  const took = {};   // key -> hash of what was applied, null for a tombstone
 
   for (;;) {
     const { data, error } = await c
@@ -304,7 +365,11 @@ async function pull(c) {
       // whatever was being typed — the write having been caused by that typing.
       if (!row.deleted && hashes[key(row.kind, row.id)] === hash(row.data)) continue;
       if (winner(row, baseline, hashes) === 'remote') {
-        if (applyRow(row)) changed = true;
+        const ok = applyRow(row);
+        if (ok) { changed = true; applied++; }
+        // a kind this build does not know is not taken, and must not be
+        // recorded either, or push would send a tombstone for it
+        if (ok || row.deleted) took[key(row.kind, row.id)] = row.deleted ? null : hash(row.data);
       }
     }
     cursor = data[data.length - 1].synced_at;
@@ -315,7 +380,7 @@ async function pull(c) {
     applyAppearance();
     commit(null, { source: 'cloud' });
   }
-  return maxSynced;
+  return { cursor: maxSynced, applied, took };
 }
 
 /**
@@ -352,8 +417,7 @@ function winner(row, baseline, hashes) {
  * Returns the pushed cursor and the hashes it actually sent — those hashes, not
  * the state at the end of the sync, are what the next baseline must record.
  */
-async function push(c) {
-  const baseline = loadBaseline();
+async function push(c, baseline = loadBaseline()) {
   const rows = snapshotRows();
   const hashes = {};
   const now = new Date().toISOString();
@@ -380,7 +444,7 @@ async function push(c) {
       out.push({ user_id: cloud.userId, kind, id: rest.join(':'), data: {}, deleted: true, updated_at: now });
     }
   }
-  if (!out.length) return { cursor: '', hashes };
+  if (!out.length) return { cursor: '', hashes, sent: 0, adopted: 0 };
 
   /* Read back what landed, not just that it landed. The database drops a
      write older than the row it hits (planner_rows_keep_newest) and answers
@@ -407,7 +471,7 @@ async function push(c) {
     }
   }
   if (adopted) commit(null, { source: 'cloud' });
-  return { cursor: maxSynced, hashes, adopted };
+  return { cursor: maxSynced, hashes, sent: out.length, adopted };
 }
 
 /* ---------------- realtime ---------------- */
@@ -473,10 +537,37 @@ export function stop() {
   cloud.live = false;
 }
 
+/* ---------------- history ----------------
+   Every version a row had on the server, kept 30 days by a trigger
+   (supabase/upgrade.sql). An upsert has no undo of its own; this is it. */
+const HISTORY = 'planner_rows_history';
+
+/** The last versions rows had on the server, newest first. */
+export async function history(limit = 40) {
+  const c = await client();
+  const { data, error } = await c
+    .from(HISTORY)
+    .select('hid,kind,id,data,deleted,updated_at,replaced_at')
+    .order('replaced_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+/** Put a version back: into state, stamped now, so the next push wins over what the server holds. */
+export function restore(row) {
+  const data = { ...row.data };
+  if (row.kind !== 'meta') data.updatedAt = new Date().toISOString();
+  if (!applyRow({ kind: row.kind, id: row.id, data, deleted: false })) return false;
+  commit(null, { source: 'restore' });
+  return true;
+}
+
 /** Forget this device's sync bookkeeping without touching the data itself. */
 export function resetLocalSyncState() {
   if (cloud.userId) { try { localStorage.removeItem(BASE_KEY(cloud.userId)); } catch { /* ignore */ } }
   mem = { uid: null, has: false, base: null, schema: null };
+  cloud.halted = false; quietPushes = 0; editsSinceSync = 0;
   cfg().cursor = '';
   save();
   resetClient();
@@ -490,6 +581,7 @@ export function resetLocalSyncState() {
 // twitched with each round.
 subscribe((meta) => {
   if (meta?.source === 'cloud' || meta?.external) return;
+  editsSinceSync++;
   if (cfg().enabled && isSignedIn()) pushSoon();
 });
 

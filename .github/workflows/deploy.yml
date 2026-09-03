@@ -34,6 +34,20 @@ jobs:
           node --check sw.js
           node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest'))"
 
+      # The suite, in a real browser. Every bug shipped this week parsed fine;
+      # this is the gate that would have caught them. tests/run.mjs opens
+      # tests/index.html headless and fails on any failing check.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run the tests in Chromium
+        run: |
+          npm i --no-save --no-audit --no-fund playwright@1.47.2
+          npx playwright install --with-deps chromium
+          python3 -m http.server 8000 >/dev/null 2>&1 &
+          sleep 1
+          node tests/run.mjs http://localhost:8000/tests/
+
       - uses: actions/configure-pages@v5
 
       - name: Package the site

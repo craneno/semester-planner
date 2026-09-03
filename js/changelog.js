@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v40', date: '2026-09-03',
+    title: 'Sync that watches itself',
+    notes: [
+      'Settings has a sync log: the last thirty syncs from this device, with how many rows went up and came down. A loop shows there in the first minute.',
+      'Sync stops itself if it sends rows on five syncs in a row with nothing edited here. Sync now starts it again.',
+      'The server keeps every version of every row for thirty days. Settings lists what it used to hold, and a Put back button makes any old version the newest. Run supabase/upgrade.sql once to turn it on.',
+      'A row that came down from another device is no longer sent straight back up.'
+    ]
+  },
+  {
     version: 'v39', date: '2026-09-02',
     title: 'The sync a second, for real this time',
     notes: [

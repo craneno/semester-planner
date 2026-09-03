@@ -17,9 +17,9 @@ suite('Cloud sync — delete durability', async ({ check }) => {
      mirroring the planner_touch() trigger in supabase/schema.sql. The query
      object is a thenable so it serves both call shapes cloud.js uses —
      .select().gt().order().limit() for pull, .upsert().select() for push. */
-  function makeFake(seed = []) {
+  function makeFake(seed = [], { mutate = false } = {}) {
     const table = seed.slice();
-    let clock = 100;
+    let clock = 100, touched = 0;
     const stamp = () => new Date(Date.UTC(2026, 0, 1) + (++clock) * 1000).toISOString();
     // Postgres keeps jsonb with its keys sorted, and hands rows back that way.
     // The fake has to do the same, or a hash that minds the order passes here
@@ -29,8 +29,10 @@ suite('Cloud sync — delete durability', async ({ check }) => {
       : v;
     const api = {
       table, writes: 0,
-      from() {
+      history: [],       // what .from('planner_rows_history') answers
+      from(name) {
         const q = {
+          _table: name,
           _gt: null, _up: null,
           select() { return q; },
           gt(_col, val) { q._gt = val; return q; },
@@ -42,13 +44,17 @@ suite('Cloud sync — delete durability', async ({ check }) => {
               const data = [];
               for (const r of q._up) {
                 const i = table.findIndex((x) => x.kind === r.kind && x.id === r.id);
-                const row = { ...r, data: jsonb(r.data), synced_at: stamp() };
+                // a server that never keeps quite what it was sent, for the loop breaker
+                const kept = mutate ? { ...jsonb(r.data), touched: ++touched } : jsonb(r.data);
+                const row = { ...r, data: kept, synced_at: stamp() };
                 if (i >= 0) table[i] = row; else table.push(row);
                 api.writes++;
                 // what .select('kind,id,data,deleted,synced_at') answers
                 data.push({ kind: row.kind, id: row.id, data: row.data, deleted: row.deleted, synced_at: row.synced_at });
               }
               res({ data, error: null });
+            } else if (q._table === 'planner_rows_history') {
+              res({ data: api.history.slice().sort((a, b) => (a.replaced_at < b.replaced_at ? 1 : -1)), error: null });
             } else {
               const data = table
                 .filter((r) => !q._gt || r.synced_at > q._gt)
@@ -75,9 +81,9 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     C.resetLocalSyncState();   // the key on disk, and the copy cloud.js keeps in memory
   }
 
-  function fresh(seed) {
+  function fresh(seed, opts) {
     reset();
-    const fake = makeFake(seed);
+    const fake = makeFake(seed, opts);
     C._setClient(fake, { userId: USER, email: 't@e.st' });
     return fake;
   }
@@ -186,6 +192,73 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('...and the row is still here, as it was', itemById('ps')?.plan?.start === '09:00');
   }
 
+  /* The log says what each sync did. It is how the next loop gets found in
+     a minute instead of three releases. */
+  async function tSyncLog() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'lg', title: 'logged' }); });
+    await C.sync();
+    let e = C.cloud.log[0];
+    check('the log has the sync, newest first', !!e && e.up >= 1 && e.down === 0 && e.error === null,
+      JSON.stringify(e));
+    check('...with how long it took', typeof e.ms === 'number' && e.ms >= 0);
+
+    fake.table.push({ user_id: USER, kind: 'item', id: 'from-phone', data: { id: 'from-phone', title: 'phone' },
+      deleted: false, updated_at: new Date(Date.UTC(2026, 0, 5)).toISOString(), synced_at: new Date(Date.UTC(2026, 0, 5)).toISOString() });
+    await C.sync();
+    e = C.cloud.log[0];
+    check('a row that came down is counted', e.down === 1 && e.up === 0, JSON.stringify(e));
+    check('the log is kept to thirty', C.cloud.log.length <= 30);
+  }
+
+  /* A push with nothing edited here, sync after sync, is a loop — the kind
+     shipped three times this week. Sync stops itself rather than run all
+     night, and Sync now starts it again. */
+  async function tLoopBreaker() {
+    const fake = fresh([], { mutate: true });
+    commit(() => { upsertItem({ id: 'lp', title: 'looping' }); });
+    let halted = 0;
+    for (let i = 0; i < 8; i++) { await C.sync(); if (C.cloud.halted) { halted = i + 1; break; } }
+    check('a push on every sync with nothing edited trips the breaker', C.cloud.halted === true, `(after ${halted} syncs)`);
+    check('...and says so as an error', C.cloud.status === 'error' && /loop/i.test(C.cloud.message), C.cloud.message);
+    check('...in the log too', C.cloud.log[0].error === 'loop');
+
+    const before = fake.writes;
+    await C.sync();
+    check('a sync while halted does nothing', fake.writes === before);
+    await C.sync({ manual: true });
+    check('Sync now runs once more', fake.writes > before);
+
+    commit(() => { upsertItem({ id: 'lp2', title: 'a real edit' }); });
+    C.resetLocalSyncState();
+    check('a rebuild clears the halt', C.cloud.halted === false);
+  }
+
+  /* An upsert has no undo; the history table on the server is it. A version
+     put back must go up as the newest thing, or the trigger drops it. */
+  async function tRestore() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'rs', title: 'new draft' }); });
+    await C.sync();
+    fake.history.push({
+      hid: 1, kind: 'item', id: 'rs', deleted: false,
+      data: { id: 'rs', title: 'old draft', updatedAt: '2026-01-01T00:00:00.000Z' },
+      updated_at: '2026-01-01T00:00:00.000Z', replaced_at: '2026-01-02T00:00:00.000Z'
+    });
+    const rows = await C.history();
+    check('history lists what the server used to hold', rows.length === 1 && rows[0].data.title === 'old draft');
+
+    let repaints = 0;
+    const off = subscribe((meta) => { if (meta?.source === 'restore') repaints++; });
+    check('a version can be put back', C.restore(rows[0]) === true && itemById('rs')?.title === 'old draft');
+    off();
+    check('...and the page is told', repaints === 1);
+    check('...stamped now, not with the old clock', itemById('rs').updatedAt > '2026-06-01', itemById('rs').updatedAt);
+    const before = fake.writes;
+    await C.sync();
+    check('...so it goes up on the next sync', fake.writes > before && serverRow(fake, 'rs').data.title === 'old draft');
+  }
+
   /* The guard has to be the hash, not applyRow: applyRow reports a change for
      any live row, identical or not, which is what made the echo loud. */
   {
@@ -216,7 +289,10 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['remote row adopted', tRemoteRowAdopted],
     ['our own echo is quiet', tOwnEchoIsQuiet],
     ['remote tombstone applied', tRemoteTombstoneApplied],
-    ['a push settles', tPushSettles]
+    ['a push settles', tPushSettles],
+    ['the sync log', tSyncLog],
+    ['the loop breaker', tLoopBreaker],
+    ['history and restore', tRestore]
   ]) {
     await fn();
   }
