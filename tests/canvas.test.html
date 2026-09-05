@@ -119,6 +119,21 @@ suite('Canvas — the feed', async ({ check }) => {
     check('nothing fits, nothing is guessed', matchArea('PHIL 1101 Ethics', areas) === null);
     check('an empty course is unfiled', matchArea('', areas) === null);
   }
+
+  {
+    // a reminder block inside the event has a DESCRIPTION of its own, and one event has no SUMMARY at all
+    const alarm = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:event-assignment-al', 'DTSTART;VALUE=DATE:20260915',
+      'SUMMARY:Essay [ME 2340 Thermodynamics]', 'DESCRIPTION:Two pages.',
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Reminder', 'TRIGGER:-PT15M', 'END:VALARM',
+      'URL:https://x.instructure.com/courses/1/assignments/al', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:event-assignment-nameless', 'DTSTART;VALUE=DATE:20260916', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const evs = parseIcs(alarm);
+    const [al, nameless] = evs;
+    check('a VALARM inside the event keeps its lines to itself',
+      al?.description === 'Two pages.' && al?.url === 'https://x.instructure.com/courses/1/assignments/al', JSON.stringify(al));
+    check('...and the event is read to its end', evs.length === 2 && nameless?.uid === 'event-assignment-nameless', String(evs.length));
+    check('no SUMMARY reads as none', nameless && nameless.summary === undefined);
+  }
 });
 
 suite('Canvas — the import', async ({ check }) => {
@@ -149,14 +164,28 @@ suite('Canvas — the import', async ({ check }) => {
     s.upsertItem({ id: lab.id, areaId: 'gen' });
     s.toggleItem(ps.id, true);
     s.upsertItem({ id: ps.id, notes: 'my own note' });
+    const labStamp = s.itemById(lab.id).updatedAt;
     const moved = FEED.replace('DTSTART;VALUE=DATE:20260915', 'DTSTART;VALUE=DATE:20260917');
     const res = importCanvas(moved);
-    check('the same feed again adds nothing', res.added === 0 && res.updated === 2, JSON.stringify(res));
+    check('the same feed again adds nothing, and touches only the row that moved', res.added === 0 && res.updated === 1, JSON.stringify(res));
     check('...and makes no copies', s.state.items.filter((t) => t.canvasId).length === 2);
     check('a moved due date lands', s.itemById(ps.id).due === '2026-09-17');
     check('the tick stays', s.itemById(ps.id).done === true);
     check('the note stays', s.itemById(ps.id).notes === 'my own note');
     check('the hand-filed area stays', s.itemById(lab.id).areaId === 'gen');
+    check('a row nothing moved on keeps its clock', s.itemById(lab.id).updatedAt === labStamp,
+      'stamped now, it would beat a real edit from another device');
+  }
+
+  {
+    // a person drags the problem set onto the calendar; the next morning's feed must not pull it back off
+    const ps = s.state.items.find((t) => t.canvasId === 'event-assignment-123456');
+    s.upsertItem({ id: ps.id, plan: { date: '2026-09-16', start: '14:00', mins: 90 }, due: null, dueTime: null });
+    const stamp = s.itemById(ps.id).updatedAt;
+    const res = importCanvas(FEED);   // Canvas still says the 15th
+    check('a block the person made keeps its plan on the next feed',
+      s.itemById(ps.id).plan?.date === '2026-09-16' && s.itemById(ps.id).due === null, JSON.stringify(s.itemById(ps.id).plan));
+    check('...and is neither counted as updated nor stamped again', res.updated === 0 && s.itemById(ps.id).updatedAt === stamp, JSON.stringify(res));
   }
 
   {
@@ -175,6 +204,13 @@ suite('Canvas — the import', async ({ check }) => {
     check('...and one due after it', !s.state.items.some((t) => t.canvasId === 'event-assignment-next'));
     const { inTerm } = await import('../js/canvas.js');
     check('two weeks either side is still the term', inTerm('2026-08-20') && inTerm('2026-12-24') && !inTerm('2026-08-18') && !inTerm('2026-12-27'));
+  }
+
+  {
+    const bare = ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:event-assignment-bare', 'DTSTART;VALUE=DATE:20260918', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    importCanvas(bare);
+    const t = s.state.items.find((t) => t.canvasId === 'event-assignment-bare');
+    check('an assignment with no SUMMARY still has a name', t?.title === 'Untitled assignment', String(t?.title));
   }
 });
 
@@ -249,7 +285,8 @@ suite('Canvas — by itself, once a day', async ({ check }) => {
   check('signed in and due, it fetches and brings the feed in', calls === 1 && res?.added === 2, JSON.stringify(res));
   check('...and stamps the time', s.state.settings.canvasFeedAt === new Date(t0).toISOString());
   check('an hour later it does nothing', (await refreshIfDue({ fetch, now: t0 + 3600e3 })) === null && calls === 1);
-  check('a day later it goes again', (await refreshIfDue({ fetch, now: t0 + FEED_EVERY }))?.updated === 2 && calls === 2);
+  check('a day later it goes again, and the same feed changes nothing',
+    (await refreshIfDue({ fetch, now: t0 + FEED_EVERY }))?.updated === 0 && calls === 2);
 
   s.commit(() => { s.state.settings.canvasFeedAt = ''; });
   const bad = async () => { throw new Error('502'); };

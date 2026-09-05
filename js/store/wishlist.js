@@ -58,8 +58,11 @@ export function parseWishAdd(input) {
     if (bare) { url = normalizeUrl(bare); text = text.replace(bare, ' '); }
   }
 
-  const pm = text.match(/\s\$\s?(\d+(?:\.\d{1,2})?)\b/);
-  if (pm) { price = Number(pm[1]); text = text.replace(pm[0], ' '); }
+  // two prices — "$5 $10", a sale — the last one stands, and none stays in
+  // the name
+  const priceRe = /\s\$\s?(\d+(?:\.\d{1,2})?)\b/g;
+  const prices = [...text.matchAll(priceRe)];
+  if (prices.length) { price = Number(prices[prices.length - 1][1]); text = text.replace(priceRe, ' '); }
 
   return {
     title: text.replace(/\s+/g, ' ').trim() || 'Untitled',

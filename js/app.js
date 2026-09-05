@@ -7,7 +7,7 @@ import {
   reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules,
   undo, redo
 } from './store.js';
-import { toast, closePeek, reorderable, modal, closeModal, navSlide, navSettle } from './ui.js';
+import { toast, closePeek, reorderable, modal, closeModal, modalOpen, navSlide, navSettle } from './ui.js';
 import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
@@ -77,6 +77,9 @@ export function navigate() {
   if (document.body.classList.contains('nav-dragging')) { redrawHeld = true; return; }
   sweep();
   current = route();
+  // an area deleted while its page was open: the hash still named it, so
+  // Overview drew under a lying address and go('overview') did nothing
+  if (current.kind === 'view' && /^#\/area\//.test(location.hash)) history.replaceState(null, '', '#/' + current.id);
   paintChrome();
   const host = $('#view');
   const view = current.kind === 'view' ? VIEWS[current.id] : null;
@@ -246,14 +249,19 @@ function paintChrome() {
 const spared = new Set();
 
 function sweep() {
-  if (!doneBefore(today(), spared).length) return;
+  const due = doneBefore(today(), spared);
+  if (!due.length) return;
+  // their Google events go too; queued now, while the rows still hold the ids
+  for (const t of due) G.forgetItem(t);
   let gone = [];
   // not a source app.js re-renders for — navigate() is already on its way
   commit(() => { gone = sweepDone(today(), spared); }, { source: 'sweep' });
   toast(`Cleared ${gone.length} finished ${gone.length === 1 ? 'task' : 'tasks'}`, {
     action: 'Undo',
     onAction: () => commit(() => {
-      for (const t of gone) spared.add(t.id);
+      // stamped now, or the server keeps the tombstone and the next sync sweeps them again
+      const now = new Date().toISOString();
+      for (const t of gone) { spared.add(t.id); t.updatedAt = now; }
       state.items.push(...gone);
     }, { source: 'editor' })
   });
@@ -480,7 +488,8 @@ function wireKeys() {
     }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') { closePeek(); closeModal(); return; }
-    if (typing) return;
+    // a dialog has the keyboard: `/` on a confirm's button must not swap it for the search
+    if (typing || modalOpen()) return;
     switch (e.key) {
       case 'n': e.preventDefault(); $('#quickadd-input').focus(); return;
       case '/': e.preventDefault(); openSearch({ go, showDay }); return;
@@ -597,6 +606,10 @@ function boot() {
     // cheap, and almost anything committed can change what is on next —
     // including a block planned from a panel that must not repaint the view
     paintNextUp();
+    // the name box is written once at boot; a rename in Settings, or one
+    // synced down, has to reach it — unless it is the box being typed in
+    const nameBox = $('#sem-name');
+    if (document.activeElement !== nameBox && nameBox.value !== state.semester.name) nameBox.value = state.semester.name;
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
       || meta?.source === 'editor' || meta?.source === 'restore'
       || meta?.source === 'undo' || meta?.source === 'redo'

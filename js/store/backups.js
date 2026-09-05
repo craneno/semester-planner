@@ -38,7 +38,12 @@ export function keepBackups(raw) {
   if (!raw || typeof raw !== 'object') return;
   const put = (name) => {
     if (localStorage.getItem(BAK + name)) return;   // already have this one
-    try { localStorage.setItem(BAK + name, backupOf(raw)); } catch { prune(true); }
+    const copy = backupOf(raw);
+    try { localStorage.setItem(BAK + name, copy); } catch {
+      // out of room: make some, then try the once more that the room was for
+      prune(true);
+      try { localStorage.setItem(BAK + name, copy); } catch { /* still full; the day goes without */ }
+    }
   };
   const prune = (hard = false) => {
     const dailies = listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label));

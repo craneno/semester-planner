@@ -108,6 +108,28 @@ suite('Repeat — the rule', async ({ check }) => {
     check('count counts occurrences, not weeks',
       repeatDates(R({ freq: 'weekly', days: [1, 3], count: 3 }), '2026-09-07', '2026-09-01', '2026-12-31').join()
       === '2026-09-07,2026-09-09,2026-09-14');
+    check('a count of 0 is no count',
+      repeatDates(R({ freq: 'daily', count: 0 }), '2026-09-07', '2026-09-07', '2026-09-11').length === 5);
+    check('...and is not said', !describeRepeat(R({ freq: 'daily', count: 0 }), '2026-09-07').includes('times'),
+      describeRepeat(R({ freq: 'daily', count: 0 }), '2026-09-07'));
+    check('a count typed as text still counts',
+      repeatDates(R({ freq: 'daily', count: '2' }), '2026-09-07', '2026-09-01', '2026-12-31').length === 2);
+  }
+
+  /* ---- a rule that came in bent ---- */
+
+  {
+    check('weekdays as strings are still weekdays',
+      repeatDates(R({ freq: 'weekly', days: ['1'] }), '2026-09-07', '2026-09-07', '2026-09-14').join()
+      === '2026-09-07,2026-09-14', 'a "1" from a form would concatenate its way through addDays');
+    check('junk among the weekdays is dropped',
+      repeatDates(R({ freq: 'weekly', days: [1, '3', 9, 'x', null] }), '2026-09-07', '2026-09-07', '2026-09-13').join()
+      === '2026-09-07,2026-09-09');
+    check('...and described without it',
+      describeRepeat(R({ freq: 'weekly', days: ['3', 1] }), '2026-09-07') === 'Every week on Mon and Wed',
+      describeRepeat(R({ freq: 'weekly', days: ['3', 1] }), '2026-09-07'));
+    check('an anchor that is not a date yields nothing rather than throwing',
+      repeatDates(R({ freq: 'weekly' }), 'someday', '2026-09-01', '2026-09-30').length === 0);
   }
 
   /* ---- the awkward asks ---- */

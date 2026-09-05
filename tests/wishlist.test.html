@@ -39,6 +39,11 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
       all.title === 'Nozzle heater' && all.price === 48.5 && all.url === 'https://mcmaster.com/1234',
       `${all.title} | ${all.price} | ${all.url}`);
 
+    const two = p('Two prices $5 $10 mcmaster.com/1');
+    check('two prices: the last one stands', two.price === 10, String(two.price));
+    check('...and neither stays in the name', two.title === 'Two prices' && two.url === 'https://mcmaster.com/1',
+      `${two.title} | ${two.url}`);
+
     check('a version number is not a link',
       p('3.5in case fan').url === null && p('3.5in case fan').title === '3.5in case fan',
       String(p('3.5in case fan').url));

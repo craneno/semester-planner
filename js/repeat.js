@@ -30,6 +30,17 @@ const MAX_DATES = 750;
 
 export const isRepeat = (rep) => !!(rep && REPEAT_FREQ.includes(rep.freq));
 
+/** How many in all, or null: 0, a blank and nonsense all mean no limit. */
+const countOf = (rep) => (Number(rep.count) > 0 ? Math.floor(Number(rep.count)) : null);
+
+/** The weekdays a weekly rule names, once each, as numbers 0–6 — a `"1"` from
+ *  a form or a sync would otherwise concatenate its way through addDays.
+ *  Only a number or a string of one counts: `Number(null)` is 0, not Sunday. */
+const asDay = (d) => (typeof d === 'number' || (typeof d === 'string' && d.trim()) ? Number(d) : NaN);
+const weekdaysOf = (rep) => [...new Set((Array.isArray(rep.days) ? rep.days : []).map(asDay))]
+  .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+  .sort((x, y) => x - y);
+
 /**
  * Every day the rule lands on, in order, for ever.
  *
@@ -40,6 +51,7 @@ export const isRepeat = (rep) => !!(rep && REPEAT_FREQ.includes(rep.freq));
 function* points(rep, anchor) {
   const every = Math.max(1, Math.round(rep.every || 1));
   const a = parseYmd(anchor);
+  if (!a) return;
 
   if (rep.freq === 'daily') {
     for (let k = 0; ; k++) yield addDays(anchor, k * every);
@@ -47,10 +59,8 @@ function* points(rep, anchor) {
   }
 
   if (rep.freq === 'weekly') {
-    const days = (rep.days && rep.days.length ? [...new Set(rep.days)] : [a.getDay()])
-      .filter((d) => d >= 0 && d <= 6)
-      .sort((x, y) => x - y);
-    if (!days.length) return;
+    const chosen = weekdaysOf(rep);
+    const days = chosen.length ? chosen : [a.getDay()];
     const sunday = addDays(anchor, -a.getDay());
     for (let w = 0; ; w += every) {
       const base = addDays(sunday, w * 7);
@@ -93,11 +103,12 @@ function* points(rep, anchor) {
 export function repeatDates(rep, anchor, from, to) {
   if (!isRepeat(rep) || !anchor || !from || !to || from > to) return [];
   const out = [];
+  const count = countOf(rep);
   let made = 0, steps = 0;
   for (const d of points(rep, anchor)) {
     if (++steps > MAX_STEPS) break;
     if (rep.until && d > rep.until) break;
-    if (rep.count && made >= rep.count) break;
+    if (count && made >= count) break;
     made++;
     if (d > to) break;
     if (d >= from) out.push(d);
@@ -136,9 +147,8 @@ export function describeRepeat(rep, anchor) {
   if (rep.freq === 'daily') {
     s = every === 1 ? 'Every day' : `Every ${every} days`;
   } else if (rep.freq === 'weekly') {
-    const days = (rep.days && rep.days.length ? [...new Set(rep.days)] : (a ? [a.getDay()] : []))
-      .sort((x, y) => x - y)
-      .map((d) => DOW[d]);
+    const chosen = weekdaysOf(rep);
+    const days = (chosen.length ? chosen : (a ? [a.getDay()] : [])).map((d) => DOW[d]);
     const when = days.length ? ' on ' + listOf(days) : '';
     s = (every === 1 ? 'Every week' : `Every ${every} weeks`) + when;
   } else if (rep.freq === 'monthly') {
@@ -148,7 +158,8 @@ export function describeRepeat(rep, anchor) {
     s = every === 1 ? 'Every year' : `Every ${every} years`;
   }
 
-  if (rep.count) s += `, ${rep.count} times`;
+  const count = countOf(rep);
+  if (count) s += `, ${count} times`;
   else if (rep.until) s += `, until ${rep.until}`;
   return s;
 }

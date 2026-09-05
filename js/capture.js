@@ -82,7 +82,15 @@ export function captureStrip(onChange) {
   /* ---- the area menu ---- */
 
   let menu = null;
-  const closeAreaMenu = () => { menu?.remove(); menu = null; };
+  // on the document only while the menu is up: one left on every draw of
+  // Overview stayed for the life of the page, and there were soon dozens
+  const clickAway = (e) => {
+    if (menu && !menu.contains(e.target) && !row.contains(e.target)) closeAreaMenu();
+  };
+  const closeAreaMenu = () => {
+    menu?.remove(); menu = null;
+    document.removeEventListener('click', clickAway);
+  };
 
   function openAreaMenu(anchor) {
     if (menu) { closeAreaMenu(); return; }
@@ -126,11 +134,9 @@ export function captureStrip(onChange) {
 
     anchor.parentElement.append(menu);
     filter.focus();
+    // after this click has finished, or the one that opened it closes it
+    setTimeout(() => { if (menu) document.addEventListener('click', clickAway); }, 0);
   }
-
-  document.addEventListener('click', (e) => {
-    if (menu && !menu.contains(e.target) && !row.contains(e.target)) closeAreaMenu();
-  });
 
   /* ---- the filing row ---- */
 

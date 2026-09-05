@@ -115,7 +115,7 @@ suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
   // its own; and every sync writes `lastSync`, so a push for it would have
   // two tabs on one device syncing each other for ever.
   check('a save from another tab does not schedule a push',
-    /subscribe\(\(meta\) => \{\s*if \(meta\?\.source === 'cloud' \|\| meta\?\.external\) return;/.test(src),
+    /subscribe\(\(meta\) => \{[\s\S]{0,600}if \(meta\?\.external\) return;\s*if \(cfg\(\)\.enabled && isSignedIn\(\)\) pushSoon\(\);/.test(src),
     'two open tabs kept each other syncing every couple of seconds');
   check('our own write coming down the channel does not start a sync',
     /payload\?\.new[\s\S]{0,200}currentHashes\(\)\[key\(r\.kind, r\.id\)\] === hash\(r\.data\)\) return;/.test(src),

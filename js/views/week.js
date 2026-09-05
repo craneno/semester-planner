@@ -13,9 +13,14 @@ import { pushItem } from '../gcal.js';
 import { moveItem } from '../actions.js';
 
 let anchor = today();          // any date inside the shown week
+/* Whether the week still follows the day. Set once at load, the anchor stayed
+   on the week it was born in: a tab left open past Saturday night showed last
+   week, with no today in it. Prev and next let go of the day; Today takes it
+   back. */
+let follows = true;
 
 /** Show the week a date falls in, next time the view draws. */
-export function showWeekOf(date) { anchor = date || today(); }
+export function showWeekOf(date) { anchor = date || today(); follows = !date || date === today(); }
 
 /* The now line. One timer for the page, reset on every draw, so a week left
    open overnight keeps the line where the clock is. */
@@ -43,11 +48,33 @@ let showExternal = true;
 const COMPACT_H = 42;          // below this a block gets one line, not two
 
 
+/**
+ * The hours the grid draws: the settings' range, opened wider when something
+ * on these days falls outside it. A block at 23:00 under a grid that ended at
+ * 23:00 was drawn below the last line, in nothing.
+ */
+function shownHours(days) {
+  const s = state.settings;
+  let lo = clamp(s.dayStart | 0, 0, 23), hi = clamp(s.dayEnd | 0, lo + 1, 24);
+  const span = (a, b) => {
+    if (a == null) return;
+    lo = Math.min(lo, Math.floor(a / 60));
+    hi = Math.max(hi, Math.ceil(Math.min(24 * 60, b) / 60));
+  };
+  for (const d of days) {
+    for (const c of classesOn(d)) span(toMin(c.start), toMin(c.end) || toMin(c.start) + 60);
+    for (const e of eventsOn(d)) if (!e.allDay && e.start) span(toMin(e.start), toMin(e.end) || toMin(e.start) + 60);
+    for (const t of itemsPlannedOn(d)) if (t.plan.start) span(toMin(t.plan.start), toMin(t.plan.start) + (t.plan.mins || t.estMins || 60));
+  }
+  return { dayStart: lo, dayEnd: hi };
+}
+
 export function renderWeek(root, { navigate } = {}) {
   clear(root);
+  if (follows) anchor = today();
   const ws = state.settings.weekStart;
   const days = weekDays(startOfWeek(anchor, ws));
-  const dayStart = state.settings.dayStart, dayEnd = state.settings.dayEnd;
+  const { dayStart, dayEnd } = shownHours(days);
   const hours = Array.from({ length: dayEnd - dayStart }, (_, i) => dayStart + i);
   const load = workloadFor(days);
   const hour12 = state.settings.hour12;
@@ -59,9 +86,9 @@ export function renderWeek(root, { navigate } = {}) {
     : `${MONTHS[first.getMonth()].slice(0, 3)} ${first.getDate()} – ${MONTHS[last.getMonth()].slice(0, 3)} ${last.getDate()}`;
 
   root.append(h('div', { class: 'weekbar' },
-    h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, -7); navigate(); }, 'aria-label': 'Previous week' }, '‹'),
-    h('button', { class: 'btn sm', onclick: () => { anchor = today(); navigate(); } }, 'Today'),
-    h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, 7); navigate(); }, 'aria-label': 'Next week' }, '›'),
+    h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, -7); follows = false; navigate(); }, 'aria-label': 'Previous week' }, '‹'),
+    h('button', { class: 'btn sm', onclick: () => { anchor = today(); follows = true; navigate(); } }, 'Today'),
+    h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, 7); follows = false; navigate(); }, 'aria-label': 'Next week' }, '›'),
     h('h2', { style: { marginLeft: '6px' } }, span),
     h('div', { style: { flex: 1 } }),
     h('span', { class: 'eyebrow num', title: 'Planned work this week' },
@@ -124,6 +151,8 @@ export function renderWeek(root, { navigate } = {}) {
   // at a desktop hour would sit most of an hour below its own gridline
   const hourH = hourHeight();
   const top = (mins) => ((mins - dayStart * 60) / 60) * hourH;
+  // a block that runs past midnight is drawn to midnight: the grid ends there
+  const until = (s, e) => Math.min(e, dayEnd * 60) - s;
 
   days.forEach((d, i) => {
     const dt = parseYmd(d);
@@ -142,7 +171,7 @@ export function renderWeek(root, { navigate } = {}) {
     // recurring classes
     for (const c of classesOn(d)) {
       const s = toMin(c.start), e = toMin(c.end) || s + 60;
-      const hgt = Math.max(18, ((e - s) / 60) * hourH - 2);
+      const hgt = Math.max(18, (until(s, e) / 60) * hourH - 2);
       lay(s, e - s, h('div', {
         class: 'blk class' + (hgt < COMPACT_H ? ' compact' : ''),
         style: {
@@ -159,7 +188,7 @@ export function renderWeek(root, { navigate } = {}) {
     if (showExternal) {
       for (const e of eventsOn(d).filter((x) => !x.allDay && x.start)) {
         const s = toMin(e.start), en = toMin(e.end) || s + 60;
-        const hgt = Math.max(18, ((en - s) / 60) * hourH - 2);
+        const hgt = Math.max(18, (until(s, en) / 60) * hourH - 2);
         lay(s, en - s, h('div', {
           class: 'blk ext' + (hgt < COMPACT_H ? ' compact' : ''),
           style: { top: top(s) + 'px', height: hgt + 'px' },
@@ -175,7 +204,7 @@ export function renderWeek(root, { navigate } = {}) {
     for (const t of itemsPlannedOn(d).filter((x) => x.plan.start)) {
       const s = toMin(t.plan.start), mins = t.plan.mins || t.estMins || 60;
       const color = areaColor(t.areaId);
-      const hgt = Math.max(20, (mins / 60) * hourH - 2);
+      const hgt = Math.max(20, (until(s, s + mins) / 60) * hourH - 2);
       const el = h('div', {
         class: 'blk plan' + (t.done ? ' done' : '') + (hgt < COMPACT_H ? ' compact' : ''),
         dataset: { id: t.id },
@@ -187,7 +216,7 @@ export function renderWeek(root, { navigate } = {}) {
       },
       h('div', { class: 't' }, fmtTime(t.plan.start, hour12) + ' · ' + fmtDuration(mins)),
       h('div', { class: 'n' }, t.title));
-      wireBlock(el, t, body, days, dayStart, hourH, navigate);
+      wireBlock(el, t, body, days, dayStart, dayEnd, hourH, navigate);
       lay(s, mins, el);
     }
 
@@ -225,13 +254,6 @@ export function renderWeek(root, { navigate } = {}) {
   const wrap = h('div', { class: 'week-wrap' }, h('div', { class: 'week-top' }, head, rail), body);
   const scroller = h('div', { class: 'week-scroll' }, wrap);
 
-  // now line
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  if (days.includes(today()) && nowMin >= dayStart * 60 && nowMin <= dayEnd * 60) {
-    body.append(h('div', { class: 'nowline', style: { top: top(nowMin) + 'px' } }));
-  }
-
   root.append(scroller);
 
   /* ---- unscheduled tray ----
@@ -264,10 +286,16 @@ export function renderWeek(root, { navigate } = {}) {
   tray.append(items);
   root.append(tray);
 
-  // open on a useful hour rather than at midnight
+  // open on a useful hour rather than at midnight — and, where the week is
+  // wider than the screen, on today rather than on Sunday
   requestAnimationFrame(() => {
+    const now = new Date();
     const target = days.includes(today()) ? Math.max(dayStart, now.getHours() - 2) : 8;
     scroller.scrollTop = Math.max(0, (target - dayStart) * hourH - 20);
+    const todayCol = body.querySelector('.daycol.today');
+    if (todayCol && scroller.scrollWidth > scroller.clientWidth + 1) {
+      scroller.scrollLeft = Math.max(0, todayCol.offsetLeft - gutter.offsetWidth);
+    }
   });
 }
 
@@ -286,21 +314,34 @@ function edgeScroll(ev, body) {
   else if (ev.clientY > r.bottom - margin) sc.scrollTop += 12;
 }
 
-/** Shared hit-test: pointer position -> {date, mins} */
-function hit(ev, body, days, dayStart, hourH) {
+/**
+ * Shared hit-test: pointer position -> {date, mins, col, inside}. The nearest
+ * column is always named, so a drag keeps its ghost past the edge; `inside`
+ * says whether the pointer is really over a day, which a drop must be.
+ */
+function hit(ev, body, days, dayStart, hourH, dayEnd = 24) {
   const cols = body.querySelectorAll('.daycol');
-  let idx = -1;
+  let idx = -1, inside = false;
   for (let i = 0; i < cols.length; i++) {
     const r = cols[i].getBoundingClientRect();
-    if (ev.clientX >= r.left && ev.clientX <= r.right) { idx = i; break; }
+    if (ev.clientX >= r.left && ev.clientX <= r.right) {
+      idx = i;
+      inside = ev.clientY >= r.top && ev.clientY <= r.bottom;
+      break;
+    }
   }
   if (idx < 0) {
     const r0 = cols[0].getBoundingClientRect();
     idx = ev.clientX < r0.left ? 0 : cols.length - 1;
   }
   const r = cols[idx].getBoundingClientRect();
-  const mins = snap((ev.clientY - r.top) / hourH * 60 + dayStart * 60);
-  return { date: days[idx], mins, col: cols[idx] };
+  // a column runs on under the tray, out of sight in the scroller; over
+  // there the pointer is not over a day
+  const sc = body.closest('.week-scroll')?.getBoundingClientRect();
+  if (sc && (ev.clientY < sc.top || ev.clientY > sc.bottom)) inside = false;
+  // held to the hours drawn: a drop over the due-date rail is not a block at 5am
+  const mins = clamp(snap((ev.clientY - r.top) / hourH * 60 + dayStart * 60), dayStart * 60, dayEnd * 60 - 15);
+  return { date: days[idx], mins, col: cols[idx], inside };
 }
 
 /**
@@ -308,30 +349,38 @@ function hit(ev, body, days, dayStart, hourH) {
  * grid's hit test names one. The top and bottom edges stretch it. All three
  * are `dragBlock`, shared with Overview's clock; only the geometry differs.
  */
-function wireBlock(el, item, body, days, dayStart, hourH, navigate) {
+function wireBlock(el, item, body, days, dayStart, dayEnd, hourH, navigate) {
   const mins = item.plan.mins || item.estMins || 60;
   dragBlock(el, { date: item.plan.date, start: item.plan.start, mins }, {
-    hit: (ev) => hit(ev, body, days, dayStart, hourH),
-    hourH, origin: dayStart * 60,
+    hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
+    hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
     edge: (ev) => edgeScroll(ev, body),
     onDrop: (plan) => moveItem(item.id, plan, { after: navigate }),
     onClick: () => openItem(item.id)
   });
 }
 
+/* A chip is planned only when it is let go over a day. The hit test names
+   the nearest column whatever the pointer is over, and a wiggle let go on the
+   tray itself used to plan the task for Sunday at a quarter to midnight. On
+   touch the chip waits for a hold, so a swipe along the tray scrolls it. */
 function wireTray(chip, item, body, days, dayStart, hourH, navigate) {
   let ghost = null, pend = null;
+  const drop = () => { ghost?.remove(); ghost = null; pend = null; };
   draggable(chip, {
+    hold: true,
     onStart: () => { chip.classList.add('dragging'); },
     onMove: (ev) => {
       edgeScroll(ev, body);
-      const { date, mins, col } = hit(ev, body, days, dayStart, hourH);
+      const { date, mins, col, inside } = hit(ev, body, days, dayStart, hourH);
+      if (!inside) { drop(); return; }
       if (!ghost) ghost = h('div', { class: 'drop-ghost' });
       ghost.style.top = ((mins - dayStart * 60) / 60 * hourH) + 'px';
       ghost.style.height = ((item.estMins || 60) / 60 * hourH - 2) + 'px';
       col.append(ghost);
       pend = { date, start: fromMin(mins) };
     },
+    onCancel: () => { chip.classList.remove('dragging'); drop(); },
     onEnd: () => {
       chip.classList.remove('dragging');
       ghost?.remove(); ghost = null;

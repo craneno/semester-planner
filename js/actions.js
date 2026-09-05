@@ -28,14 +28,15 @@ const send = (id) => pushItem(seriesById(id)?.id || id).catch(() => {});
  * because an untick after a mis-tap is the second most common.
  */
 export function tickItem(id, on, { after } = {}) {
-  commit(() => toggleItem(id, on));
+  // tagged for the panel's checkbox: the view under it lists this row too
+  commit(() => toggleItem(id, on), { source: 'editor' });
   send(id);
   after?.();
   const item = itemById(id);
   toast(on ? `Done · ${item?.title || ''}` : 'Not done', {
     ms: 2600,
     action: 'Undo',
-    onAction: () => { commit(() => toggleItem(id, !on)); send(id); after?.(); }
+    onAction: () => { commit(() => toggleItem(id, !on), { source: 'editor' }); send(id); after?.(); }
   });
 }
 

@@ -443,8 +443,11 @@ export function tapCreate(host, { only, hit, onPick }) {
     if (Date.now() - t0 > TAP_MS || Math.hypot(t.clientX - x0, t.clientY - y0) > 8) return;
     const at = hit({ clientX: t.clientX, clientY: t.clientY, target: was });
     if (!at) return;
+    // the click the browser makes of this tap would land on the new dialog's
+    // scrim and close it before it was seen; not passive, so it can be stopped
+    if (e.cancelable) e.preventDefault();
     onPick({ date: at.date, start: fromMin(at.mins), mins: 60 });
-  }, { passive: true });
+  }, { passive: false });
 }
 
 const TYPE_LABEL = {
@@ -458,6 +461,8 @@ const TYPE_LABEL = {
  */
 export function newBlockPrompt({ date, start, mins }, { onDone } = {}) {
   const hour12 = state.settings.hour12;
+  // a tap at 23:30 asks for an hour; the day has half of one left
+  mins = Math.max(SNAP, Math.min(mins, DAY - toMin(start)));
   const draft = {
     title: '', type: 'event', areaId: defaultAreaId(),
     start, mins,

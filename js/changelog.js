@@ -9,6 +9,22 @@
 
 export const CHANGELOG = [
   {
+    version: 'v48', date: '2026-09-04',
+    title: 'A day of bug fixes',
+    notes: [
+      'Erasing this device, or restoring a backup over it, no longer tells the cloud that everything was deleted here. Both forget the sync baseline first, so the cloud is taken as the truth instead.',
+      'Making one day of a repeating deadline a block of time, or one day of a repeating block a deadline, now does that — before, the day stayed as it was and every other day in the series lost its time.',
+      'The week grid follows the day: a tab left open past Saturday night now shows the new week. On a phone the week opens on today, not Sunday, and its tray of unscheduled work no longer squeezes every chip to one letter. A phone on its side keeps its hours.',
+      'Anything at 11pm or later, and a class that runs past midnight, is drawn on the grid rather than below it; a class that crosses midnight ends the day at midnight.',
+      'A chip from the unscheduled tray is planned only when dropped on a day. On a phone, hold it first — a swipe along the tray scrolls the tray.',
+      'A tap on the empty grid on a phone keeps its dialog open. Dialogs put the cursor in their first box rather than on the close button, so typing a name and pressing Enter works, and Find can be typed into again. Escape in a confirm no longer closes the panel under it.',
+      'Ticking, retyping or rescheduling in the task panel repaints the page behind it. Undo after a delete keeps the task on every device. A new edit right after Undo clears Redo. Deleting an area unfiles its notes instead of hiding them. Merging a backup brings links, the wishlist and sprints too.',
+      'The cloud: a first pull of more than five hundred rows no longer skips some; a change made on another device while this one was mid-sync is no longer missed; notes and habit edits carry a clock; a Google event of a deleted task is removed; a repeating event interrupted mid-push is not created twice; the Canvas refresh leaves a scheduled assignment where you put it.',
+      'Quick add: dates that do not exist and times past midnight are left in the title instead of stored; "every 2 weeks", "by fri", "noon", "yesterday" are understood; a title is no longer clipped when a link, a day word or a capital İ is in it.',
+      'The series bar on the semester chart writes its title inside itself. Toasts stop at three. The semester name in the sidebar follows a rename.'
+    ]
+  },
+  {
     version: 'v47', date: '2026-09-03',
     title: 'Once on the week, not twice',
     notes: [

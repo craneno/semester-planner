@@ -27,8 +27,11 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const jsonb = (v) => Array.isArray(v) ? v.map(jsonb)
       : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, jsonb(v[k])]))
       : v;
+    // the pull's order, and its key: (synced_at, kind, id)
+    const byKey = (a, b) => a.synced_at < b.synced_at ? -1 : a.synced_at > b.synced_at ? 1
+      : a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     const api = {
-      table, writes: 0,
+      table, writes: 0, reads: 0,
       history: [],       // what .from('planner_rows_history') answers
       feed: null,        // the one planner_feeds row, if saved
       failNext: null,    // an error the next query answers with, once
@@ -40,12 +43,18 @@ suite('Cloud sync — delete durability', async ({ check }) => {
       from(name) {
         const q = {
           _table: name,
-          _gt: null, _up: null, _del: false,
+          _gt: null, _after: null, _limit: null, _up: null, _del: false,
           select() { return q; },
           gt(_col, val) { q._gt = val; return q; },
+          // the keyset page: synced_at.gt."t",and(synced_at.eq."t",kind.gt."k"),and(…,id.gt."i")
+          or(expr) {
+            const take = (col) => { const m = expr.match(new RegExp(col + '\\.gt\\."((?:[^"\\\\]|\\\\.)*)"')); return m ? m[1].replace(/\\(.)/g, '$1') : null; };
+            q._after = { synced_at: take('synced_at'), kind: take('kind'), id: take('id') };
+            return q;
+          },
           eq() { return q; },
           order() { return q; },
-          limit() { return q; },
+          limit(n) { q._limit = n; return q; },
           maybeSingle() { return q; },
           delete() { q._del = true; return q; },
           upsert(list) { q._up = list; return q; },
@@ -59,9 +68,13 @@ suite('Cloud sync — delete durability', async ({ check }) => {
               const data = [];
               for (const r of q._up) {
                 const i = table.findIndex((x) => x.kind === r.kind && x.id === r.id);
+                const old = i >= 0 ? table[i] : null;
+                // planner_rows_keep_newest: a live write older than the row it lands
+                // on is dropped, and what comes back is the row the server kept
+                const refused = !!(old && !r.deleted && old.updated_at && r.updated_at && r.updated_at < old.updated_at);
                 // a server that never keeps quite what it was sent, for the loop breaker
-                const kept = mutate ? { ...jsonb(r.data), touched: ++touched } : jsonb(r.data);
-                const row = { ...r, data: kept, synced_at: stamp() };
+                const kept = refused ? old.data : mutate ? { ...jsonb(r.data), touched: ++touched } : jsonb(r.data);
+                const row = refused ? { ...old, synced_at: stamp() } : { ...r, data: kept, synced_at: stamp() };
                 if (i >= 0) table[i] = row; else table.push(row);
                 api.writes++;
                 // what .select('kind,id,data,deleted,synced_at') answers
@@ -71,9 +84,11 @@ suite('Cloud sync — delete durability', async ({ check }) => {
             } else if (q._table === 'planner_rows_history') {
               res({ data: api.history.slice().sort((a, b) => (a.replaced_at < b.replaced_at ? 1 : -1)), error: null });
             } else {
-              const data = table
-                .filter((r) => !q._gt || r.synced_at > q._gt)
-                .sort((a, b) => (a.synced_at < b.synced_at ? -1 : 1));
+              api.reads++;
+              let data = table
+                .filter((r) => q._gt ? r.synced_at > q._gt : q._after ? byKey(r, q._after) > 0 : true)
+                .sort(byKey);
+              if (q._limit) data = data.slice(0, q._limit);
               res({ data, error: null });
             }
           }
@@ -86,6 +101,10 @@ suite('Cloud sync — delete durability', async ({ check }) => {
 
   const USER = 'test-user';
   const serverRow = (fake, id) => fake.table.find((r) => r.kind === 'item' && r.id === id);
+  const at = (n) => new Date(Date.UTC(2026, 0, 1) + n * 1000).toISOString();   // the fake's clock, n seconds in
+  const remote = (id, n, title = id) => ({
+    user_id: USER, kind: 'item', id, data: { id, title }, deleted: false, updated_at: at(n), synced_at: at(n)
+  });
 
   function reset() {
     state.items.length = 0; state.areas.length = 0;
@@ -370,6 +389,102 @@ suite('Cloud sync — delete durability', async ({ check }) => {
       /upgrade\.sql/.test(C.describeSyncError({ code: '42P01', message: 'relation "public.planner_feeds" does not exist' })));
   }
 
+  /* A push upserts 200 rows in one statement, and the server stamps them all
+     with the one transaction time. Paged by that stamp alone, a page that
+     ended inside a batch lost the rest of it: the next page asked for what
+     came after the stamp. Ten rows over three stamps, three to a page, so
+     both page ends fall inside a stamp. */
+  async function tPagedPull() {
+    const stamps = [5, 5, 5, 5, 6, 6, 7, 7, 7, 7];
+    const seed = stamps.map((s, i) => remote('pg' + i, s, 'page ' + i));
+    const fake = fresh(seed);
+    C.pullSettings.page = 3;
+    try { await C.sync(); } finally { C.pullSettings.page = 500; }
+    const got = seed.filter((r) => itemById(r.id)).length;
+    check('a pull paged inside a batch brings every row', got === 10, `(got ${got} of 10)`);
+    check('...over several pages', fake.reads >= 4, `(${fake.reads} reads)`);
+    check('...and the cursor is the last stamp', state.settings.cloud.cursor === at(7), state.settings.cloud.cursor);
+    const before = fake.writes;
+    await C.sync();
+    check('...none of which goes back up', fake.writes === before, `(wrote ${fake.writes - before})`);
+  }
+
+  /* A row another device wrote between our pull and our push has a stamp
+     after the one and before the other. A cursor moved up to the push
+     stepped over it, and no pull ever asked for it again. */
+  async function tCursorStaysAtPull() {
+    const fake = fresh([remote('early', 1)]);
+    commit(() => { upsertItem({ id: 'mine', title: 'mine' }); });
+    await C.sync();   // pulls `early`, pushes `mine` after it
+    check('setup: the push landed after the pull', serverRow(fake, 'mine').synced_at > at(1) && !!itemById('early'));
+    check('the cursor is what pull saw, not what push wrote', state.settings.cloud.cursor === at(1), state.settings.cloud.cursor);
+    fake.table.push(remote('phone', 50));   // between the two
+    await C.sync();
+    check('a row written between our pull and our push still comes down', !!itemById('phone'), '(never arrived)');
+  }
+
+  /* A live row sent for one the server has since tombstoned: the trigger
+     keeps the tombstone and hands it back. Kept here and recorded as sent,
+     the row sat on this device for ever and never went up again. */
+  async function tRefusedForTombstone() {
+    // something far ahead to pull, so the cursor sits past where the tombstone will
+    const fake = fresh([remote('far', 500)]);
+    commit(() => { upsertItem({ id: 'tb', title: 'tb' }); });
+    await C.sync();
+    // deleted on the phone, newer than anything here, and stamped behind our cursor so no pull sees it
+    Object.assign(serverRow(fake, 'tb'), { deleted: true, data: {}, updated_at: '2027-01-01T00:00:00.000Z', synced_at: at(200) });
+    commit(() => { upsertItem({ id: 'tb', title: 'tb edited' }); });
+    await C.sync();
+    check('a live row refused for a newer tombstone is let go here', !itemById('tb'), '(kept)');
+    check('...and counted as adopted', C.cloud.log[0].adopted === 1, JSON.stringify(C.cloud.log[0]));
+    const before = fake.writes;
+    await C.sync();
+    check('...and nothing is sent for it after', fake.writes === before, `(wrote ${fake.writes - before})`);
+  }
+
+  /* Two tabs on one device. The other tab's edits arrive as a save from
+     outside, and its push leaves our baseline behind, so our next sync sends
+     rows nothing here typed — once per glance at the idle tab. Five glances
+     halted sync for a loop that was not one. */
+  async function tExternalSaveIsAnEdit() {
+    fresh([], { mutate: true });   // a server that has this device push on every sync
+    commit(() => { upsertItem({ id: 'tab', title: 'two tabs' }); });
+    for (let i = 0; i < 8; i++) {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'semesterPlanner.v1', newValue: JSON.stringify(state) }));
+      await C.sync();
+    }
+    check('a save seen from another tab counts as an edit for the loop breaker',
+      C.cloud.halted === false && C.cloud.status === 'ready', C.cloud.message);
+  }
+
+  /* An edit made here while a page of the pull was on its way. Judged by
+     hashes taken before the await, the row looked clean, the remote copy
+     won, and the edit was written over. */
+  async function tEditDuringPull() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'ed', title: 'first' }); });
+    await C.sync();
+    // the phone's edit, older than the one about to be typed here
+    const row = serverRow(fake, 'ed');
+    Object.assign(row, { data: { ...row.data, title: 'from the phone' }, updated_at: at(5), synced_at: at(900) });
+
+    let fired = false;
+    const origFrom = fake.from.bind(fake);
+    fake.from = () => {
+      const q = origFrom();
+      const origThen = q.then.bind(q);
+      q.then = (res) => {
+        if (!q._up && !fired) { fired = true; commit(() => { upsertItem({ id: 'ed', title: 'typed here' }); }); }
+        origThen(res);
+      };
+      return q;
+    };
+    await C.sync();
+    fake.from = origFrom;
+    check('an edit made while the pull was out is kept', itemById('ed')?.title === 'typed here', itemById('ed')?.title);
+    check('...and goes up', serverRow(fake, 'ed').data.title === 'typed here', serverRow(fake, 'ed').data.title);
+  }
+
   for (const [name, fn] of [
     ['delete beats a live pull', tDeleteBeatsLivePull],
     ['delete during push', tDeleteDuringPush],
@@ -382,7 +497,12 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['history and restore', tRestore],
     ['resume refreshes first', tResume],
     ['an expired token', tExpiredToken],
-    ['the feed row', tFeedRow]
+    ['the feed row', tFeedRow],
+    ['a paged pull', tPagedPull],
+    ['the cursor stays at the pull', tCursorStaysAtPull],
+    ['refused for a tombstone', tRefusedForTombstone],
+    ['an external save is an edit', tExternalSaveIsAnEdit],
+    ['an edit during the pull', tEditDuringPull]
   ]) {
     await fn();
   }

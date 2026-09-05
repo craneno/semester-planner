@@ -38,6 +38,8 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('a bare domain is a link', isLink('example.com'));
     check('www. is a link', isLink('www.fhjfjgbrjb.com'));
     check('a deep path is a link', isLink('https://en.wikipedia.org/wiki/Entropy'));
+    check('a host with a port is a link', isLink('example.com:8000/x'),
+      '"example.com:" is not a scheme');
 
     check('ordinary work is not a link', !isLink('Problem set 3 due fri 5pm'));
     check('a sentence with a dot is not a link', !isLink('email prof. about the lab'));
@@ -56,6 +58,9 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
       'a stored javascript: url would run as the app the moment it is clicked');
     check('data: is refused', s.normalizeUrl('data:text/html,<b>x') === null);
     check('a hostname without a dot is refused', s.normalizeUrl('notadomain') === null);
+    check('a port is not a scheme', s.normalizeUrl('example.com:8000/x') === 'https://example.com:8000/x',
+      String(s.normalizeUrl('example.com:8000/x')));
+    check('mailto: is still a scheme, and still refused', s.normalizeUrl('mailto:a@example.com') === null);
     check('addLink refuses what normalizeUrl refuses',
       s.addLink('javascript:alert(1)') === null && s.state.links.length === 0);
   }

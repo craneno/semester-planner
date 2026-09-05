@@ -248,11 +248,15 @@ function chartData(range, dayW) {
     // width of the end of term, where the scroller would cut it off and it is
     // written to the left instead. Either way the packing has to know.
     const labelDays = Math.ceil((label.length * LABEL_CHAR + 20) / dayW);
-    const flip = range.days - s.to < labelDays;
+    // a bar wide enough holds its own title, the way a band does: a series
+    // that runs the whole term had it written to the left, under the sticky
+    // area column, where it could not be seen
+    const inside = !s.milestone && s.days >= labelDays;
+    const flip = !inside && range.days - s.to < labelDays;
     byArea.get(t.areaId).push({
-      ...s, t, label, flip,
+      ...s, t, label, flip, inside,
       head: flip ? s.from - labelDays : s.from,
-      reserve: flip ? s.to : s.to + labelDays
+      reserve: inside ? s.to : flip ? s.to : s.to + labelDays
     });
   }
   return { areas, byArea, left };
@@ -423,6 +427,7 @@ function areaLane(area, packed, { go, navigate }, range, dayW) {
     track.append(h('button', {
       class: 'gantt-item'
         + (s.milestone ? ' is-mile' : '')
+        + (s.inside ? ' inside' : '')
         + (s.flip ? ' flip' : '')
         + (t.done ? ' done' : '')
         + (s.clipStart ? ' clip-l' : '') + (s.clipEnd ? ' clip-r' : ''),
@@ -437,8 +442,8 @@ function areaLane(area, packed, { go, navigate }, range, dayW) {
     h('span', {
       class: 'gantt-shape',
       style: s.milestone ? null : { width: `calc(var(--day-w) * ${s.days})` }
-    }),
-    h('span', { class: 'gantt-tag' }, s.label)));
+    }, s.inside ? h('span', { class: 'gantt-tag' }, s.label) : null),
+    s.inside ? null : h('span', { class: 'gantt-tag' }, s.label)));
   }
 
   if (!packed.rows.length && !bands.rows.length) {

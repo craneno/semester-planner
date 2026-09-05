@@ -150,11 +150,13 @@ const snapshot = () => structuredClone(Object.fromEntries(UNDO_KEYS.map((k) => [
 
 function remember(meta) {
   const at = Date.now();
+  // an edit after an undo is a new future, coalesced or not: what redo held
+  // would put back a world without this edit in it
+  redoStack.length = 0;
   if (undoStack.length && at - lastLocalAt < undoSettings.coalesceMs) { lastLocalAt = at; return; }
   lastLocalAt = at;
   undoStack.push({ label: meta.label || '', copy: snapshot() });
   if (undoStack.length > undoSettings.max) undoStack.shift();
-  redoStack.length = 0;
 }
 
 function forget() { undoStack.length = 0; redoStack.length = 0; }
@@ -269,12 +271,25 @@ export function occurrenceOf(item, key) {
     doneAt: (ov && ov.doneAt) || null
   };
   if (ov && ov.title) o.title = ov.title;
-  if (item.plan) {
-    o.plan = { ...item.plan, date: on };
-    if (ov && ov.start !== undefined) o.plan.start = ov.start;
-    if (ov && ov.mins !== undefined) o.plan.mins = ov.mins;
+  // `mode` is one occurrence that is not the kind its series is: a deadline
+  // series with one day booked as a block, or a block series with one day
+  // owed instead. Without one, the occurrence is what the series is.
+  if (ov && ov.mode === 'plan') {
+    o.plan = { date: on, start: ov.start ?? null, mins: ov.mins ?? item.estMins ?? 60 };
+    o.due = null;
+    o.dueTime = null;
+  } else if (ov && ov.mode === 'due') {
+    o.plan = null;
+    o.due = on;
+    o.dueTime = ov.dueTime ?? null;
+  } else {
+    if (item.plan) {
+      o.plan = { ...item.plan, date: on };
+      if (ov && ov.start !== undefined) o.plan.start = ov.start;
+      if (ov && ov.mins !== undefined) o.plan.mins = ov.mins;
+    }
+    if (item.due) o.due = on;
   }
-  if (item.due) o.due = on;
   return o;
 }
 
@@ -381,17 +396,22 @@ export function nextForArea(areaId, limit = 3) {
    Everything below asks `state.items` for the plain ones and the rule for the
    rest, so no screen has to know which it is holding. */
 
+/* Every series is asked, not only the ones of the right kind: one occurrence
+   can be booked as a block on a deadline series, or owed on a block series
+   (`mode` in its exception), so the kind is read off the occurrence. */
 export function itemsDueOn(date) {
   return [
     ...state.items.filter((t) => !repeats(t) && t.due === date),
-    ...occurrencesBetween(date, date, (t) => !!t.due).filter((o) => o.due === date)
+    ...occurrencesBetween(date, date).filter((o) => o.due === date)
   ];
 }
 
 export function itemsPlannedOn(date) {
   return [
     ...state.items.filter((t) => !repeats(t) && t.plan && t.plan.date === date),
-    ...state.items.filter((t) => repeats(t) && t.plan).flatMap((t) => occurrencesOn(t, date))
+    ...state.items.filter((t) => repeats(t))
+      .flatMap((t) => occurrencesOn(t, date))
+      .filter((o) => o.plan && o.plan.date === date)
   ];
 }
 
@@ -410,7 +430,8 @@ export function upcoming(days = 14, ref = today()) {
   const end = addDays(ref, days);
   return [
     ...state.items.filter((t) => !repeats(t) && !t.done && t.due && t.due >= ref && t.due <= end),
-    ...occurrencesBetween(ref, end, (t) => !!t.due).filter((o) => !o.done)
+    // the window is walked by the rule's days; one moved out of it is not due in it
+    ...occurrencesBetween(ref, end).filter((o) => !o.done && o.due && o.due >= ref && o.due <= end)
   ].sort((a, b) => (a.due < b.due ? -1 : a.due > b.due ? 1 : 0));
 }
 
@@ -448,9 +469,15 @@ export function classesOn(date) {
     if (a.archived) continue;
     for (const m of a.schedule || []) {
       if (!(m.days || []).includes(dow)) continue;
+      const s = toMin(m.start), e = toMin(m.end);
       out.push({
         kind: 'class', areaId: a.id, title: a.name, color: a.color,
-        start: m.start, end: m.end, location: m.location || a.location || ''
+        start: m.start,
+        // one that runs past midnight ends this day at midnight, for every
+        // screen that draws it; read as written it was a sliver, ending
+        // before it began
+        end: e == null ? fromMin(s + 60) : e > s ? m.end : '24:00',
+        location: m.location || a.location || ''
       });
     }
   }
@@ -627,18 +654,28 @@ const OCCURRENCE_OWNS = new Set(['plan', 'due', 'title', 'done', 'doneAt']);
 function patchOccurrence(parent, key, patch) {
   const ov = overrideFor(parent, key);
   const rest = {};
-  for (const [k, v] of Object.entries(patch)) {
+  const { plan, due, dueTime, ...other } = patch;
+  /* The when is read as one thing. Folded a key at a time, the editor's
+     `{ plan, due: null, dueTime: null }` set the date and then wiped it, and
+     the `dueTime: null` landed on the series — every Tuesday lost its 5pm. */
+  if (plan) {
+    if (plan.date !== undefined) ov.date = plan.date;
+    if (plan.start !== undefined) ov.start = plan.start;
+    if (plan.mins !== undefined) ov.mins = plan.mins;
+    // a day of a deadline series booked as a block is its own kind from here
+    if (parent.plan) delete ov.mode; else ov.mode = 'plan';
+  } else if (plan === null && due) {
+    ov.date = due;
+    if (parent.plan) { ov.mode = 'due'; ov.dueTime = dueTime ?? null; } else delete ov.mode;
+  } else if (due !== undefined) {
+    ov.date = due;
+  }
+  if (dueTime !== undefined && plan === undefined) {
+    if (ov.mode === 'due') ov.dueTime = dueTime; else rest.dueTime = dueTime;
+  }
+  for (const [k, v] of Object.entries(other)) {
     if (k === 'id') continue;
-    if (!OCCURRENCE_OWNS.has(k)) { rest[k] = v; continue; }
-    if (k === 'plan' && v) {
-      if (v.date !== undefined) ov.date = v.date;
-      if (v.start !== undefined) ov.start = v.start;
-      if (v.mins !== undefined) ov.mins = v.mins;
-    } else if (k === 'due') {
-      ov.date = v;
-    } else {
-      ov[k] = v;
-    }
+    if (OCCURRENCE_OWNS.has(k)) ov[k] = v; else rest[k] = v;
   }
   if (Object.keys(rest).length) Object.assign(parent, rest);
   parent.updatedAt = new Date().toISOString();
@@ -652,6 +689,8 @@ export function upsertItem(patch) {
     const parent = state.items.find((t) => t.id === cut.id);
     return parent && repeats(parent) ? patchOccurrence(parent, cut.on, patch) : null;
   }
+  // a blank name is no name: the screens would draw an empty row
+  if (typeof patch.title === 'string' && !patch.title.trim()) patch = { ...patch, title: 'Untitled' };
   let item = patch.id ? itemById(patch.id) : null;
   if (item) {
     const moved = patch.areaId !== undefined && patch.areaId !== item.areaId && patch.canvasArea === undefined;
@@ -703,6 +742,8 @@ export function deleteItem(id) {
   if (cut) {
     const parent = state.items.find((t) => t.id === cut.id);
     if (!parent || !repeats(parent)) return;
+    // a day the rule never named has nothing to skip, and would only grow junk
+    if (!isRepeatDate(parent.repeat, repeatAnchor(parent), cut.on)) return;
     const ov = overrideFor(parent, cut.on);
     ov.off = true;
     parent.updatedAt = new Date().toISOString();
@@ -712,9 +753,19 @@ export function deleteItem(id) {
   if (i >= 0) state.items.splice(i, 1);
 }
 
+/** The first day a series falls on at or before `key`, or null if none. */
+const firstBefore = (item, key) => {
+  const anchor = repeatAnchor(item);
+  return repeatDates(item.repeat, anchor, anchor, key)[0] || null;
+};
+
 /** Stop a series after the occurrence shown, keeping everything before it. */
 export function endSeriesBefore(item, key) {
   if (!repeats(item)) return;
+  // ending it before its first day leaves a rule that never fires: unseen on
+  // every screen, and in every list and every sync for good. That is a delete.
+  const first = firstBefore(item, key);
+  if (!first || first >= key) { deleteItem(item.id); return; }
   item.repeat = { ...item.repeat, until: addDays(key, -1), count: null };
   for (const k of Object.keys(item.repeat.ex || {})) {
     if (k >= key) delete item.repeat.ex[k];
@@ -731,6 +782,9 @@ export function endSeriesBefore(item, key) {
  */
 export function splitSeriesAt(series, key, patch = {}) {
   if (!repeats(series)) return null;
+  // "this and after" from the first one is all of them
+  const first = firstBefore(series, key);
+  if (!first || first >= key) return upsertItem({ id: series.id, ...patch });
   const rep = series.repeat;
   const anchor = repeatAnchor(series);
   const before = rep.count ? repeatDates(rep, anchor, anchor, addDays(key, -1)).length : 0;
@@ -833,9 +887,15 @@ export function toggleItem(id, force) {
   if (cut) {
     const parent = state.items.find((t) => t.id === cut.id);
     if (!parent || !repeats(parent)) return;
+    if (!isRepeatDate(parent.repeat, repeatAnchor(parent), cut.on)) return;
     const ov = overrideFor(parent, cut.on);
-    ov.done = force ?? !ov.done;
-    ov.doneAt = ov.done ? new Date().toISOString() : null;
+    const on = force ?? !ov.done;
+    if (on) { ov.done = true; ov.doneAt = new Date().toISOString(); }
+    else {
+      // unticked is the same as never ticked: no exception is kept for it
+      delete ov.done; delete ov.doneAt;
+      if (!Object.keys(ov).length) delete parent.repeat.ex[cut.on];
+    }
     parent.updatedAt = new Date().toISOString();
     return;
   }
@@ -882,6 +942,8 @@ export function deleteArea(id) {
   if (i >= 0) state.areas.splice(i, 1);
   for (const t of state.items) if (t.areaId === id) t.areaId = null;
   for (const l of state.links) if (l.areaId === id) l.areaId = null;
+  // unfiled again, so they show on Overview: a card is on its area's page or nowhere
+  for (const c of state.cards) if (c.areaId === id) c.areaId = null;
   // a band is drawn in its area's lane and nowhere else, so an orphan is not
   // an orphan — it is a thing with no way back onto the screen
   state.sprints = state.sprints.filter((p) => p.areaId !== id);
@@ -903,10 +965,12 @@ export function cardToItem(id, { as = 'task', areaId } = {}) {
   else if (card.areaId) parsed.areaId = card.areaId;
 
   if (as === 'timed') {
+    // a block, and only a block: a thing that is both booked and owed is
+    // drawn twice and read as either
     const date = parsed.due || parsed.plan?.date || today();
     const start = parsed.dueTime || parsed.plan?.start || '09:00';
-    parsed.due = date;
-    parsed.dueTime = start;
+    parsed.due = null;
+    parsed.dueTime = null;
     parsed.plan = { date, start, mins: parsed.estMins || 60 };
   }
   const item = upsertItem(parsed);
@@ -917,6 +981,17 @@ export function cardToItem(id, { as = 'task', areaId } = {}) {
 export function note(date) {
   if (!state.notes[date]) state.notes[date] = { focus: '', text: '', tomorrow: '', top3: [], journal: {} };
   return state.notes[date];
+}
+
+/**
+ * The day's note, stamped now. Every writer calls this: a note with no clock
+ * is pushed with the clock at send, and a week-old copy from a device that
+ * was offline then beats the one written yesterday.
+ */
+export function touchNote(date) {
+  const n = note(date);
+  n.updatedAt = new Date().toISOString();
+  return n;
 }
 
 /* ---------------- a daily journal ----------------
@@ -932,7 +1007,7 @@ export const journalEntry = (areaId, date) => (state.notes[date]?.journal || {})
 
 /** Write today's entry. An emptied one is removed rather than kept blank. */
 export function setJournalEntry(areaId, date, text) {
-  const n = note(date);
+  const n = touchNote(date);
   if (!n.journal) n.journal = {};
   const body = String(text ?? '');
   if (body.trim()) n.journal[areaId] = body;
@@ -980,8 +1055,8 @@ export function pendingTomorrow(day = today()) {
 export function carryForward(day = today()) {
   const found = pendingTomorrow(day);
   if (!found) return null;
-  state.notes[found.date].tomorrowUsed = true;
-  const n = note(day);
+  touchNote(found.date).tomorrowUsed = true;
+  const n = touchNote(day);
   if (n.focus) return null;
   n.focus = found.text;
   n.carriedFrom = found.date;
@@ -1105,18 +1180,24 @@ export function importJson(text, { merge = false } = {}) {
   if (!merge) {
     Object.assign(state, next);
   } else {
-    const seen = new Set(state.items.map((t) => t.id));
-    state.items.push(...next.items.filter((t) => !seen.has(t.id)));
-    const seenA = new Set(state.areas.map((a) => a.id));
-    state.areas.push(...next.areas.filter((a) => !seenA.has(a.id)));
-    const seenC = new Set(state.cards.map((c) => c.id));
-    state.cards.push(...next.cards.filter((c) => !seenC.has(c.id)));
-    const seenH = new Set(state.habits.map((x) => x.id));
-    state.habits.push(...next.habits.filter((x) => !seenH.has(x.id)));
+    // every list by id, what is here first; a day's note field by field
+    for (const key of ['items', 'areas', 'cards', 'links', 'wishlist', 'sprints', 'habits']) {
+      const seen = new Set(state[key].map((x) => x.id));
+      state[key].push(...(next[key] || []).filter((x) => !seen.has(x.id)));
+    }
     for (const [d, list] of Object.entries(next.habitLog)) {
       state.habitLog[d] = [...new Set([...(state.habitLog[d] || []), ...list])];
+      const at = next.habitLogAt?.[d];
+      if (at && (!state.habitLogAt[d] || at > state.habitLogAt[d])) state.habitLogAt[d] = at;
     }
-    Object.assign(state.notes, next.notes);
+    for (const [d, theirs] of Object.entries(next.notes)) {
+      if (!theirs) continue;
+      const mine = state.notes[d];
+      if (!mine) { state.notes[d] = theirs; continue; }
+      for (const k of ['focus', 'text', 'tomorrow']) if (!mine[k] && theirs[k]) mine[k] = theirs[k];
+      if (!(mine.top3 || []).length && (theirs.top3 || []).length) mine.top3 = theirs.top3;
+      mine.journal = { ...(theirs.journal || {}), ...(mine.journal || {}) };
+    }
   }
   save();
 }

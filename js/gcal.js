@@ -83,7 +83,8 @@ function ensureTokenClient() {
   tokenClient = window.google.accounts.oauth2.initTokenClient({
     client_id: cfg().clientId,
     scope: SCOPES,
-    callback: () => {}
+    callback: () => {},
+    error_callback: () => {}
   });
   return tokenClient;
 }
@@ -137,6 +138,13 @@ export async function signIn(interactive = true) {
       setStatus('ready', 'Connected.');
       resolve(gcal.token);
     };
+    // a popup that was blocked, or closed, never reaches `callback`; without
+    // this the promise hung, api() with it, and the status said Connecting…
+    client.error_callback = (err) => {
+      const msg = err?.message || (err?.type === 'popup_closed' ? 'Google sign-in was closed.' : 'Google sign-in did not open.');
+      setStatus('signed-out', msg);
+      reject(new Error(msg));
+    };
     try {
       client.requestAccessToken({ prompt: interactive ? 'consent' : '' });
     } catch (e) { reject(e); }
@@ -167,7 +175,9 @@ async function api(path, { method = 'GET', body, params, retry = true } = {}) {
     await signIn(false);
     return api(path, { method, body, params, retry: false });
   }
-  if (res.status === 410) throw Object.assign(new Error('Sync token expired'), { code: 410 });
+  // 410 on the events list is a sync token Google will not honour any more;
+  // on one event it is the event, gone for good — the callers read the code
+  if (res.status === 410) throw Object.assign(new Error(method === 'GET' ? 'Sync token expired' : 'Google Calendar 410: gone'), { code: 410 });
   if (res.status === 204) return null;
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
@@ -444,6 +454,8 @@ function scheduleFlush(delay) {
 
 const isRateLimit = (err) => err?.code === 429
   || (err?.code === 403 && /rateLimit|usageLimits|quota/i.test(err.message || ''));
+// an event Google no longer has: 404, or 410 once it has been deleted there
+const gone = (err) => err?.code === 404 || err?.code === 410;
 
 /** Google said slow down: keep the queue, wait longer each time it says so. */
 function pauseAfter(err) {
@@ -494,12 +506,18 @@ async function pushSeries(item, calId) {
   const want = wantedFor(item);
   const have = item.gcalIds || {};
   const ids = { ...have };
+  // written to the item after every step, not once at the end: a rate limit
+  // on the ninth create of fifteen threw the first eight away, and the retry
+  // made them again, so the calendar had each week twice. The re-queue that
+  // follows a failure commits, and this is what it saves.
+  const keep = () => { item.gcalIds = Object.keys(ids).length ? ids : null; };
 
   for (const [key, id] of Object.entries(have)) {
     if (want.has(key)) continue;
     try { await api(`/calendars/${calId}/events/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
-    catch (err) { if (err.code !== 404 && err.code !== 410) throw err; }
+    catch (err) { if (!gone(err)) throw err; }
     delete ids[key];
+    keep();
   }
   for (const [key, body] of want) {
     if (ids[key]) {
@@ -508,14 +526,16 @@ async function pushSeries(item, calId) {
         continue;
       } catch (err) {
         // gone from Google's side: fall through and make it again
-        if (err.code !== 404 && err.code !== 410) throw err;
+        if (!gone(err)) throw err;
         delete ids[key];
+        keep();
       }
     }
     const ev = await api(`/calendars/${calId}/events`, { method: 'POST', body });
     ids[key] = ev.id;
+    keep();
   }
-  item.gcalIds = Object.keys(ids).length ? ids : null;
+  keep();
   // a series has no single event of its own; the one it had before it repeated
   // is now the first occurrence's
   item.gcalId = null;
@@ -534,11 +554,51 @@ export async function pushItem(itemId) {
   scheduleFlush();
 }
 
-/** The push itself, now. Throws nothing: a failure re-queues the item. */
-async function pushNow(itemId) {
-  const item = seriesById(itemId);
+/**
+ * Take an item off the calendar as it goes. Queues a delete that carries the
+ * event ids itself, so the send still works once the item is gone from state
+ * — so call it *before* `deleteItem()`, with the row being deleted (the series,
+ * for "All of them"). Skipping one occurrence is an edit to the series, and
+ * `pushItem` reconciles that. Undo within the wait is safe: an item that is
+ * back when the queue goes out is pushed as it stands.
+ * @param {object} item  the item, or an occurrence of a series
+ */
+export function forgetItem(item) {
+  if (!item || !cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
+  if (splitOccurrence(item.id)) { pushItem(item.id).catch(() => {}); return; }
+  const live = itemById(item.id) || item;
+  const ids = [live.gcalId, ...Object.values(live.gcalIds || {})].filter(Boolean);
+  if (!ids.length) return;
+  queue({ kind: 'delete', itemId: live.id, ids });
+  scheduleFlush();
+}
+
+/** The events of an item that no longer exists, off the calendar by id. */
+async function deleteGone(op) {
+  if (!navigator.onLine || !isSignedIn()) { queue(op); return; }
+  const calId = encodeURIComponent(cfg().calendarId || 'primary');
+  const left = op.ids.slice();
+  try {
+    while (left.length) {
+      try { await api(`/calendars/${calId}/events/${encodeURIComponent(left[0])}`, { method: 'DELETE' }); }
+      catch (err) { if (!gone(err)) throw err; }
+      left.shift();
+    }
+  } catch (err) {
+    queue({ ...op, ids: left });   // the ones still standing
+    if (isRateLimit(err)) { pauseAfter(err); return; }
+    gcal.lastError = err;
+    setStatus('error', err.message);
+  }
+}
+
+/** The push itself, now. Throws nothing: a failure re-queues the op. */
+async function pushNow(op) {
+  const item = seriesById(op.itemId);
   if (!cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
-  if (!item) return;
+  // gone from state: only a delete that brought its event ids along has
+  // anything left to do — and it is done from the ids, the row being no more
+  if (!item) { if (op.kind === 'delete' && op.ids?.length) await deleteGone(op); return; }
 
   if (repeats(item)) {
     if (!navigator.onLine || !isSignedIn()) { queue({ kind: 'upsert', itemId: item.id }); return; }
@@ -572,7 +632,7 @@ async function pushNow(itemId) {
   if (!wantsEvent && !item.gcalId) return;
 
   if (!navigator.onLine || !isSignedIn()) {
-    queue({ kind: wantsEvent ? 'upsert' : 'delete', itemId });
+    queue({ kind: wantsEvent ? 'upsert' : 'delete', itemId: item.id });
     return;
   }
   const calId = encodeURIComponent(cfg().calendarId || 'primary');
@@ -588,8 +648,10 @@ async function pushNow(itemId) {
     }
     commit(null, { source: 'gcal-push' });
   } catch (err) {
-    if (err.code === 404 && item.gcalId) { item.gcalId = null; commit(); return pushNow(itemId); }
-    queue({ kind: wantsEvent ? 'upsert' : 'delete', itemId });
+    // the event is not there any more: forget it and go again — a create
+    // when one is wanted, nothing when the delete was the point
+    if (gone(err) && item.gcalId) { item.gcalId = null; commit(); return pushNow(op); }
+    queue({ kind: wantsEvent ? 'upsert' : 'delete', itemId: item.id });
     if (isRateLimit(err)) { pauseAfter(err); return; }
     gcal.lastError = err;
     setStatus('error', err.message);
@@ -607,7 +669,7 @@ export async function flushOutbox() {
   let paused = false;
   for (const op of pending) {
     if (paused) { queue(op); continue; }   // back in line, behind the one that hit the limit
-    await pushNow(op.itemId);
+    await pushNow(op);
     if (gcal.backoffUntil > Date.now()) paused = true;
   }
   if (!paused) {
