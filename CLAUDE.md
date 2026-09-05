@@ -205,7 +205,9 @@ label**, or the sidebar's line-up breaks.
 the settings' hours, opened wider for anything on those days (`shownHours`);
 a block past midnight is drawn to midnight.
 **Overview is the day**: a 24-hour clock, opened at 8am, next to focus, top
-three, open work and the end-of-day note; `#nextup` says what is on now or next,
+three, open work and the end-of-day note. `overdue()` is deadlines gone by
+*and* plain blocks booked on a day gone by with no deadline, unticked — a
+series only for its deadlines; `#nextup` says what is on now or next,
 on every screen. **The end-of-day note is the only thing that crosses a day**:
 `tomorrow` becomes the next morning's `focus` by way of `carryForward()`, from
 the draw *before* anything reads the note, only when `pendingTomorrow()` says
@@ -276,7 +278,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1133 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1141 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

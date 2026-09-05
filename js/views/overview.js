@@ -346,6 +346,7 @@ function deadlines(soon, late, { navigate, go }) {
   if (late.length) {
     list.append(h('div', { class: 'eyebrow', style: { color: 'var(--warn)', padding: '10px 4px 2px' } },
       `${late.length} past due — worth rescheduling`));
+    // a past block with no deadline is here too: its day was the only when it had
     for (const t of late.slice(0, 6)) list.append(row(t, navigate));
   }
   if (!soon.length && !late.length) {

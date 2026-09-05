@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v49', date: '2026-09-05',
+    title: 'A block that went by',
+    notes: [
+      'A block booked on a day that has passed, not ticked and with no deadline of its own, now sits under “past due — worth rescheduling” on Overview with the deadlines, soonest first. The → on the row pushes it to tomorrow. A repeating block is left out: Monday’s gym not ticked is not Tuesday’s owed.'
+    ]
+  },
+  {
     version: 'v48', date: '2026-09-04',
     title: 'A day of bug fixes',
     notes: [

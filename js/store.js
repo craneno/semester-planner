@@ -418,12 +418,21 @@ export function itemsPlannedOn(date) {
 /** How far back an unbounded question about the past is allowed to look. */
 const LOOKBACK = 120;
 
+/**
+ * What is behind: a deadline that went by unticked, and a block booked on a
+ * day that went by unticked — with no deadline of its own, the block was
+ * the only when it had, and a past block nobody ticked is work still owed.
+ * A series is asked only for its deadlines: the gym on Monday not ticked is
+ * not the gym owed on Tuesday. Soonest first, by whichever when it has.
+ */
 export function overdue(ref = today()) {
+  const when = (t) => t.due || t.plan?.date || '';
   return [
     ...state.items.filter((t) => !repeats(t) && !t.done && t.due && t.due < ref),
+    ...state.items.filter((t) => !repeats(t) && !t.done && !t.due && t.plan?.date && t.plan.date < ref),
     ...occurrencesBetween(addDays(ref, -LOOKBACK), addDays(ref, -1), (t) => !!t.due)
       .filter((o) => !o.done && o.due && o.due < ref)
-  ];
+  ].sort((a, b) => (when(a) < when(b) ? -1 : when(a) > when(b) ? 1 : 0));
 }
 
 export function upcoming(days = 14, ref = today()) {

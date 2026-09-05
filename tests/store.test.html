@@ -671,6 +671,37 @@ suite('Events — a class already on the schedule is not drawn twice', async ({ 
   check('the topbar sees each class once too', s.dayTimeline('2026-09-14').filter((x) => /thermo/i.test(x.title) && x.start === '10:30').length === 1);
 });
 
+/* What is behind. What has to hold: a deadline gone by; a block booked on a
+   day gone by, with no deadline, not ticked; not one ticked, not one on a
+   day to come, not one with a deadline still ahead (that is upcoming's), and
+   not a past occurrence of a repeating block; soonest first. */
+suite('Overdue — a block that went by is owed too', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+    items: [], cards: [], notes: {}
+  });
+  const ref = '2026-09-10';
+  s.upsertItem({ id: 'd1', title: 'deadline gone by', due: '2026-09-08' });
+  s.upsertItem({ id: 'b1', title: 'block gone by', plan: { date: '2026-09-07', start: '15:00', mins: 60 } });
+  s.upsertItem({ id: 'b2', title: 'block gone by, ticked', plan: { date: '2026-09-07', start: '16:00', mins: 60 }, done: true });
+  s.upsertItem({ id: 'b3', title: 'block still to come', plan: { date: '2026-09-11', start: '15:00', mins: 60 } });
+  s.upsertItem({ id: 'b4', title: 'block today', plan: { date: ref, start: '09:00', mins: 60 } });
+  s.upsertItem({ id: 'b5', title: 'block gone by, deadline ahead', plan: { date: '2026-09-06', start: null, mins: 0 }, due: '2026-09-20' });
+  s.upsertItem({ id: 'r1', title: 'gym', plan: { date: '2026-09-01', start: '07:00', mins: 60 }, repeat: { freq: 'daily', every: 1, until: null, count: null, ex: {} } });
+  const late = s.overdue(ref);
+  const ids = late.map((t) => t.id);
+  check('a deadline gone by is late', ids.includes('d1'));
+  check('a block booked on a day gone by, unticked, is late too', ids.includes('b1'), ids.join());
+  check('...not one that was ticked', !ids.includes('b2'));
+  check('...not one on a day to come, nor today', !ids.includes('b3') && !ids.includes('b4'));
+  check('a block gone by with a deadline still ahead is upcoming, not late', !ids.includes('b5') && s.upcoming(14, ref).some((t) => t.id === 'b5'));
+  check('a repeating block is never late', !ids.some((id) => id.startsWith('r1')), ids.join());
+  check('soonest first, by whichever when it has', ids.join() === 'b1,d1');
+  check('the count is what Overview says', late.length === 2);
+});
+
 suite('Series — this and after, and a copy', async ({ check }) => {
   const s = await storeWith({
     version: 20,
