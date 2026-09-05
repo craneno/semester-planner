@@ -156,7 +156,8 @@ one back and **stamps every row that differs with now**, or the server refuses
 the old clock as stale and the next sync undoes the undo. A commit from outside
 (`FOREIGN`, `external`) clears the stack. `undo`/`redo` are sources of their
 own: redrawn, pushed, never remembered. **The small edits live in
-`js/actions.js`** — tick, move, push to tomorrow — each with an Undo of its
+`js/actions.js`** — tick, move, push forward (`pushTarget`: today from
+behind, else tomorrow) — each with an Undo of its
 own that puts the old *when* back through `upsertItem`. A Canvas
 assignment is a deadline with `canvasId` (`js/canvas.js`); a re-import
 refreshes the date and title and leaves the area, the tick and the notes alone.
@@ -278,7 +279,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1141 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1154 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

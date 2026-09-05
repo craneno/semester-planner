@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v50', date: '2026-09-05',
+    title: 'Behind means today',
+    notes: [
+      'The → on a row that fell behind now brings it to today, not tomorrow: what was due last week is wanted now. On a row that is today’s, or has no day yet, it still pushes to tomorrow. Hover the arrow and it says which.'
+    ]
+  },
+  {
     version: 'v49', date: '2026-09-05',
     title: 'A block that went by',
     notes: [

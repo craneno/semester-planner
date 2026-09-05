@@ -7,7 +7,7 @@ import {
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
 import { pushItem, forgetItem } from './gcal.js';
-import { tickItem, pushToTomorrow, canPush } from './actions.js';
+import { tickItem, pushForward, pushLabel, canPush } from './actions.js';
 
 const syncOut = debounce((id) => pushItem(id).catch(() => {}), 700);
 
@@ -90,8 +90,8 @@ function render(item) {
     (item.gcalId || live.gcalIds) && h('span', { class: 'eyebrow', title: 'On your Google Calendar' }, 'GCAL'),
     live.canvasId && h('span', { class: 'eyebrow', title: 'From your Canvas feed' + (live.canvasCourse ? ' · ' + live.canvasCourse : '') }, 'CANVAS'),
     canPush(item) && h('button', {
-      class: 'btn ghost sm', title: 'Push to tomorrow',
-      onclick: () => pushToTomorrow(item.id, { after: rerender })
+      class: 'btn ghost sm', title: pushLabel(item),
+      onclick: () => pushForward(item.id, { after: rerender })
     }, '→'),
     h('button', {
       class: 'btn ghost sm', title: isOccurrence ? 'Duplicate the series' : 'Duplicate',

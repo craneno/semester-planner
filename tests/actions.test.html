@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Small edits tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<div id="toasts" hidden></div>
+<script type="module">
+/* The small edits in js/actions.js. The push: what fell behind comes to
+   today, what is today's or has no day goes to tomorrow; a block keeps its
+   time; a deadline stays a deadline; the label says which; and Undo puts the
+   old when back. actions.js reads the one store, so this shares it. */
+import { suite, sharedStoreWith } from './harness.js';
+import { today, addDays } from '../js/util.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+  items: [], cards: [], notes: {}
+});
+
+suite('Push forward — today from behind, else tomorrow', async ({ check }) => {
+  const A = await import('../js/actions.js');
+  const T = today(), Y = addDays(T, -1), TM = addDays(T, 1);
+
+  check('a thing due yesterday is wanted today', A.pushTarget({ due: Y }, T) === T);
+  check('...and one booked last week', A.pushTarget({ plan: { date: addDays(T, -7) } }, T) === T);
+  check("today's goes to tomorrow", A.pushTarget({ due: T }, T) === TM && A.pushTarget({ plan: { date: T } }, T) === TM);
+  check('so does one still ahead', A.pushTarget({ due: TM }, T) === TM);
+  check('and one with no day at all', A.pushTarget({}, T) === TM);
+  check('the label says which', A.pushLabel({ due: Y }, T) === 'Push to today' && A.pushLabel({ due: T }, T) === 'Push to tomorrow');
+
+  s.upsertItem({ id: 'p1', title: 'behind, a block', plan: { date: Y, start: '15:00', mins: 90 } });
+  s.upsertItem({ id: 'p2', title: 'behind, a deadline', due: addDays(T, -3), dueTime: '17:00' });
+  s.upsertItem({ id: 'p3', title: "today's", plan: { date: T, start: '09:00', mins: 60 } });
+  s.upsertItem({ id: 'p4', title: 'no day' });
+
+  A.pushForward('p1');
+  const p1 = s.itemById('p1');
+  check('a block from behind lands today, at its time and length', p1.plan.date === T && p1.plan.start === '15:00' && p1.plan.mins === 90, JSON.stringify(p1.plan));
+  A.pushForward('p2');
+  const p2 = s.itemById('p2');
+  check('a deadline from behind is due today, still a deadline', p2.due === T && p2.dueTime === '17:00' && p2.plan === null);
+  A.pushForward('p3');
+  check("today's block goes to tomorrow", s.itemById('p3').plan.date === TM);
+  A.pushForward('p4');
+  const p4 = s.itemById('p4');
+  check('a thing with no day gets tomorrow, all day', p4.plan?.date === TM && p4.plan.start === null && !p4.due);
+
+  check('nothing is remembered as done by it', !p1.done && !p2.done);
+  // the latest toast is the last push's; the ones before it said the same words and were folded
+  const undo = [...document.querySelectorAll('#toasts .toast button')].pop();
+  check('the toast offers Undo', !!undo && undo.textContent === 'Undo');
+  undo?.click();
+  check('...and Undo puts the old when back', s.itemById('p4').plan === null);
+  for (const id of ['p1', 'p2', 'p3', 'p4']) s.deleteItem(id);
+});
+</script>
+</body>
+</html>

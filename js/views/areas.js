@@ -14,7 +14,7 @@ import { openItem } from '../editor.js';
 import { openSyllabusImport } from '../syllabus.js';
 import { pushItem, recurringSeries, gcal } from '../gcal.js';
 import { noteCard } from '../capture.js';
-import { tickItem, pushToTomorrow, canPush } from '../actions.js';
+import { tickItem, pushForward, pushLabel, canPush } from '../actions.js';
 
 const PREVIEW = 3;   // deadlines shown under each area before "see all"
 
@@ -332,12 +332,12 @@ function hintFor(area) {
   return clash ? area.name.toLowerCase() : first;
 }
 
-/** One tap to tomorrow. Stops the row's own click, which opens the editor. */
+/** One tap forward: today from behind, else tomorrow. Stops the row's own click, which opens the editor. */
 function pushBtn(t, rerender) {
   if (!canPush(t)) return null;
   return h('button', {
-    class: 'push-btn', title: 'Push to tomorrow', 'aria-label': `Push ${t.title} to tomorrow`,
-    onclick: (e) => { e.stopPropagation(); pushToTomorrow(t.id, { after: rerender }); }
+    class: 'push-btn', title: pushLabel(t), 'aria-label': `${pushLabel(t)}: ${t.title}`,
+    onclick: (e) => { e.stopPropagation(); pushForward(t.id, { after: rerender }); }
   }, '→');
 }
 

@@ -62,27 +62,43 @@ export function moveItem(id, plan, { after } = {}) {
 }
 
 /**
- * Push to tomorrow — the most common reschedule, one tap. A planned block
- * keeps its time and length and moves a day; a deadline moves a day; a thing
- * with no date at all gets tomorrow, all day.
+ * The day a push lands: today for a thing left behind, tomorrow for one
+ * that is today's or has no day yet. What fell behind is wanted now, not
+ * the day after; pushing it a day at a time from last week was six taps.
  */
-export function pushToTomorrow(id, { after } = {}) {
+export function pushTarget(item, ref = today()) {
+  const when = item?.due || item?.plan?.date || null;
+  return when && when < ref ? ref : addDays(ref, 1);
+}
+
+/** What the → does to this row, for a title or a label. */
+export const pushLabel = (item, ref = today()) => `Push to ${pushTarget(item, ref) === ref ? 'today' : 'tomorrow'}`;
+
+/**
+ * Push forward — the most common reschedule, one tap. A planned block keeps
+ * its time and length and moves to the day; a deadline moves to it; a thing
+ * with no date at all gets tomorrow, all day. See pushTarget for which day.
+ */
+export function pushForward(id, { after } = {}) {
   const item = itemById(id);
   if (!item) return;
   const before = whenOf(item);
-  const tomorrow = addDays(today(), 1);
+  const day = pushTarget(item);
   let patch;
-  if (item.plan?.date) patch = { plan: { ...item.plan, date: tomorrow } };
-  else if (item.due) patch = { due: tomorrow };
-  else patch = { plan: { date: tomorrow, start: null, mins: 0 }, due: null, dueTime: null };
+  if (item.plan?.date) patch = { plan: { ...item.plan, date: day } };
+  else if (item.due) patch = { due: day };
+  else patch = { plan: { date: day, start: null, mins: 0 }, due: null, dueTime: null };
   commit(() => upsertItem({ id, ...patch }));
   send(id);
   after?.();
-  toast(`Pushed to ${fmtDate(tomorrow, { weekday: true })}`, {
+  toast(`Pushed to ${day === today() ? 'today' : fmtDate(day, { weekday: true })}`, {
     action: 'Undo',
     onAction: () => { commit(() => upsertItem({ id, ...before })); send(id); after?.(); }
   });
 }
+
+/** The old name, kept for a caller that still says it. */
+export const pushToTomorrow = pushForward;
 
 /** True for a row a push makes sense on: not done, and not a whole series. */
 export const canPush = (item) => !!item && !item.done && !(item.repeat && !splitOccurrence(item.id));

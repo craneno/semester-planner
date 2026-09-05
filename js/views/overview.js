@@ -18,7 +18,7 @@ import { openItem } from '../editor.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
-import { tickItem, pushToTomorrow, canPush } from '../actions.js';
+import { tickItem, pushForward, pushLabel, canPush } from '../actions.js';
 
 export function renderOverview(root, { navigate, go }) {
   clear(root);
@@ -365,10 +365,10 @@ const check = (t, navigate) => h('input', {
   onchange: (e) => tickItem(t.id, e.target.checked, { after: navigate })
 });
 
-/** One tap to tomorrow. Stops the row's own click, which opens the editor. */
+/** One tap forward: today from behind, else tomorrow. Stops the row's own click, which opens the editor. */
 const pushBtn = (t, navigate) => (canPush(t) ? h('button', {
-  class: 'push-btn', title: 'Push to tomorrow', 'aria-label': `Push ${t.title} to tomorrow`,
-  onclick: (e) => { e.stopPropagation(); pushToTomorrow(t.id, { after: navigate }); }
+  class: 'push-btn', title: pushLabel(t), 'aria-label': `${pushLabel(t)}: ${t.title}`,
+  onclick: (e) => { e.stopPropagation(); pushForward(t.id, { after: navigate }); }
 }, '→') : null);
 
 function line(t, navigate) {
