@@ -26,7 +26,8 @@ const TABLE = 'planner_rows';
 const BASE_KEY = (uid) => `semesterPlanner.cloudBase.${uid}`;
 const SCHEMA_KEY = (uid) => `semesterPlanner.cloudSchema.${uid}`;
 const EPOCH = '1970-01-01T00:00:00Z';
-const PAGE = 500;
+/** Rows per page of a pull. A seam: the tests page with three. */
+export const pullSettings = { page: 500 };
 
 export const cloud = {
   status: 'off',      // off | signed-out | connecting | ready | syncing | error | offline
@@ -133,7 +134,16 @@ export async function client() {
   return sb;
 }
 
-function resetClient() { sb = null; }
+/* The old client goes with its channel and its auth listener: left standing,
+   each one kept firing beside the new client's, one more of each per sign-in.
+   Nothing is stood up again here: the caller says when — Settings starts
+   the client once its rebuild or restore is done, and a start from in here
+   ran a sync under the very restore that asked for the reset. */
+function resetClient() {
+  stop();
+  if (authSub) { try { authSub.unsubscribe(); } catch { /* ignore */ } authSub = null; }
+  sb = null;
+}
 
 /** Test seam: inject a stand-in for the Supabase client. */
 export function _setClient(fake, { userId, email } = {}) {
@@ -335,7 +345,12 @@ export async function sync({ full = false, manual = false } = {}) {
     const pushed = await push(c, base);
     entry.down = pulled.applied; entry.up = pushed.sent; entry.adopted = pushed.adopted || 0;
 
-    cfg().cursor = [cfg().cursor, pulled.cursor, pushed.cursor].filter(Boolean).sort().pop() || cfg().cursor;
+    // The cursor is what pull saw, never what push wrote. A row another
+    // device sent between our pull and our push has a synced_at after the
+    // one and before the other; a cursor moved up to the push would step
+    // over it, and the next pull would never ask for it. Our own rows come
+    // down again on the next pull and are dropped there by their hash.
+    cfg().cursor = [cfg().cursor, pulled.cursor].filter(Boolean).sort().pop() || cfg().cursor;
     cfg().lastSync = new Date().toISOString();
     // Record what push saw, not what state holds now: an edit or delete made
     // while the round trip was in flight has not been sent yet, and baking it
@@ -363,6 +378,10 @@ export async function sync({ full = false, manual = false } = {}) {
       entry.error = 'token expired — refreshed, trying again';
       pending = true;
     } else {
+      // set only between the refresh and its retry: left standing after a
+      // retry that failed for some other reason, the next expiry hours on
+      // would not be refreshed at all
+      authRetried = false;
       console.warn('cloud sync', err);
       entry.error = describeSyncError(err);
       setStatus('error', entry.error);
@@ -375,26 +394,49 @@ export async function sync({ full = false, manual = false } = {}) {
   }
 }
 
-/** Bring down everything the server has seen since our cursor. */
+/* A PostgREST filter value, quoted: an id or a timestamp holds dots, colons
+   and commas, which are the filter grammar's own. */
+const quoted = (v) => '"' + String(v).replace(/[\\"]/g, '\\$&') + '"';
+
+/**
+ * Bring down everything the server has seen since our cursor.
+ *
+ * Paged by (synced_at, kind, id), not by synced_at alone. A push upserts 200
+ * rows in one statement and planner_touch stamps them all with the one
+ * transaction time, so a page that ends inside a batch would, keyed on the
+ * stamp alone, skip the rest of the batch: the next page asked for what came
+ * after that stamp. Keyed on all three, the next page starts at the row after
+ * the last one seen, and a page of identical stamps still moves on.
+ */
 async function pull(c) {
   const baseline = loadBaseline();
-  const hashes = currentHashes();
-  let cursor = cfg().cursor || EPOCH;
+  let hashes;
+  const cursor = cfg().cursor || EPOCH;
+  let last = null;   // the last row of the page before: where the next one starts
   let maxSynced = '';
   let changed = false;
   let applied = 0;
   const took = {};   // key -> hash of what was applied, null for a tombstone
 
   for (;;) {
-    const { data, error } = await c
-      .from(TABLE)
-      .select('kind,id,data,deleted,updated_at,synced_at')
-      .gt('synced_at', cursor)
+    let q = c.from(TABLE).select('kind,id,data,deleted,updated_at,synced_at');
+    q = last
+      ? q.or(`synced_at.gt.${quoted(last.synced_at)},`
+        + `and(synced_at.eq.${quoted(last.synced_at)},kind.gt.${quoted(last.kind)}),`
+        + `and(synced_at.eq.${quoted(last.synced_at)},kind.eq.${quoted(last.kind)},id.gt.${quoted(last.id)})`)
+      : q.gt('synced_at', cursor);
+    const { data, error } = await q
       .order('synced_at', { ascending: true })
-      .limit(PAGE);
+      .order('kind', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(pullSettings.page);
     if (error) throw error;
     if (!data || !data.length) break;
 
+    // hashed after the await, not before: an edit made here while the page
+    // was on its way would look clean against a hash taken earlier, and the
+    // remote row would be written over it
+    hashes = currentHashes();
     for (const row of data) {
       if (row.synced_at > maxSynced) maxSynced = row.synced_at;
       // Our own write, coming back down the realtime channel we are subscribed
@@ -410,8 +452,12 @@ async function pull(c) {
         if (ok || row.deleted) took[key(row.kind, row.id)] = row.deleted ? null : hash(row.data);
       }
     }
-    cursor = data[data.length - 1].synced_at;
-    if (data.length < PAGE) break;
+    const end = data[data.length - 1];
+    // a page that did not move on is a server that ignored the key, and
+    // one more ask would be the same page again, for ever
+    if (last && last.synced_at === end.synced_at && last.kind === end.kind && last.id === end.id) break;
+    last = { synced_at: end.synced_at, kind: end.kind, id: end.id };
+    if (data.length < pullSettings.page) break;
   }
 
   if (changed) {
@@ -445,15 +491,18 @@ function winner(row, baseline, hashes) {
   if (!dirty) return 'remote';
 
   const stamp = rowStamp(row.kind, row.id);
-  if (stamp && row.updated_at && new Date(stamp) > new Date(row.updated_at)) return 'local';
+  // a tie keeps the local edit: the cursor stops at what pull saw, so our own
+  // last write comes back down once, and an edit made here in the same
+  // millisecond must not lose to it
+  if (stamp && row.updated_at && new Date(stamp) >= new Date(row.updated_at)) return 'local';
   if (!baseline) return 'remote';       // first sync: trust the cloud
   return stamp ? 'remote' : 'local';    // no local timestamp to compare: keep the edit we can see
 }
 
 /**
  * Send up anything that changed here, plus tombstones for anything deleted here.
- * Returns the pushed cursor and the hashes it actually sent — those hashes, not
- * the state at the end of the sync, are what the next baseline must record.
+ * Returns the hashes it actually sent — those hashes, not the state at the end
+ * of the sync, are what the next baseline must record.
  */
 async function push(c, baseline = loadBaseline()) {
   const rows = snapshotRows();
@@ -482,7 +531,7 @@ async function push(c, baseline = loadBaseline()) {
       out.push({ user_id: cloud.userId, kind, id: rest.join(':'), data: {}, deleted: true, updated_at: now });
     }
   }
-  if (!out.length) return { cursor: '', hashes, sent: 0, adopted: 0 };
+  if (!out.length) return { hashes, sent: 0, adopted: 0 };
 
   /* Read back what landed, not just that it landed. The database drops a
      write older than the row it hits (planner_rows_keep_newest) and answers
@@ -490,7 +539,6 @@ async function push(c, baseline = loadBaseline()) {
      sent is one the server refused, and the copy it holds is the newer one.
      Take it, and record its hash rather than ours, or the next diff would
      push the same stale copy again for ever. */
-  let maxSynced = '';
   let adopted = 0;
   for (let i = 0; i < out.length; i += 200) {
     const { data, error } = await c
@@ -499,9 +547,16 @@ async function push(c, baseline = loadBaseline()) {
       .select('kind,id,data,deleted,synced_at');
     if (error) throw error;
     for (const row of data || []) {
-      if (row.synced_at > maxSynced) maxSynced = row.synced_at;
       const k = key(row.kind, row.id);
-      if (row.deleted || hashes[k] === undefined) continue;
+      if (hashes[k] === undefined) continue;   // our own tombstone, back as sent
+      if (row.deleted) {
+        // a live row refused for a newer tombstone: the delete is the newer
+        // decision, so it is taken here too, and the row leaves the baseline
+        // — kept, it would sit here for ever and never go up again
+        if (applyRow(row)) adopted++;
+        delete hashes[k];
+        continue;
+      }
       const kept = hash(row.data);
       if (kept === hashes[k]) continue;
       if (applyRow(row)) adopted++;
@@ -509,7 +564,7 @@ async function push(c, baseline = loadBaseline()) {
     }
   }
   if (adopted) commit(null, { source: 'cloud' });
-  return { cursor: maxSynced, hashes, sent: out.length, adopted };
+  return { hashes, sent: out.length, adopted };
 }
 
 /* ---------------- realtime ---------------- */
@@ -538,6 +593,7 @@ async function subscribeLive(c) {
 /* ---------------- lifecycle ---------------- */
 
 let timer = null;
+let authSub = null;   // the one onAuthStateChange listener; start() is called on every sign-in
 const pushSoon = debounce(() => sync(), 1500);
 
 export async function start() {
@@ -549,10 +605,11 @@ export async function start() {
     const { data } = await c.auth.getSession();
     if (!data.session) { setStatus('signed-out', 'Sign in to sync.'); return; }
     await adoptSession(data.session);
-    c.auth.onAuthStateChange((_e, session) => {
+    if (authSub) { try { authSub.unsubscribe(); } catch { /* ignore */ } }
+    authSub = c.auth.onAuthStateChange?.((_e, session) => {
       if (session) adoptSession(session);
       else { cloud.userId = null; setStatus('signed-out'); }
-    });
+    })?.data?.subscription || null;
     await sync();
     await subscribeLive(c);
     schedule();
@@ -658,9 +715,14 @@ export function resetLocalSyncState() {
 // of ours, pushes, writes its own `lastSync`... two tabs of the planner on
 // one device kept each other syncing every couple of seconds, and Settings
 // twitched with each round.
+// It does count as an edit for the loop breaker, though. The other tab's
+// edits arrive this way, and our baseline is older than what it pushed, so
+// our next sync sends rows with nothing typed here — once per glance at the
+// idle tab, and five glances halted sync for a loop that was not one.
 subscribe((meta) => {
-  if (meta?.source === 'cloud' || meta?.external) return;
+  if (meta?.source === 'cloud') return;
   editsSinceSync++;
+  if (meta?.external) return;
   if (cfg().enabled && isSignedIn()) pushSoon();
 });
 

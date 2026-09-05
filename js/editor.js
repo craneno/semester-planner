@@ -6,7 +6,7 @@ import {
   repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
-import { pushItem } from './gcal.js';
+import { pushItem, forgetItem } from './gcal.js';
 import { tickItem, pushToTomorrow, canPush } from './actions.js';
 
 const syncOut = debounce((id) => pushItem(id).catch(() => {}), 700);
@@ -63,11 +63,16 @@ function render(item) {
       if (!onlyTitle) rerender();
       return;
     }
+    // gone from under the panel — a pull or another tab deleted it. Writing
+    // by its id would make it again, as a ghost with default fields.
+    if (!itemById(targetId)) { toast('That task was deleted elsewhere.'); closePeek(); return; }
+    // tagged: the panel floats over a view that lists this item, and that
+    // view repaints only for a source it knows
     commit(() => {
       const next = upsertItem({ id: targetId, ...patch });
       // keep the copy this render is holding in step with what was stored
       if (next && targetId === item.id) Object.assign(item, next);
-    });
+    }, { source: 'editor' });
     if (resync) syncOut(live.id);
   };
 
@@ -433,13 +438,21 @@ function addMonths(date, n) {
 async function removePlain(item) {
   if (!await confirmDialog('Delete this task?', item.title, 'Delete')) return;
   const snapshot = JSON.parse(JSON.stringify(item));
+  // its Google event goes with it — queued before the row is gone, since the
+  // queue needs the event ids the row holds
+  forgetItem(item);
   // tagged so the view underneath repaints — the peek floats over whichever
   // view is showing, and it still lists this item
   commit(() => deleteItem(item.id), { source: 'editor' });
   closePeek();
   toast('Task deleted', {
     action: 'Undo',
-    onAction: () => commit(() => state.items.push(snapshot), { source: 'editor' })
+    // stamped now, like the store's own undo: put back with its old clock the
+    // server keeps the tombstone, and the next full sync deletes it here too
+    onAction: () => commit(() => {
+      snapshot.updatedAt = new Date().toISOString();
+      state.items.push(snapshot);
+    }, { source: 'editor' })
   });
 }
 
@@ -453,6 +466,7 @@ function removeOccurrence(item, live) {
     toast(msg, {
       action: 'Undo',
       onAction: () => commit(() => {
+        undo.updatedAt = new Date().toISOString();
         const i = state.items.findIndex((t) => t.id === undo.id);
         if (i >= 0) state.items[i] = undo; else state.items.push(undo);
       }, { source: 'editor' })
@@ -474,6 +488,7 @@ function removeOccurrence(item, live) {
       }, 'This and after'),
       h('button', {
         class: 'btn', onclick: () => {
+          forgetItem(live);          // every occurrence's event, before the row goes
           commit(() => deleteItem(live.id), { source: 'editor' });
           done('Series deleted');
         }

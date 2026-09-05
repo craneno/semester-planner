@@ -59,10 +59,11 @@ suite('Capture — notecards and filing', async ({ check }) => {
     const s = await storeWith(base());
     const card = s.addCard('call advisor thu 2pm 30m');
     const item = s.cardToItem(card.id, { as: 'timed' });
-    check('a timed task parses the date out of the text', !!item.due, `got ${item.due}`);
-    check('a timed task keeps the time', item.dueTime === '14:00', `got ${item.dueTime}`);
+    // a block and only a block: booked and owed at once, it was drawn twice
+    check('a timed task parses the date out of the text', !!item.plan?.date, `got ${item.plan?.date}`);
+    check('a timed task keeps the time', item.plan?.start === '14:00', `got ${item.plan?.start}`);
     check('a timed task books a block', !!item.plan && item.plan.start === '14:00');
-    check('the block matches the due date', item.plan.date === item.due);
+    check('the block is not also a deadline', item.due === null && item.dueTime === null, `got ${item.due} ${item.dueTime}`);
     check('the block uses the stated duration', item.plan.mins === 30, `got ${item.plan?.mins}`);
     check('the parsed noise is out of the title', item.title === 'call advisor', `got "${item.title}"`);
   }
@@ -72,7 +73,7 @@ suite('Capture — notecards and filing', async ({ check }) => {
     const card = s.addCard('undated thing');
     const item = s.cardToItem(card.id, { as: 'timed' });
     check('a timed task with no date in the text still books today',
-      item.plan && item.plan.date === item.due && !!item.due);
+      !!item.plan && !!item.plan.date && item.due === null);
   }
 
   {

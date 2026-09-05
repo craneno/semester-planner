@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v44**.
+Schema **20**, service worker **planner-v48**.
 
 ## Working with me
 
@@ -54,7 +54,10 @@ there (`itemById`, `itemsDueOn`, `upcoming`, `classesOn`, `dayTimeline`, …)
 instead of filtering by hand again. `commit(fn, { source })` — `app.js` redraws
 only for `external`, `gcal`, `cloud`, `editor`, `restore`, `undo`, `redo`,
 `canvas`; tag one made from a
-floating panel, or the view under it will not repaint.
+floating panel, or the view under it will not repaint (`set()` in the editor
+and `tickItem` are). `modal()` focuses the first control in its *body*, never
+the ✕. Anything an Undo puts back is stamped now, or the server keeps the
+tombstone.
 
 ## Cloud sync
 
@@ -67,8 +70,7 @@ is the pull cursor). **No book-keeping per change** — never add dirty flags or
 **Back from the background, ask for the session first** (`resume()`): an iOS
 app that slept wakes with an expired token, and a sync fired straight away got
 a 401 before supabase-js had refreshed it. A sync that meets one refreshes and
-goes once more, once (`authRetried`). **Sync watches itself.** `cloud.log` is the last thirty syncs (Settings → Sync
-log); the loop breaker halts after `LOOP_MAX` pushes in a row with nothing
+goes once more, once (`authRetried`). **Sync watches itself.** `cloud.log` is the last thirty syncs; the loop breaker halts after `LOOP_MAX` pushes in a row with nothing
 edited here, and `sync({ manual })` starts it again. `pull()` hands `push()` the
 hashes it took, or every row from another device went straight back up. The
 server keeps replaced rows thirty days (`planner_rows_history`); `restore()`
@@ -97,13 +99,11 @@ baseline was built under, and a bump throws the baseline away: with none, the
 cloud wins every row, and the new shape goes up only once we agree with the
 server. `push()` sends `rowStamp()`, never the clock at send; `rowStamp()` must
 know every kind that carries one, and **`migrate()` must carry `updatedAt`
-through** — the area normaliser did not, which left every area with no clock at
-all. Postgres has the last word: `planner_rows_keep_newest` drops a write older
+through** — the area normaliser once did not. Postgres has the last word: `planner_rows_keep_newest` drops a write older
 than the row it lands on (`supabase/upgrade.sql`; a delete still passes, being
 its own decision). **The baseline is a short hash per row** (cyrb53, keys
-sorted first — jsonb comes back sorted, and a raw-bytes hash had push read its
-own row back as "changed" for ever), held in memory as well as localStorage.
-`AGREED` is schema *and* hash shape, so an old baseline is thrown away too.
+sorted first, as jsonb comes back sorted), held in memory as well as
+localStorage. `AGREED` is schema *and* hash shape, so an old one goes too.
 
 **Sync is fan-out, not safety.** An upsert keeps no history and reaches every
 device in seconds. `keepBackups()` copies the raw state *before `migrate()`
@@ -178,7 +178,10 @@ is the plain date maths); the screens draw **occurrences**, made on the spot and
 named `<id>@<the day the rule gave it>`. A series never draws itself, or its
 first occurrence lands on the page twice. Only `plan`, `due`, `title` and `done`
 can belong to one occurrence, in `repeat.ex[key]`; the rest belongs to the
-series. **An occurrence is a copy** — writing to it throws the change away, so
+series. `ex[key].mode` (`'plan'`/`'due'`) makes one occurrence the other kind
+from its series, so `itemsDueOn`/`itemsPlannedOn` ask every series. "This and
+after" from the first occurrence is all of them; ending a series before its
+first day deletes it, or a rule that never fires sits in every sync unseen. **An occurrence is a copy** — writing to it throws the change away, so
 writes go through `upsertItem`/`toggleItem`/`deleteItem`, and views must ask the
 selectors (`itemsPlannedOn`, `itemsDueOn`, `upcoming`) rather than filter
 `state.items`, which holds only the rule. Google gets **one plain event per
@@ -191,24 +194,27 @@ ends the day before, a new one starts at the occurrence with the edit.
 
 `VIEWS` in `js/app.js`: overview, semester, week, habits, wishlist, settings.
 Categories and areas are **data, not screens**, so `route()` handles `#/week`,
-`#/course` and `#/area/<id>`, falling back to Overview; `AREA_CATEGORIES` is the
-one source for the sidebar, the breakdown and the editor's select. Habits and
-the wishlist sit under Personal but are **not** areas: `CATEGORY_PINS` hangs
-them off the group, outside the `reorderable()` host (a pinned row has no
-`reorderId`). **A category row's caret goes after the label** — anything ahead
-of the glyph breaks the sidebar's one line-up.
+`#/course` and `#/area/<id>`, falling back to Overview (and putting the hash
+right when an open area is deleted); `AREA_CATEGORIES` is the one source for
+the sidebar, the breakdown and the editor's select. Habits and the wishlist sit
+under Personal but are **not** areas: `CATEGORY_PINS` hangs them off the group,
+outside the `reorderable()` host. **A category row's caret goes after the
+label**, or the sidebar's line-up breaks.
 
+**Week follows the day** (`follows`) until prev/next let go of it. It draws
+the settings' hours, opened wider for anything on those days (`shownHours`);
+a block past midnight is drawn to midnight.
 **Overview is the day**: a 24-hour clock, opened at 8am, next to focus, top
 three, open work and the end-of-day note; `#nextup` says what is on now or next,
 on every screen. **The end-of-day note is the only thing that crosses a day**:
 `tomorrow` becomes the next morning's `focus` by way of `carryForward()`, from
-the draw *before* anything reads the note, and only when `pendingTomorrow()`
-says so — a `commit()` with no check would sync a row every visit. Tagged
-`{ source: 'carry' }` so `app.js` does not redraw mid-build, and marked spent
-(`tomorrowUsed`) even when the day already has a focus.
-**A journal entry lives in the day it was written**, `notes[date].journal[areaId]`,
-so a term of writing syncs as small rows instead of one big one sent again and
-again; the **freewrite** is one string on the area. **The day starts at 3am** —
+the draw *before* anything reads the note, only when `pendingTomorrow()` says
+so (a `commit()` with no check would sync a row every visit), tagged
+`{ source: 'carry' }`, and marked spent (`tomorrowUsed`) either way.
+**Every note writer calls `touchNote(date)`**, or the note has no clock and
+an old copy beats a new one. **A journal entry lives in the day it was
+written**, `notes[date].journal[areaId]`, so a term of writing syncs as small
+rows; the **freewrite** is one string on the area. **The day starts at 3am** —
 `DAY_RESET_HOUR` and `today(now)` in `js/util.js`, the one place that decides it
 — so an entry written at 1am files under the day it is about. `sweepDone()`
 deletes work ticked off *before* that reset, behind an Undo from `navigate()`.
@@ -216,11 +222,10 @@ deletes work ticked off *before* that reset, behind an Undo from `navigate()`.
 **Semester is a chart, with the list behind a switch.** Bands are the three
 categories, lanes are areas, and `area.onChart` (missing reads as true) picks
 which. The maths is **whole days from the first day of term**, times `--day-w`
-at the last moment — which keeps `chartRange`, `itemSpan`, `bandSpan`,
-`packLanes`, `monthBands` and `fitDayWidth` plain and easy to test. A bar too
-narrow for its title writes it outside, and *left* near the end of term, hence
-`head` as well as `reserve`; bands do the same (`bandRows`). A **series draws as
-its run**, first occurrence to last, not one bar at its anchor. **A focus or a
+at the last moment, which keeps `chartRange`, `itemSpan`, `packLanes` and
+the rest plain to test. A bar wide enough writes its title inside; too narrow,
+outside, and *left* near the end of term, hence `head` as well as `reserve`.
+A **series draws as its run**, first occurrence to last. **A focus or a
 sprint is a stretch of weeks in one area's lane**, dragged out the way a block
 is on the calendar — `kind` decides whether we ask for deliverables.
 
@@ -228,25 +233,26 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 - `restoreDayScroll()` runs **right after append, in the same tick**:
   `scrollTop` does nothing before layout, and rAF never fires in a background
-  tab, which is exactly when a restored session draws. **A redraw under a
-  finger loses the touch**: the node it began on is gone, so `navigate()`
-  waits while `body.nav-dragging`, and a stuck menu settles on the next touch.
+  tab. **A redraw under a finger loses the touch**: the node it began on is
+  gone, so `navigate()` waits while `body.nav-dragging`.
 - Both drags — `dragCreate()`, `dragSpan()` — fire only on the **empty grid
   itself**, never on a block in it, never on touch (there the drag scrolls);
   `pointercancel` and Escape must not open the prompt. `dragBlock()` is the
   other half: middle moves, edges resize, `grabMode` keeping a third for the
-  middle. **It owns the click** — the browser fires one after every drag, so a
-  block with its own `onclick` would open the panel each time.
+  middle. **It owns the click** the browser fires after every drag.
+- A tray chip is planned only when let go **over a day** (`inside` from
+  `hit()`, which names the nearest column whatever is under the pointer). On
+  touch `draggable({ hold })` waits, so a swipe along the tray scrolls it. A
+  dialog a tap opens ignores the scrim for `SCRIM_GRACE_MS`, or its own click
+  closed it.
 - **A finger says what it means by waiting.** A tap opens a block, a press held
   `HOLD_MS` picks it up, and moving before that hands the touch back to the
   scroller — so `.blk` keeps `touch-action: pan-x pan-y` (`none` would let a
   block eat the scroll) and `dragBlock` takes it, with `preventDefault()` on
-  `touchmove`, only once the hold is out. On touch the mode is always `move`:
-  an 8px resize edge is finer than a fingertip.
+  `touchmove`, only once the hold is out. On touch the mode is always `move`.
 - **Pixels per hour come from CSS, never a number in the JS.** `--hour-h` and
   `--day-hour-h` draw the gridlines; `cssPx()` places the blocks. A hard-coded
-  52 put every block an hour off on a phone, where the hour is 46. Crossing
-  that breakpoint redraws, or the maths stays that of the size it was born in.
+  52 put every block an hour off on a phone. Crossing the breakpoint redraws.
 - **Never size a textarea that has no width.** Measured at zero it wraps every
   word and reports tens of thousands of pixels; `fitBoxes()` watches width only.
   `body.rail-hidden` makes `#app` **one column**, or main sits in a zero-wide one.
@@ -270,7 +276,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1045 checks, and
+Serve the repo, open `/tests/`. No runner in the page, no deps, 1133 checks, and
 `tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
 suite has finished** — taking the first hid a failure in a later one — and its
 suites **run one at a time** (`queue` in `suite()`): started together, their

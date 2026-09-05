@@ -26,9 +26,16 @@ export function navSettle(job, dx, w, min) {
 
 /* ---------------- toasts ---------------- */
 
+/** How many may stand at once: past this the oldest goes, or eight quick adds
+ *  in a row wall off the page behind them. */
+const TOASTS_MAX = 3;
+
 export function toast(msg, { action, onAction, ms = 3200 } = {}) {
   const host = $('#toasts');
-  const el = h('div', { class: 'toast' }, msg,
+  // the same words twice are one toast, said again
+  for (const old of host.querySelectorAll('.toast')) if (old.dataset.msg === msg) old.remove();
+  while (host.children.length >= TOASTS_MAX) host.firstElementChild.remove();
+  const el = h('div', { class: 'toast', dataset: { msg } }, msg,
     action && h('button', { onclick: () => { onAction?.(); el.remove(); } }, action));
   host.append(el);
   setTimeout(() => el.remove(), ms);
@@ -39,9 +46,14 @@ export function toast(msg, { action, onAction, ms = 3200 } = {}) {
 
 let openModal = null;
 
+/** A click on the scrim this soon after opening is the one the browser makes
+ *  of the tap that opened the dialog, and is not an answer to it. */
+const SCRIM_GRACE_MS = 400;
+
 export function modal({ title, body, footer, onClose, wide = false }) {
   closeModal();
-  const scrim = h('div', { class: 'scrim open', onclick: closeModal });
+  const openedAt = Date.now();
+  const scrim = h('div', { class: 'scrim open', onclick: () => { if (Date.now() - openedAt > SCRIM_GRACE_MS) closeModal(); } });
   const el = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div', { class: 'modal-h' },
       h('h2', {}, title),
@@ -52,7 +64,13 @@ export function modal({ title, body, footer, onClose, wide = false }) {
   if (wide) el.style.width = 'min(900px, calc(100vw - 24px))';
   document.body.append(scrim, el);
   openModal = { el, scrim, onClose };
-  setTimeout(() => el.querySelector('input, textarea, button')?.focus(), 30);
+  // the first control in the body, else the first button in the footer. The
+  // header's ✕ is first in the DOM, and focused there, Enter closed the
+  // dialog and typing went nowhere.
+  setTimeout(() => {
+    if (openModal?.el !== el) return;
+    el.querySelector('.modal-b input, .modal-b textarea, .modal-b select, .modal-b button, .modal-f button')?.focus();
+  }, 30);
   return el;
 }
 
@@ -144,38 +162,72 @@ export const priorityTag = (p) =>
 
 /* ---------------- pointer drag (works on iOS + Windows) ---------------- */
 
+/** A finger must rest this long on a `hold` handle before it has hold of it. */
+export const DRAG_HOLD_MS = 400;
+
 /**
  * @param {HTMLElement} handle
- * @param {{onStart?:Function, onMove:Function, onEnd:Function, threshold?:number}} cb
+ * @param {{onStart?:Function, onMove:Function, onEnd:Function, onCancel?:Function,
+ *          onClick?:Function, threshold?:number, hold?:boolean}} cb
+ *
+ * A drag the browser takes back (pointercancel) or the user gives up (Escape)
+ * is not a drop: `onCancel` gets it, or `onEnd` when there is none — the
+ * callers that reorder a list are safe either way, since nothing moved.
+ *
+ * `hold`: on touch, wait DRAG_HOLD_MS before the drag begins, and hand the
+ * gesture back to the scroller if the finger moves first — a chip in a
+ * horizontal tray is swiped past far more often than it is picked up.
  */
 export function draggable(handle, cb) {
   const threshold = cb.threshold ?? 5;
   handle.addEventListener('pointerdown', (e) => {
     if (e.button != null && e.button !== 0) return;
     const startX = e.clientX, startY = e.clientY;
-    let started = false;
+    const waits = cb.hold && e.pointerType === 'touch';
+    let started = false, hold = null, at = e;
+
+    const begin = (ev) => {
+      started = true;
+      handle.setPointerCapture?.(ev.pointerId);
+      cb.onStart?.(ev, { startX, startY });
+    };
+    // once the hold is out the gesture is ours, not the scroller's
+    const keepGesture = (ev) => { if (started && ev.cancelable) ev.preventDefault(); };
 
     const move = (ev) => {
+      at = ev;
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
-      if (!started && Math.hypot(dx, dy) < threshold) return;
       if (!started) {
-        started = true;
-        handle.setPointerCapture?.(ev.pointerId);
-        cb.onStart?.(ev, { startX, startY });
+        if (waits) { if (Math.hypot(dx, dy) >= 8) finish(null); return; }
+        if (Math.hypot(dx, dy) < threshold) return;
+        begin(ev);
       }
       ev.preventDefault();
       cb.onMove(ev, { dx, dy, startX, startY });
     };
-    const up = (ev) => {
+    const finish = (how) => {
+      clearTimeout(hold);
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-      if (started) cb.onEnd(ev, { startX, startY });
-      else cb.onClick?.(ev);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('touchmove', keepGesture);
+      if (!started) { if (how === 'drop') cb.onClick?.(at); return; }
+      if (how === 'drop') cb.onEnd(at, { startX, startY });
+      else (cb.onCancel || cb.onEnd)(at, { startX, startY, cancelled: true });
     };
+    const up = (ev) => { at = ev; finish('drop'); };
+    const cancel = (ev) => { at = ev; finish(null); };
+    const onKey = (ev) => { if (ev.key === 'Escape') finish(null); };
+
+    if (waits) {
+      window.addEventListener('touchmove', keepGesture, { passive: false });
+      hold = setTimeout(() => { navigator.vibrate?.(8); begin(at); cb.onMove(at, { dx: 0, dy: 0, startX, startY }); }, DRAG_HOLD_MS);
+    }
     window.addEventListener('pointermove', move, { passive: false });
     window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('keydown', onKey);
   });
 }
 
@@ -238,9 +290,14 @@ export function reorderable(container, { handle, onDrop }) {
   }
 }
 
-/* keyboard: Escape closes the topmost layer */
+/** Whether a dialog is up — the key handlers ask before they act on a key. */
+export const modalOpen = () => !!openModal;
+
+/* keyboard: Escape closes the topmost layer, and only that one. The other
+   listeners on window still run after stopPropagation(), and app.js's closed
+   the panel under a confirm along with the confirm. */
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (openModal) { closeModal(); e.stopPropagation(); return; }
+  if (openModal) { closeModal(); e.stopImmediatePropagation(); return; }
   closePeek();
 });

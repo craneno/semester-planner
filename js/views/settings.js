@@ -9,6 +9,14 @@ import * as G from '../gcal.js';
 import * as C from '../cloud.js';
 import { importCanvas, refreshFeed, isFeedUrl } from '../canvas.js';
 
+/* One listener each, for the life of the page, that calls whichever painter
+   the latest render made. Subscribing from inside the render stacked one
+   more painter per visit to Settings, each rebuilding detached DOM on every
+   status change. */
+const painters = { gcal: null, cloud: null };
+G.onGcal(() => painters.gcal?.());
+C.onCloud(() => painters.cloud?.());
+
 // open state of the two cloud panels, outside the DOM: a sync rebuilds them
 let syncLogOpen = false;
 let historyOpen = false;
@@ -32,11 +40,11 @@ export function renderSettings(root, { navigate }) {
     h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
       field('First day', h('input', {
         type: 'date', value: state.semester.start,
-        onchange: (e) => { commit(() => { state.semester.start = e.target.value; }); navigate(); }
+        onchange: (e) => setTerm('start', e.target.value, navigate)
       })),
       field('Last day', h('input', {
         type: 'date', value: state.semester.end,
-        onchange: (e) => { commit(() => { state.semester.end = e.target.value; }); navigate(); }
+        onchange: (e) => setTerm('end', e.target.value, navigate)
       }))),
     zoneRow(navigate)
   ]));
@@ -63,7 +71,7 @@ export function renderSettings(root, { navigate }) {
         c.name + (c.writable ? '' : ' (read-only)')));
     }
   }
-  G.onGcal(paintStatus);
+  painters.gcal = paintStatus;
 
   p.append(section('Google Calendar', [
     statusLine,
@@ -143,7 +151,9 @@ export function renderSettings(root, { navigate }) {
             if (await confirmDialog('Rebuild sync from scratch?',
               'Pulls everything down again and re-uploads this device. Useful if the two ever drift apart. No data is deleted.', 'Rebuild')) {
               C.resetLocalSyncState();
-              await C.sync({ full: true });
+              // start, not sync: the reset drops the client, and only start
+              // stands the realtime channel up again
+              await C.start();
               toast('Sync rebuilt.');
               navigate();
             }
@@ -157,8 +167,10 @@ export function renderSettings(root, { navigate }) {
         h('button', {
           class: 'btn primary', onclick: async () => {
             try {
-              commit(() => { cl.enabled = true; });
               await C.signIn(emailIn.value.trim(), pwIn.value);
+              // on only once the sign-in took: left on after a failure, the
+              // strip said "sign in to sync" of a device that never was
+              commit(() => { cl.enabled = true; });
               await C.start();
               toast('Signed in — syncing.');
               navigate();
@@ -168,8 +180,8 @@ export function renderSettings(root, { navigate }) {
         h('button', {
           class: 'btn', onclick: async () => {
             try {
-              commit(() => { cl.enabled = true; });
               const r = await C.signUp(emailIn.value.trim(), pwIn.value);
+              commit(() => { cl.enabled = true; });
               if (r.needsConfirmation) toast('Check your email to confirm, then sign in.');
               else { await C.start(); toast('Account created — syncing.'); }
               navigate();
@@ -184,7 +196,7 @@ export function renderSettings(root, { navigate }) {
         }, 'Forgot password'));
     }
   }
-  C.onCloud(paintCloud);
+  painters.cloud = paintCloud;
 
   /* The sync log: what each sync did. A loop shows here in the first minute
      — "up 40" a second with nothing edited — where the status line only ever
@@ -332,8 +344,8 @@ export function renderSettings(root, { navigate }) {
         h('option', { value: '12', selected: s.hour12 }, '12-hour'),
         h('option', { value: '24', selected: !s.hour12 }, '24-hour')))),
     h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
-      field('Day grid starts', hourSelect('dayStart')),
-      field('Day grid ends', hourSelect('dayEnd'))),
+      field('Day grid starts', hourSelect('dayStart', navigate)),
+      field('Day grid ends', hourSelect('dayEnd', navigate))),
     /* The one setting here that deletes something, so it says both what and
        when — "at the reset" means nothing without the hour beside it. */
     toggle(
@@ -359,8 +371,13 @@ export function renderSettings(root, { navigate }) {
       const text = await f.text();
       try {
         const merge = await confirmDialog('Merge or replace?',
-          'Merge keeps what is already here and adds anything new. Replace overwrites this device.', 'Merge');
+          'Merge keeps what is already here and adds anything new. Replace overwrites this device — and, with cloud sync on, the cloud takes this copy as the truth.', 'Merge');
+        // a replaced copy has rows the sync baseline still lists; kept, the
+        // next push would read every one of them as deleted here and
+        // tombstone them on every device
+        if (!merge) C.resetLocalSyncState();
         importJson(text, { merge });
+        if (!merge) C.start().catch(() => {});
         toast(merge ? 'Backup merged.' : 'Backup restored.');
         navigate();
       } catch (err) { toast('That file could not be read: ' + err.message); }
@@ -385,7 +402,12 @@ export function renderSettings(root, { navigate }) {
       h('button', {
         class: 'btn ghost danger', onclick: async () => {
           if (await confirmDialog('Erase everything on this device?', 'Tasks, areas, and settings. Export first if you want them back.', 'Erase')) {
-            localStorage.removeItem('semesterPlanner.v1');
+            // the sync baseline and cursor go too, or a later sign-in reads
+            // the empty copy as "everything deleted here" and says so to the cloud
+            C.resetLocalSyncState();
+            for (const k of Object.keys(localStorage)) {
+              if (k.startsWith('semesterPlanner.')) localStorage.removeItem(k);
+            }
             location.reload();
           }
         }
@@ -666,8 +688,33 @@ function fontSelect(role) {
   }, ...FONT_STACKS.map((f) => h('option', { value: f.value, selected: s.fonts[role] === f.value }, f.label)));
 }
 
-function hourSelect(key) {
+/* A term with no last day, or one before the first, made every class vanish
+   from Week and Overview with nothing said: `classesOn` is empty outside the
+   term. So the edit is refused and the box put back. */
+function setTerm(key, value, navigate) {
+  const next = { ...state.semester, [key]: value };
+  const bad = !next.start || !next.end ? 'The term needs both days.'
+    : next.end < next.start ? 'The last day has to come after the first.' : '';
+  if (bad) { toast(bad); navigate(); return; }
+  commit(() => { state.semester[key] = value; });
+  navigate();
+}
+
+/* The week grid is `dayStart` to `dayEnd`; a start at or past the end drew
+   no hours at all. The other end moves out of the way. */
+function hourSelect(key, navigate) {
   const s = state.settings;
-  return h('select', { onchange: (e) => { commit(() => { s[key] = +e.target.value; }); } },
-    ...Array.from({ length: 25 }, (_, i) => h('option', { value: i, selected: s[key] === i }, String(i).padStart(2, '0') + ':00')));
+  const last = key === 'dayStart' ? 23 : 24;
+  return h('select', {
+    onchange: (e) => {
+      const v = +e.target.value;
+      commit(() => {
+        s[key] = v;
+        if (key === 'dayStart' && s.dayEnd <= v) s.dayEnd = v + 1;
+        if (key === 'dayEnd' && s.dayStart >= v) s.dayStart = v - 1;
+      });
+      navigate?.();
+    }
+  },
+  ...Array.from({ length: last + 1 }, (_, i) => h('option', { value: i, selected: s[key] === i }, String(i).padStart(2, '0') + ':00')));
 }

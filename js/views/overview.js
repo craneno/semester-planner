@@ -10,8 +10,8 @@ import {
 } from '../util.js';
 import {
   state, commit, upsertItem, toggleItem, upcoming, overdue, workloadFor,
-  categoryLoad, note, carryForward, pendingTomorrow, areaColor,
-  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn
+  categoryLoad, note, touchNote, carryForward, pendingTomorrow, areaColor,
+  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -138,7 +138,8 @@ function todayColumn(day, { navigate, go }) {
   const laid = [];
   const block = ({ start, mins, cls, color, title, sub, onclick, done }) => {
     laid.push({ start, mins });
-    const height = Math.max(16, (mins / 60) * hourH - 2);
+    // to midnight at most: the clock ends there
+    const height = Math.max(16, (Math.min(mins, HOURS * 60 - start) / 60) * hourH - 2);
     return h('div', {
       class: 'blk ' + cls + (done ? ' done' : '') + (height < 34 ? ' compact' : ''),
       style: {
@@ -221,6 +222,8 @@ function todayColumn(day, { navigate, go }) {
       hit: at, hourH,
       edge: (ev) => edgeScroll(scroller, ev),
       onDrop: (plan) => {
+        // gone while it was being carried: writing by id would make it again
+        if (!itemById(t.id)) { navigate(); return; }
         commit(() => upsertItem({ id: t.id, plan: { ...t.plan, ...plan } }));
         pushItem(t.id).catch(() => {});
         navigate();
@@ -249,7 +252,7 @@ function decisionColumn(day, { navigate, go, soon }) {
   focus.append(h('input', {
     class: 'focus-line', value: n.focus, placeholder: 'The one thing that matters today',
     'aria-label': "Today's focus",
-    oninput: debounce((e) => commit(() => { n.focus = e.target.value; }), 400)
+    oninput: debounce((e) => commit(() => { n.focus = e.target.value; touchNote(day); }), 400)
   }));
 
   // only while it is still last night's line, so editing it stops the credit
@@ -314,7 +317,7 @@ function decisionColumn(day, { navigate, go, soon }) {
       h('textarea', {
         placeholder: 'What moved, what stalled.',
         style: { minHeight: '78px' },
-        oninput: debounce((e) => commit(() => { n.text = e.target.value; }), 500)
+        oninput: debounce((e) => commit(() => { n.text = e.target.value; touchNote(day); }), 500)
       }, n.text || ''),
       h('div', { class: 'eyebrow', style: { margin: '14px 0 4px' } }, 'Tomorrow needs'),
       h('input', {
@@ -323,6 +326,7 @@ function decisionColumn(day, { navigate, go, soon }) {
         'aria-label': 'What tomorrow needs',
         oninput: debounce((e) => commit(() => {
           n.tomorrow = e.target.value;
+          touchNote(day);
           // edited after it was spent: mean it again, and it carries again
           if (n.tomorrowUsed) delete n.tomorrowUsed;
         }), 400)

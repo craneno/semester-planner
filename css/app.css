@@ -475,7 +475,8 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 .tray-item {
   border: 1px solid var(--rule); background: var(--surface); border-radius: var(--r);
   padding: 4px 9px; font-size: calc(12.5px * var(--scale)); cursor: grab;
-  border-left: 2.5px solid var(--c, var(--ink-3)); touch-action: none;
+  /* a finger scrolls the tray until it has held the chip (draggable's hold) */
+  border-left: 2.5px solid var(--c, var(--ink-3)); touch-action: pan-x pan-y;
 }
 .tray-item:active { cursor: grabbing; }
 
@@ -620,7 +621,16 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
   .week-head, .week-body, .allday-rail { grid-template-columns: var(--gutter-w) repeat(7, 32vw); }
   .week-scroll { overflow: auto; }
   .tray-items { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
-  .tray-item { white-space: nowrap; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; }
+  /* no shrinking: a row that must not wrap squeezed every chip to one letter */
+  .tray-item { flex: 0 0 auto; white-space: nowrap; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* a phone on its side: the head, the due-date rail and the tray took the
+   whole height between them and the hours had none left */
+@media (max-height: 520px) {
+  .week-scroll { min-height: 45vh; }
+  .allday-rail { min-height: 0; max-height: 54px; }
+  .tray { max-height: 22vh; padding-top: 6px; padding-bottom: 6px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1189,6 +1199,9 @@ body.rail-hidden .sidebar { display: none; }
 /* a bar within a label's width of the end writes its title on the other side
    of itself, anchored by its right edge, or the scroller cuts the words off */
 .gantt-item.flip { flex-direction: row-reverse; }
+/* the title inside a bar wide enough to hold it */
+.gantt-item.inside .gantt-shape { display: flex; align-items: center; overflow: hidden; padding: 0 6px; }
+.gantt-item.inside .gantt-tag { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
 .gantt-item.clip-l .gantt-shape { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .gantt-item.clip-r .gantt-shape { border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .gantt-item.done { opacity: .42; }

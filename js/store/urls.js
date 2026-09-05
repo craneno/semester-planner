@@ -13,10 +13,14 @@ export const BARE_DOMAIN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9-]+)*\.[
  * a `javascript:` URL saved here would run as this page the moment it is
  * clicked, and the whole point of the pile is that you click things in it.
  */
+/** `scheme://`, or one of the schemes written without slashes. A bare host
+ *  with a port — "example.com:8000/x" — is neither, and gets https. */
+const HAS_SCHEME = /^(?:[a-z][a-z0-9+.-]*:\/\/|(?:mailto|tel|sms|javascript|data|blob|about|file|vbscript):)/i;
+
 export function normalizeUrl(raw) {
   const text = String(raw || '').trim();
   if (!text) return null;
-  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : 'https://' + text;
+  const withScheme = HAS_SCHEME.test(text) ? text : 'https://' + text;
   let u;
   try { u = new URL(withScheme); } catch { return null; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;

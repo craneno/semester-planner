@@ -202,6 +202,171 @@ suite('Quick add — area tags', async ({ check }) => {
   check('a tag with no letters is not a tag', p('call at 3 @ 4').areaId === null);
 });
 
+/* The 2026-09-04 bug hunt: every line here was typed into the real bar and
+   came out wrong. Kept as the spec for the parser. */
+suite('Quick add — what the bug hunt found', async ({ check }) => {
+  const s = await storeWith({
+    ...base,
+    areas: [
+      { id: 'th', name: 'Thermodynamics', category: 'course', order: 0 },
+      { id: 'cs', name: 'CS', category: 'course', order: 1 },
+      { id: 'cs101', name: 'CS 101', category: 'course', order: 2 },
+      { id: 'cpp', name: 'C++', category: 'course', order: 3 },
+      { id: 'gone', name: 'Old course', category: 'course', order: 4, archived: true }
+    ]
+  });
+  const p = (str) => s.parseQuickAdd(str);
+  const { today, addDays, diffDays } = await import('../js/util.js');
+  const dow = (d) => new Date(d + 'T00:00:00').getDay();
+
+  /* ---- "by" is "due" ---- */
+
+  {
+    const r = p('Read ch 3 by fri');
+    check('"by fri" is a deadline', !!r.due && dow(r.due) === 5, String(r.due));
+    check('...and "by" goes with the day', r.title === 'Read ch 3', `got "${r.title}"`);
+  }
+  check('"by" with no day after it is a word',
+    p('stand by the door').title === 'stand by the door' && p('stand by the door').due === null);
+  {
+    const r = p('essay by kant due fri');
+    check('"due" still wins, and a "by" that names no day stays',
+      !!r.due && dow(r.due) === 5 && r.title === 'essay by kant', `got "${r.title}"`);
+  }
+
+  /* ---- dates the calendar does not have ---- */
+
+  for (const [str, title] of [['exam #cs 3/40', 'exam 3/40'], ['meet 31/2', 'meet 31/2'], ['party feb 30', 'party feb 30']]) {
+    const r = p(str);
+    check(`"${str}" is not a date`, r.due === null && r.plan === null, JSON.stringify([r.due, r.plan]));
+    check('...and the words stay in the title', r.title === title, `got "${r.title}"`);
+  }
+  check('...though the area still lands', p('exam #cs 3/40').areaId === 'cs');
+  check('a real numeric date still reads', p('exam 3/4/2027').due === '2027-03-04', p('exam 3/4/2027').due);
+
+  /* ---- a month and day with no year ---- */
+
+  {
+    const past = addDays(today(), -30);
+    const md = `${+past.slice(5, 7)}/${+past.slice(8, 10)}`;
+    const r = p(`exam ${md}`);
+    check('a day a month gone means next year',
+      !!r.due && r.due > today() && r.due.slice(5) === past.slice(5), `${md} -> ${r.due}`);
+    const near = addDays(today(), -6);
+    const md2 = `${+near.slice(5, 7)}/${+near.slice(8, 10)}`;
+    const r2 = p(`exam ${md2}`);
+    check('...but a few days back stays where it is',
+      !!r2.due && r2.due.slice(5) === near.slice(5) && diffDays(r2.due, today()) <= 14, `${md2} -> ${r2.due}`);
+  }
+
+  /* ---- clocks that do not exist ---- */
+
+  {
+    const r = p('task at 25:99');
+    check('"25:99" is not a time', r.dueTime === null && r.due === null && r.plan === null, JSON.stringify(r));
+    check('...and stays in the title', r.title === 'task at 25:99', `got "${r.title}"`);
+  }
+  check('"13pm" is not a time either', p('call 13pm').dueTime === null, String(p('call 13pm').dueTime));
+  check('"at 14:30" still is', p('call at 14:30').dueTime === '14:30');
+
+  /* ---- more words for when ---- */
+
+  check('"yesterday" is yesterday', p('log hours due yesterday').due === addDays(today(), -1));
+  check('...and is out of the title', p('log hours due yesterday').title === 'log hours',
+    `got "${p('log hours due yesterday').title}"`);
+  {
+    const r = p('noon meeting at noon');
+    check('"noon" is twelve', r.dueTime === '12:00', String(r.dueTime));
+    check('...the second one, not the first', r.title === 'noon meeting', `got "${r.title}"`);
+  }
+  check('"midnight" is the end of the day', p('submit by midnight').dueTime === '23:59', String(p('submit by midnight').dueTime));
+  check('"at 5pm" takes the "at" with it', p('call at 5pm').title === 'call', `got "${p('call at 5pm').title}"`);
+
+  /* ---- repeats ---- */
+
+  {
+    const r = p('every 2 weeks review');
+    check('"every 2 weeks" is every second week', r.repeat?.freq === 'weekly' && r.repeat.every === 2, JSON.stringify(r.repeat));
+    check('...with a clean title', r.title === 'review', `got "${r.title}"`);
+  }
+  check('"every 3 days" is daily, every third',
+    p('water plants every 3 days').repeat?.freq === 'daily' && p('water plants every 3 days').repeat.every === 3,
+    JSON.stringify(p('water plants every 3 days').repeat));
+  check('"every 6 months" is monthly, every sixth',
+    p('dentist every 6 months').repeat?.freq === 'monthly' && p('dentist every 6 months').repeat.every === 6,
+    JSON.stringify(p('dentist every 6 months').repeat));
+  for (const str of ['gym weekly on sat and sun', 'gym every sat and sun', 'gym every week on sat, sun']) {
+    const r = p(str);
+    check(`"${str}" is Saturdays and Sundays`, r.repeat?.days?.join() === '0,6', JSON.stringify(r.repeat));
+    check('...and nothing but "gym" is left', r.title === 'gym', `got "${r.title}"`);
+  }
+
+  /* ---- plan and due in one line ---- */
+
+  {
+    const r = p('essay work on mon due fri');
+    check('"work on mon due fri" plans Monday', !!r.plan && dow(r.plan.date) === 1, JSON.stringify(r.plan));
+    check('...and is due Friday', !!r.due && dow(r.due) === 5, String(r.due));
+    check('...leaving "essay"', r.title === 'essay', `got "${r.title}"`);
+  }
+  {
+    const r = p('essay plan mon due fri 5pm');
+    check('the due clause keeps its own time', !!r.due && dow(r.due) === 5 && r.dueTime === '17:00',
+      JSON.stringify([r.due, r.dueTime]));
+    check('...and the plan does not take it', !!r.plan && dow(r.plan.date) === 1 && r.plan.start === null,
+      JSON.stringify(r.plan));
+  }
+  {
+    const r = p('essay due fri 5pm plan mon 9am');
+    check('the other way round works too',
+      dow(r.due) === 5 && r.dueTime === '17:00' && dow(r.plan.date) === 1 && r.plan.start === '09:00' && r.title === 'essay',
+      JSON.stringify(r));
+  }
+
+  /* ---- letters that grow when lowered ---- */
+
+  check('"İstanbul" keeps all its letters', p('İstanbul trip tomorrow').title === 'İstanbul trip',
+    `got "${p('İstanbul trip tomorrow').title}"`);
+
+  /* ---- areas by name ---- */
+
+  check('an archived area is not matched by name', p('Old course notes').areaId === null);
+  check('the longest name wins', p('CS 101 hw').areaId === 'cs101', String(p('CS 101 hw').areaId));
+  check('...and the short one still works alone', p('CS hw').areaId === 'cs');
+  check('"C++" can be an area', p('C++ hw').areaId === 'cpp', String(p('C++ hw').areaId));
+
+  /* ---- words that hide a weekday ---- */
+
+  check('"Thus" is not Thursday', p('Thus we begin').due === null && p('Thus we begin').title === 'Thus we begin',
+    JSON.stringify(p('Thus we begin')));
+  check('"next monitor" is not next Monday', p('next monitor').due === null);
+
+  /* ---- ranges that are not hours ---- */
+
+  check('"problem set 3-4" is not a time range',
+    p('problem set 3-4').plan === null && p('problem set 3-4').title === 'problem set 3-4', p('problem set 3-4').title);
+  {
+    const r = p('Sep 3-5 conference');
+    check('"Sep 3-5" is days, not hours', r.plan === null, JSON.stringify(r.plan));
+    check('...and stays whole in the title', r.title === 'Sep 3-5 conference', `got "${r.title}"`);
+  }
+  {
+    const r = p('submit 2026-09-04');
+    check('an ISO date is a date', r.due === '2026-09-04', String(r.due));
+    check('...not a nine-to-four', r.plan === null && r.title === 'submit', `got "${r.title}"`);
+  }
+  {
+    const r = p('lab 14:00-16:00');
+    check('a 24h range is read as one', r.plan?.start === '14:00' && r.plan.mins === 120, JSON.stringify(r.plan));
+  }
+  check('"12-7" is still noon to seven', p('12-7').plan?.start === '12:00' && p('12-7').plan.mins === 420, JSON.stringify(p('12-7').plan));
+  check('...named by what was typed', p('12-7').title === '12-7', `got "${p('12-7').title}"`);
+
+  /* ---- a title has a length ---- */
+
+  check('a title stops at 500 characters', p('x'.repeat(600)).title.length === 500, String(p('x'.repeat(600)).title.length));
+});
+
 </script>
 </body>
 </html>

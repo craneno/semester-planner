@@ -47,9 +47,10 @@ export function addHabit(s, name) {
   return habit;
 }
 
+// stamped like every other row, or a rename here loses to any copy elsewhere
 export function updateHabit(s, id, patch) {
   const x = s.habits.find((h) => h.id === id);
-  if (x) Object.assign(x, patch);
+  if (x) Object.assign(x, patch, { updatedAt: new Date().toISOString() });
   return x;
 }
 
@@ -57,13 +58,20 @@ export function updateHabit(s, id, patch) {
 export function deleteHabit(s, id) {
   const i = s.habits.findIndex((x) => x.id === id);
   if (i >= 0) s.habits.splice(i, 1);
+  const now = new Date().toISOString();
   for (const [date, list] of Object.entries(s.habitLog)) {
+    if (!list.includes(id)) continue;
     const next = list.filter((x) => x !== id);
-    if (next.length) s.habitLog[date] = next; else delete s.habitLog[date];
+    if (next.length) { s.habitLog[date] = next; s.habitLogAt[date] = now; }
+    else { delete s.habitLog[date]; delete s.habitLogAt[date]; }
   }
 }
 
 export function reorderHabits(s, orderedIds) {
   const rest = s.habits.filter((x) => !orderedIds.includes(x.id)).map((x) => x.id);
-  [...orderedIds, ...rest].forEach((id, i) => { const x = s.habits.find((h) => h.id === id); if (x) x.order = i; });
+  const now = new Date().toISOString();
+  [...orderedIds, ...rest].forEach((id, i) => {
+    const x = s.habits.find((h) => h.id === id);
+    if (x && x.order !== i) { x.order = i; x.updatedAt = now; }
+  });
 }

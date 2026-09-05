@@ -53,10 +53,13 @@ export function parseIcs(text) {
   const lines = unfold(String(text || '')).split(/\r?\n/);
   const out = [];
   let cur = null;
+  let inner = null;   // a block inside the event — a VALARM — whose lines are its own, not the event's
   for (const line of lines) {
-    if (line === 'BEGIN:VEVENT') { cur = {}; continue; }
+    if (line === 'BEGIN:VEVENT') { cur = {}; inner = null; continue; }
     if (line === 'END:VEVENT') { if (cur) out.push(cur); cur = null; continue; }
     if (!cur) continue;
+    if (inner) { if (line === 'END:' + inner) inner = null; continue; }
+    if (line.startsWith('BEGIN:')) { inner = line.slice(6); continue; }
     const i = line.indexOf(':');
     if (i < 0) continue;
     const head = line.slice(0, i), value = line.slice(i + 1);
@@ -148,7 +151,8 @@ export function inTerm(date, sem = state.semester) {
 /**
  * Bring a feed in. An assignment seen before (by `canvasId`) has its date and
  * title refreshed; one never seen becomes a homework deadline. What a person
- * has set by hand — the area, the notes, a tick — is left alone.
+ * has set by hand — the area, the notes, a tick, a block on the calendar — is
+ * left alone, and `updated` counts only rows something moved on.
  *
  * @returns {{added:number, updated:number, unfiled:string[], skipped:number}}
  */
@@ -170,21 +174,32 @@ function applyFeed(text) {
       if (seen.has(ev.uid)) continue;
       seen.add(ev.uid);
 
-      const { title, course } = splitSummary(ev.summary);
+      const { title: named, course } = splitSummary(ev.summary);
+      const title = named || 'Untitled assignment';   // a row with no SUMMARY
       const existing = state.items.find((t) => t.canvasId === ev.uid);
-      const when = { due: ev.start.date, dueTime: ev.start.time, plan: null };
+      const when = { due: ev.start.date, dueTime: ev.start.time || null };
 
       if (existing) {
-        const patch = { id: existing.id, title, ...when };
-        if (course) patch.canvasCourse = course;
+        /* Only what moved. upsertItem stamps a row now, and a refresh every
+           morning that wrote every row would beat a real edit made on another
+           device with a Canvas copy nothing had changed in. And a block the
+           person dragged onto the calendar keeps its plan: a plan and a due
+           are never held at once, so Canvas's date is written only while the
+           row is still a deadline. */
+        const patch = {};
+        if (title !== existing.title) patch.title = title;
+        if (!existing.plan?.date) {
+          if (when.due !== existing.due) patch.due = when.due;
+          if (when.dueTime !== (existing.dueTime || null)) patch.dueTime = when.dueTime;
+        }
+        if (course && course !== existing.canvasCourse) patch.canvasCourse = course;
         // still where the import put it, and the course may have found a home since
         if (canvasUnmoved({ ...existing, canvasCourse: course || existing.canvasCourse })) {
           const home = homeFor(course);
           if (home && home !== existing.areaId) { patch.areaId = home; patch.canvasArea = home; }
           else if (!existing.canvasArea) patch.canvasArea = existing.areaId;
         }
-        upsertItem(patch);
-        res.updated++;
+        if (Object.keys(patch).length) { upsertItem({ id: existing.id, ...patch }); res.updated++; }
         continue;
       }
 
