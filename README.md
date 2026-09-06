@@ -183,7 +183,9 @@ supabase secrets set USPS_CLIENT_ID=… USPS_CLIENT_SECRET=…
 
 Set only the carriers you use. FedEx: developer.fedex.com, a project with the
 Track API. UPS: developer.ups.com, an app with Tracking. USPS:
-developer.usps.com, an app with the Tracking API (v3). Each carrier's sandbox
+developers.usps.com, an app with **Tracking 3.2** (3.0 is on its way out).
+USPS wants a free usps.com *Business* account, set up through its Customer
+Onboarding Portal; Tracking is in the default product. Each carrier's sandbox
 can be pointed at with `FEDEX_API`, `UPS_API`, `USPS_API`. A carrier with no
 keys is not an error: the row says tracking is not set up, and the link to
 the carrier's page still works.

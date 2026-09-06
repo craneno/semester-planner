@@ -13,8 +13,8 @@
 //   supabase secrets set USPS_CLIENT_ID=… USPS_CLIENT_SECRET=…
 //
 // FedEx: developer.fedex.com → a project with the Track API. UPS:
-// developer.ups.com → an app with Tracking. USPS: developer.usps.com → an
-// app with the Tracking API (v3). Sandboxes: FEDEX_API=https://apis-sandbox.fedex.com,
+// developer.ups.com → an app with Tracking. USPS: developers.usps.com → an
+// app with Tracking 3.2 (3.0 is going away). Sandboxes: FEDEX_API=https://apis-sandbox.fedex.com,
 // UPS_API=https://wwwcie.ups.com, USPS_API=https://apis-tem.usps.com.
 //
 // A carrier with no keys answers 501, and the app shows that on the row: the
@@ -172,18 +172,25 @@ async function ups(number: string): Promise<Answer | null> {
 
 /* ---------------- USPS ---------------- */
 
+// Tracking 3.2: one POST with a list of numbers, a list back, one entry
+// each. A number it cannot find comes back as its own entry with an `error`
+// (a 207 when the list is mixed), not as a failed request.
 async function usps(number: string): Promise<Answer | null> {
   const id = env('USPS_CLIENT_ID'), secret = env('USPS_CLIENT_SECRET');
   if (!id || !secret) return null;
   const api = env('USPS_API') || 'https://apis.usps.com';
   const t = await token('usps', `${api}/oauth2/v3/token`,
     new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }));
-  const res = await fetch(`${api}/tracking/v3/tracking/${encodeURIComponent(number)}?expand=DETAIL`, {
-    headers: { Authorization: `Bearer ${t}`, Accept: 'application/json' }
+  const res = await fetch(`${api}/tracking/v3r2/tracking`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify([{ trackingNumber: number }])
   });
-  if (!res.ok) throw new Error(`USPS answered ${res.status}`);
-  const r = await res.json();
-  if (r?.error) throw new Error(title(r.error.message) || 'USPS does not know that number');
+  const json = await res.json().catch(() => null);
+  const r = Array.isArray(json) ? json[0] : json;
+  const said = r?.error?.message || r?.error?.errors?.[0]?.detail;
+  if (!res.ok && res.status !== 207) throw new Error(title(said) || `USPS answered ${res.status}`);
+  if (!r || r.error) throw new Error(title(said) || 'USPS does not know that number');
 
   const cat = String(r.statusCategory || '').toLowerCase();
   const ev = (r.trackingEvents || [])[0];
@@ -192,12 +199,15 @@ async function usps(number: string): Promise<Answer | null> {
     : cat.includes('out for delivery') ? 'out'
       : cat.includes('alert') || cat.includes('exception') ? 'exception'
         : cat ? 'transit' : 'unknown';
+  // the expected date sits in its own block now, with a window beside it
+  const x = r.deliveryDateExpectation || {};
+  const from = clock(x.predictedDeliveryWindowStartTime), to = clock(x.predictedDeliveryWindowEndTime);
   return {
     carrier: 'usps', number, status,
     summary: title(r.status || r.statusSummary) + (where ? ` · ${where}` : ''),
-    eta: day(status === 'delivered' ? ev?.eventTimestamp : r.expectedDeliveryDate),
-    etaTime: clock(r.expectedDeliveryTime),
-    window: null,
+    eta: day(status === 'delivered' ? ev?.eventTimestamp : (x.expectedDeliveryDate || x.predictedDeliveryDate || x.guaranteedDeliveryDate)),
+    etaTime: clock(x.endOfDay) || to,
+    window: from && to ? { from, to } : null,
     lastEvent: ev ? { at: ev.eventTimestamp || null, text: title(ev.eventType) } : null,
     at: new Date().toISOString()
   };
