@@ -336,7 +336,8 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   /* room for three stacked all-day items before it needs to scroll */
   min-height: 74px; max-height: 148px; overflow-y: auto;
 }
-.allday-rail .cell { border-left: 1px solid var(--rule-soft); padding: 5px 4px; display: flex; flex-direction: column; gap: 3px; }
+.allday-rail .cell { border-left: 1px solid var(--rule-soft); padding: 5px 4px; display: flex; flex-direction: column; gap: 3px; cursor: crosshair; }
+.allday-rail .cell:hover { background: var(--surface); }
 .allday-rail .gutter {
   display: flex; align-items: flex-start; justify-content: flex-end;
   padding: 6px 7px 0 0; text-align: right; line-height: 1.3; letter-spacing: .03em;
@@ -619,6 +620,10 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 
   /* week: 3-day window on phones, swipe/scroll horizontally */
   .week-head, .week-body, .allday-rail { grid-template-columns: var(--gutter-w) repeat(7, 32vw); }
+  /* as wide as the seven columns, not the screen: the sticky head and rail
+     are hit-tested inside their own box, and with the box a screen wide a tap
+     on the rail past the first columns went through to the grid under it */
+  .week-wrap { width: max-content; }
   .week-scroll { overflow: auto; }
   .tray-items { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   /* no shrinking: a row that must not wrap squeezed every chip to one letter */

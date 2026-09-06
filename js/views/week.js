@@ -114,7 +114,12 @@ export function renderWeek(root, { navigate } = {}) {
       h('div', { class: 'eyebrow' }, DOW[dt.getDay()]),
       h('div', { class: 'dnum' }, String(dt.getDate()))));
 
-    const cell = h('div', { class: 'cell' });
+    // the empty rail is where an all-day plan is made: a click, or a tap,
+    // on the cell itself — a flag in it is that flag's to open
+    const cell = h('div', {
+      class: 'cell', title: 'Click for an all-day plan',
+      onclick: (e) => { if (e.target === cell) newBlockPrompt({ date: d, allDay: true }, { onDone: navigate }); }
+    });
     for (const t of itemsDueOn(d)) {
       cell.append(h('div', {
         class: 'due-flag' + (t.done ? ' done' : ''),

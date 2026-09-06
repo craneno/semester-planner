@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v48**.
+Schema **20**, service worker **planner-v51**.
 
 ## Working with me
 
@@ -85,11 +85,10 @@ skips `external`, or two tabs on one device push each other's `lastSync` for
 ever, and Settings twitches with every round. A `<details>` a view builds must
 keep its open state outside the DOM (`everythingOpen`), or a sync shuts it.
 
-**The baseline is what we last *pushed*, not what state holds now.** Both ways
-round have been bugs we shipped: a row missing here is "new from the cloud"
-*only* if the baseline never had it, or taking the server copy undoes a delete;
-and the baseline must be the hashes `push()` sent, never a snapshot taken after,
-or a delete made mid-trip is lost.
+**The baseline is what we last *pushed*, not what state holds now.** A row
+missing here is "new from the cloud" *only* if the baseline never had it, or
+taking the server copy undoes a delete; and the baseline is the hashes
+`push()` sent, never a snapshot taken after, or a delete made mid-trip is lost.
 
 **A migration is not an edit, and this one cost real data.** The baseline hashes
 each row, so a migration that adds a field — `tz` on every class meeting — makes
@@ -107,8 +106,8 @@ localStorage. `AGREED` is schema *and* hash shape, so an old one goes too.
 
 **Sync is fan-out, not safety.** An upsert keeps no history and reaches every
 device in seconds. `keepBackups()` copies the raw state *before `migrate()`
-reads it* — one a day, five kept, plus `before-v<n>` as an upgrade runs;
-`events`/`outbox` left out, and under their own keys, out of sync's reach.
+reads it* — one a day, five kept, plus `before-v<n>` as an upgrade runs,
+under their own keys, out of sync's reach.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
@@ -117,8 +116,7 @@ it was built with, so **a new kind needs an `ALTER` the user has to run**
 (`supabase/upgrade.sql`, safe to run twice, named by `describeSyncError()`).
 Links, the wishlist, sprints, habits and each day's ticks (`habitlog:<date>`)
 are rows of their own since schema 20, each with a clock in `rowStamp()`;
-`meta` is only the semester and `SYNCED_SETTINGS`, and `applyRow` **ignores**
-the lists an old device still sends in it. `push()` reads back what the server
+`meta` is only the semester and `SYNCED_SETTINGS`. `push()` reads back what the server
 kept: a row that comes back different was refused by the trigger, and is taken
 up here, its hash recorded, or it would be pushed again for ever.
 
@@ -204,7 +202,8 @@ label**, or the sidebar's line-up breaks.
 
 **Week follows the day** (`follows`) until prev/next let go of it. It draws
 the settings' hours, opened wider for anything on those days (`shownHours`);
-a block past midnight is drawn to midnight.
+a block past midnight is drawn to midnight. A click or tap on the empty
+all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`).
 **Overview is the day**: a 24-hour clock, opened at 8am, next to focus, top
 three, open work and the end-of-day note. `overdue()` is deadlines gone by
 *and* plain blocks booked on a day gone by with no deadline, unticked — a
@@ -244,10 +243,10 @@ is on the calendar — `kind` decides whether we ask for deliverables.
   other half: middle moves, edges resize, `grabMode` keeping a third for the
   middle. **It owns the click** the browser fires after every drag.
 - A tray chip is planned only when let go **over a day** (`inside` from
-  `hit()`, which names the nearest column whatever is under the pointer). On
-  touch `draggable({ hold })` waits, so a swipe along the tray scrolls it. A
-  dialog a tap opens ignores the scrim for `SCRIM_GRACE_MS`, or its own click
-  closed it.
+  `hit()`). On touch `draggable({ hold })` waits, so a swipe along the tray
+  scrolls it. A dialog a tap opens ignores the scrim for `SCRIM_GRACE_MS`.
+  On a phone `.week-wrap` is `max-content` wide: a sticky head is hit-tested
+  inside its own box, and a screen-wide box let taps on the rail through.
 - **A finger says what it means by waiting.** A tap opens a block, a press held
   `HOLD_MS` picks it up, and moving before that hands the touch back to the
   scroller — so `.blk` keeps `touch-action: pan-x pan-y` (`none` would let a
@@ -274,29 +273,25 @@ is on the calendar — `kind` decides whether we ask for deliverables.
   column each, `LAP` running all but the last under its neighbour; `applyLanes()`
   writes it as `--lane-x/w/z`.
 - Capture's **Enter must stay the shortest way out** — an unfiled note, never a
-  question. There is no Notes page: `unfiledQueue()` on Overview, `noteCard()` on
-  the area's page; delete either and captures have nowhere to show.
+  question. There is no Notes page: `unfiledQueue()` on Overview, `noteCard()`
+  on the area's page; delete either and captures have nowhere to show.
 
 ## Tests
 
-Serve the repo, open `/tests/`. No runner in the page, no deps, 1154 checks, and
-`tests/` is left out of the deploy; CI opens the same page in Chromium. A file reports to `tests/index.html` **once its last
-suite has finished** — taking the first hid a failure in a later one — and its
-suites **run one at a time** (`queue` in `suite()`): started together, their
-`storeWith` seeds clobbered each other, now and then, for months.
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1154 checks,
+left out of the deploy; CI opens the same page in Chromium. A file reports to
+`tests/index.html` **once its last suite has finished**, and its suites **run
+one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
 
 Suites drive the real modules and wipe app state, so **both guards must stay**:
 refuse to run anywhere but localhost, and put `localStorage` back afterwards,
 waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once, at import, so `migrate()` needs a fresh instance —
-`storeWith(raw)`, which **checks** its seed rather than sleeping and hoping.
-A file that has not reported in 90s is a **failure**, whatever it passed so
-far. A tab hidden five minutes gets Chrome's one-timer-a-minute throttling,
-so a long run in a background pane stalls; CI is the gate, not the pane.
-A fresh instance has its own `state`, so a suite that pokes state
-*and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` — once per page,
-since `import()` caches. To add a field to a task: `upsertItem()`, a fallback in
-`migrate()`, a row in `js/editor.js`.
+`storeWith(raw)`, which **checks** its seed. A file that has not reported in
+90s is a **failure**. A fresh instance has its own `state`, so a suite that
+pokes state *and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` —
+once per page, since `import()` caches. To add a field to a task:
+`upsertItem()`, a fallback in `migrate()`, a row in `js/editor.js`.
 
 ## House rules
 
