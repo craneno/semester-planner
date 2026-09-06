@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v51**.
+Schema **20**, service worker **planner-v52**.
 
 ## Working with me
 
@@ -127,7 +127,7 @@ up here, its hash recorded, or it would be pushed again for ever.
 | `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series |
 | `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite`, and a `schedule` of meetings, each stamped with the `tz` it is written in |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
-| `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they turn into; focuses and sprints on the chart |
+| `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they turn into — a wish with `tracking` is asked about once a day per device (`js/tracking.js`, `track-parcel` on the edge, `trackingAt` device-only); focuses and sprints on the chart |
 | `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror and writes waiting to go |
 
 **Only a `plan` block goes to Google Calendar.** A due date on its own is never
@@ -278,7 +278,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1154 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1204 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

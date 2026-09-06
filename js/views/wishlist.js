@@ -5,12 +5,13 @@
 // so ordering it is a status change and never a retype. What is on its way
 // sorts to the top by ETA, because that is the part with a clock on it.
 
-import { h, clear } from '../util.js';
+import { h, clear, fmtTime } from '../util.js';
 import {
   state, commit, WISH_STATUSES, WISH_IN_FLIGHT, addWish, updateWish, deleteWish,
-  wishesInFlight, wishesWanted, wishesDelivered, wishTotal, etaState
+  wishesInFlight, wishesWanted, wishesDelivered, wishTotal, etaState, CARRIERS, trackingUrl
 } from '../store.js';
 import { confirmDialog, toast } from '../ui.js';
+import { refreshTracking, tracked } from '../tracking.js';
 
 const STATUS_LABEL = {
   wanted: 'Wanted', ordered: 'Ordered', shipped: 'Shipped', delivered: 'Delivered'
@@ -51,6 +52,8 @@ export function renderWishlist(root, { navigate }) {
     if (!made) { toast('Give it a name first.'); return; }
     input.value = '';
     navigate();
+    // a tracking number is asked about at once; the answer redraws the page
+    if (made.tracking) refreshTracking({ only: made.id }).then(sayTally).catch(() => {});
   };
   pad.append(h('div', { class: 'wish-add' }, input,
     h('button', {
@@ -70,7 +73,16 @@ export function renderWishlist(root, { navigate }) {
 
   section(pad, 'On the way', flight, navigate, {
     total: flight.length ? wishTotal(flight) : 0,
-    empty: 'Nothing ordered.'
+    empty: 'Nothing ordered.',
+    // the carriers are asked once a day by themselves; this is for the day
+    // you are waiting by the door
+    action: tracked().length ? h('button', {
+      class: 'btn sm', title: 'Ask the carriers where every tracked parcel is',
+      onclick: (e) => {
+        e.currentTarget.disabled = true;
+        refreshTracking().then(sayTally).catch((err) => toast(err.message || 'Could not check.'));
+      }
+    }, 'Check parcels') : null
   });
   section(pad, 'Wanted', wanted, navigate, {
     total: wishTotal(wanted),
@@ -83,12 +95,23 @@ export function renderWishlist(root, { navigate }) {
   root.append(pad);
 }
 
-function section(pad, label, list, rerender, { total, empty }) {
+/** What a round of asking came to, in one line. */
+function sayTally(t) {
+  if (!t || !t.asked) return;
+  const bits = [];
+  if (t.delivered) bits.push(`${t.delivered} delivered`);
+  if (t.moved) bits.push(`${t.moved} ${t.moved === 1 ? 'date' : 'dates'} changed`);
+  if (t.failed) bits.push(`${t.failed} could not be checked`);
+  toast(bits.length ? bits.join(' · ') : 'No news from the carriers.');
+}
+
+function section(pad, label, list, rerender, { total, empty, action = null }) {
   if (!list.length && !empty) return;
   pad.append(h('div', { class: 'group-h' },
     h('h2', {}, label),
     h('span', { class: 'eyebrow num' }, String(list.length)),
     h('div', { style: { flex: 1 } }),
+    action,
     total ? h('span', { class: 'eyebrow num' }, money(total)) : null));
 
   if (!list.length) {
@@ -159,7 +182,49 @@ function wishRow(w, rerender) {
           rerender();
         }
       }
-    }, '✕'));
+    }, '✕'),
+    w.tracking ? trackLine(w) : null);
+}
+
+/** "2h ago", "yesterday" — when the carrier was last asked. */
+function ago(iso, now = Date.now()) {
+  const mins = Math.round((now - Date.parse(iso)) / 60000);
+  if (!Number.isFinite(mins) || mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 24 * 60) return `${Math.round(mins / 60)}h ago`;
+  const d = Math.round(mins / (24 * 60));
+  return d === 1 ? 'yesterday' : `${d}d ago`;
+}
+
+/* The carrier's line under a tracked parcel: which carrier and the number
+   (a link to its page), where it is in the carrier's words, the hour it
+   lands, and when we last asked. An error stays on the line, never on the
+   date: a carrier that would not answer is not a parcel that is late. */
+function trackLine(w) {
+  const t = w.tracking;
+  const hour12 = state.settings.hour12;
+  const bits = [
+    h('a', {
+      class: 'eyebrow', href: trackingUrl(t.carrier, t.number), target: '_blank', rel: 'noopener noreferrer',
+      title: 'Open on the carrier’s site'
+    }, `${CARRIERS[t.carrier] || t.carrier} · ${t.number}`)
+  ];
+  if (t.summary) bits.push(h('span', { class: 'eyebrow' + (t.status === 'out' ? ' is-live' : '') }, t.summary));
+  if (w.status !== 'delivered') {
+    if (t.window) bits.push(h('span', { class: 'eyebrow num' }, `${fmtTime(t.window.from, hour12)}–${fmtTime(t.window.to, hour12)}`));
+    else if (t.etaTime) bits.push(h('span', { class: 'eyebrow num' }, `by ${fmtTime(t.etaTime, hour12)}`));
+  }
+  if (t.error) {
+    const why = /sign in|supabase url/i.test(t.error) ? 'set up cloud sync to check'
+      : /not set up|not deployed/i.test(t.error) ? 'tracking is not set up on the server (README)'
+        : t.error;
+    bits.push(h('span', { class: 'eyebrow is-err', title: t.error }, why));
+  } else if (t.checkedAt) {
+    bits.push(h('span', { class: 'eyebrow', title: new Date(t.checkedAt).toLocaleString() }, `checked ${ago(t.checkedAt)}`));
+  } else {
+    bits.push(h('span', { class: 'eyebrow' }, 'not checked yet'));
+  }
+  return h('div', { class: 'wish-track' }, ...bits);
 }
 
 /** Swap the name for a box, and put it back however the edit ends. */

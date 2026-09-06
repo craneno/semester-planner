@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Parcel tracking tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+import { suite, sharedStoreWith } from './harness.js';
+
+/* tracking.js binds to the one live store, so this file seeds it once and
+   every suite here reads the same instance. */
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [], items: [], cards: [], links: [], notes: {},
+  wishlist: [
+    { id: 'w1', title: 'Nozzle heater', status: 'shipped', eta: null, tracking: { number: '541958247270', carrier: 'fedex' } },
+    { id: 'w2', title: 'Calipers', status: 'ordered', eta: '2026-09-20', tracking: { number: '1Z999AA10123456784', carrier: 'ups' } },
+    { id: 'w3', title: 'A book', status: 'wanted', eta: null }
+  ]
+});
+
+suite('Parcels — a number names its carrier', async ({ check }) => {
+  const { detectTracking, trackingUrl, parseWishAdd } = s;
+
+  check('twelve digits is FedEx', detectTracking('541958247270')?.carrier === 'fedex');
+  check('...with the label’s spaces too', detectTracking('5419 5824 7270')?.number === '541958247270',
+    JSON.stringify(detectTracking('5419 5824 7270')));
+  check('fifteen digits is FedEx Ground', detectTracking('986578788855')?.carrier === 'fedex' && detectTracking('123456789012345')?.carrier === 'fedex');
+  check('96 and twenty more is FedEx SmartPost', detectTracking('9612019012345678901234')?.carrier === 'fedex');
+  check('1Z is UPS', detectTracking('1Z999AA10123456784')?.carrier === 'ups');
+  check('...lower case as typed still counts', detectTracking('1z999aa10123456784')?.number === '1Z999AA10123456784');
+  check('92–95 and twenty more is USPS', detectTracking('9400111899223183452144')?.carrier === 'usps'
+    && detectTracking('9205590175547700000000')?.carrier === 'usps');
+  check('two letters, nine digits, US is USPS', detectTracking('LZ123456789US')?.carrier === 'usps');
+  check('a price is not a parcel', detectTracking('Desk $1200') === null);
+  check('a phone number is not a parcel', detectTracking('call 6175551234') === null);
+  check('an order number is not a parcel', detectTracking('order 112-1234567-1234567') === null);
+  check('a year is not a parcel', detectTracking('Spring 2027 books') === null);
+  check('nothing at all', detectTracking('') === null && detectTracking(null) === null);
+
+  check('the FedEx page', /fedex\.com\/fedextrack\/\?trknbr=541958247270$/.test(trackingUrl('fedex', '541958247270')));
+  check('the UPS page', /ups\.com\/track\?tracknum=1Z/.test(trackingUrl('ups', '1Z999AA10123456784')));
+  check('the USPS page', /usps\.com\/go\/TrackConfirmAction\?tLabels=/.test(trackingUrl('usps', 'LZ123456789US')));
+
+  /* ---- one line in ---- */
+  const bare = parseWishAdd('541958247270');
+  check('a bare number is a parcel', bare.tracking?.number === '541958247270' && bare.tracking.carrier === 'fedex', JSON.stringify(bare));
+  check('...named for its carrier', bare.title === 'FedEx parcel', bare.title);
+  check('...linked to the carrier’s page', /fedextrack/.test(bare.url), String(bare.url));
+
+  const named = parseWishAdd('Nozzle heater $48.50 541958247270 mcmaster.com/1234');
+  check('a name, a price, a link and a number all come apart',
+    named.title === 'Nozzle heater' && named.price === 48.5 && named.url === 'https://mcmaster.com/1234'
+    && named.tracking?.number === '541958247270', JSON.stringify(named));
+  check('a shop link is kept over the carrier’s', named.url === 'https://mcmaster.com/1234');
+  check('a line with no number has no tracking', parseWishAdd('Nozzle heater $48.50').tracking === null);
+
+  /* ---- the wish it makes ---- */
+  const made = s.commit(() => s.addWish('Filament 1Z999AA10123456784'));
+  const w = s.state.wishlist.find((x) => x.title === 'Filament');
+  check('a number means it has shipped', w?.status === 'shipped', w?.status);
+  check('...and carries its tracking', w?.tracking?.carrier === 'ups');
+  check('a wanted thing stays wanted', s.state.wishlist.find((x) => x.id === 'w3').tracking === null);
+  s.commit(() => s.deleteWish(w.id));
+  void made;
+});
+
+suite('Parcels — what the carrier says lands on the wish', async ({ check }) => {
+  const { applyTracking, failTracking } = s;
+  const at = '2026-09-10T12:00:00.000Z';
+
+  {
+    const w = { id: 'x', title: 'x', status: 'ordered', eta: null, tracking: { number: '541958247270', carrier: 'fedex' } };
+    const what = applyTracking(w, {
+      status: 'transit', summary: 'In transit · Memphis TN', eta: '2026-09-12', etaTime: '20:00',
+      window: { from: '10:00', to: '20:00' }
+    }, at);
+    check('the carrier’s date is the ETA', w.eta === '2026-09-12' && what === 'moved', `${w.eta} ${what}`);
+    check('the hour window is kept', w.tracking.window?.to === '20:00' && w.tracking.etaTime === '20:00');
+    check('ordered becomes shipped once the number answers', w.status === 'shipped');
+    check('the row knows when it was asked', w.tracking.checkedAt === at && w.tracking.error === null);
+    check('the same answer again is no news', applyTracking(w, { status: 'transit', eta: '2026-09-12' }, at) === 'same');
+  }
+  {
+    const w = { id: 'y', title: 'y', status: 'shipped', eta: '2026-09-12', tracking: { number: '541958247270', carrier: 'fedex' } };
+    check('a carrier with no date leaves a date typed by hand',
+      applyTracking(w, { status: 'transit', eta: null }, at) === 'same' && w.eta === '2026-09-12');
+  }
+  {
+    const w = { id: 'z', title: 'z', status: 'shipped', eta: '2026-09-12', tracking: { number: '541958247270', carrier: 'fedex' } };
+    const what = applyTracking(w, { status: 'delivered', summary: 'Delivered · Front door', eta: '2026-09-11' }, at);
+    check('delivered moves the wish to Delivered', w.status === 'delivered' && what === 'delivered');
+    check('...and the ETA is history', w.eta === null);
+  }
+  {
+    const w = { id: 'e', title: 'e', status: 'shipped', eta: '2026-09-12', tracking: { number: '541958247270', carrier: 'fedex' } };
+    failTracking(w, 'FedEx answered 503', at);
+    check('a carrier that would not answer is written on the line', w.tracking.error === 'FedEx answered 503' && w.tracking.checkedAt === at);
+    check('...never on the date', w.eta === '2026-09-12' && w.status === 'shipped');
+  }
+});
+
+suite('Parcels — asked once a day, all at once', async ({ check }) => {
+  const { refreshTracking, refreshTrackingIfDue, trackingDue, tracked, TRACK_EVERY } = await import('../js/tracking.js');
+  const t0 = Date.parse('2026-09-10T12:00:00Z');
+
+  check('two parcels are on the way, the book is not', tracked().map((w) => w.id).sort().join() === 'w1,w2');
+  check('never asked means due', trackingDue(t0));
+
+  const asked = [];
+  const answers = {
+    541958247270: { status: 'out', summary: 'On FedEx vehicle for delivery', eta: '2026-09-10', etaTime: '20:00', window: null },
+    '1Z999AA10123456784': { status: 'delivered', summary: 'Delivered', eta: '2026-09-09' }
+  };
+  const fetch = async ({ carrier, number }) => { asked.push(`${carrier}:${number}`); return answers[number]; };
+
+  const [a, b] = await Promise.all([refreshTracking({ fetch, now: t0 }), refreshTracking({ fetch, now: t0 })]);
+  check('two calls at once are one round', a === b && asked.length === 2, asked.join(' '));
+  check('every carrier was asked', asked.sort().join() === 'fedex:541958247270,ups:1Z999AA10123456784', asked.join());
+  check('the tally says what happened', a.asked === 2 && a.delivered === 1 && a.moved === 1 && a.failed === 0, JSON.stringify(a));
+
+  const w1 = s.state.wishlist.find((w) => w.id === 'w1'), w2 = s.state.wishlist.find((w) => w.id === 'w2');
+  check('the FedEx date landed', w1.eta === '2026-09-10' && w1.tracking.status === 'out' && w1.tracking.etaTime === '20:00');
+  check('the UPS parcel moved itself to Delivered', w2.status === 'delivered' && w2.eta === null);
+  check('the day is stamped, device-only', s.state.settings.trackingAt === new Date(t0).toISOString()
+    && !s.SYNCED_SETTINGS.includes('trackingAt'));
+  check('...so it is not due again today', !trackingDue(t0 + 60_000));
+  check('...and is due tomorrow', trackingDue(t0 + TRACK_EVERY + 1));
+  check('a delivered parcel is not asked about again', tracked().map((w) => w.id).join() === 'w1');
+
+  // one carrier down must not take the others with it
+  const bad = async ({ carrier }) => { if (carrier === 'fedex') throw new Error('FedEx answered 503'); return { status: 'transit', eta: '2026-09-15' }; };
+  s.commit(() => { s.state.wishlist.find((w) => w.id === 'w2').status = 'shipped'; });
+  const r = await refreshTracking({ fetch: bad, now: t0 + 1000 });
+  check('a failure is counted, not thrown', r.failed === 1 && r.moved === 1, JSON.stringify(r));
+  check('...and written on that row alone', /503/.test(w1.tracking.error) && w1.eta === '2026-09-10' && !w2.tracking.error && w2.eta === '2026-09-15');
+
+  // asking about one does not put the daily round off for the rest
+  const stampBefore = s.state.settings.trackingAt;
+  await refreshTracking({ fetch, only: 'w1', now: t0 + 5000 });
+  check('a single ask leaves the day’s stamp alone', s.state.settings.trackingAt === stampBefore);
+
+  // signed out, nothing is asked and nothing is stamped
+  const before = asked.length;
+  check('signed out, the daily round does nothing', (await refreshTrackingIfDue({ fetch, now: t0 + TRACK_EVERY * 2 })) === null && asked.length === before);
+});
+</script>
+</body>
+</html>
