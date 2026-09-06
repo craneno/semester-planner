@@ -21,6 +21,7 @@ import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
 import * as C from './cloud.js';
 import { refreshIfDue } from './canvas.js';
+import { refreshTrackingIfDue } from './tracking.js';
 
 /* Plain views. Categories and single areas are routed separately — they are
    data, not screens, so they cannot be listed here. */
@@ -613,7 +614,7 @@ function boot() {
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
       || meta?.source === 'editor' || meta?.source === 'restore'
       || meta?.source === 'undo' || meta?.source === 'redo'
-      || meta?.source === 'canvas') navigate();
+      || meta?.source === 'canvas' || meta?.source === 'tracking') navigate();
   });
 
   navigate();
@@ -623,7 +624,7 @@ function boot() {
   C.start().catch((e) => console.warn('cloud', e));
   // the Canvas feed, once a day: after any sync that ends well, so a device
   // that has just woken or just signed in gets its turn
-  C.onCloud((c) => { if (c.status === 'ready') refreshIfDue(); });
+  C.onCloud((c) => { if (c.status === 'ready') { refreshIfDue(); refreshTrackingIfDue(); } });
 
   askAboutZone();
 

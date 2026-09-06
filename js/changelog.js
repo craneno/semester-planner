@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v52', date: '2026-09-05',
+    title: 'A number that knows when it lands',
+    notes: [
+      'Paste a tracking number on the wishlist — FedEx, UPS or USPS, on its own or with a name and a price — and it is read as a parcel on its way: the row links to the carrier’s page, and the carrier is asked when it will arrive. The date lands in the ETA box and the row says the hour window and the last scan; when it is delivered the row moves itself to Delivered.',
+      'The carriers are asked again once a day per device, and whenever you press Check parcels. The asking runs on your Supabase project, with the carriers’ keys set there — see README → Parcel tracking for the three secrets and the one deploy. Without them the link still works; the row says so.'
+    ]
+  },
+  {
     version: 'v51', date: '2026-09-05',
     title: 'All day, by a tap',
     notes: [

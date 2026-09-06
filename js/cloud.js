@@ -699,6 +699,28 @@ export async function fetchFeed() {
   return text;
 }
 
+/**
+ * Ask the track-parcel function where a parcel is. The carriers' APIs want
+ * keys and send no CORS headers, so the asking happens on the edge, as you,
+ * with the keys set on the project (README → Parcel tracking). Resolves to
+ * the function's JSON; throws with the function's words when it cannot.
+ */
+export async function trackParcel({ carrier, number }) {
+  const c = await client();
+  const { data } = await c.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('Sign in first.');
+  const res = await fetch(cfg().url.replace(/\/+$/, '') + '/functions/v1/track-parcel', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, apikey: cfg().anonKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ carrier, number })
+  });
+  const text = await res.text();
+  if (res.status === 404) throw new Error('The track-parcel function is not deployed yet. From the repo: supabase functions deploy track-parcel');
+  if (!res.ok) throw new Error(text || `Tracking: ${res.status}`);
+  return JSON.parse(text);
+}
+
 /** Forget this device's sync bookkeeping without touching the data itself. */
 export function resetLocalSyncState() {
   if (cloud.userId) { try { localStorage.removeItem(BASE_KEY(cloud.userId)); } catch { /* ignore */ } }

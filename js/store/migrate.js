@@ -8,6 +8,7 @@ import { uid, tz } from '../util.js';
 import { isRepeat } from '../repeat.js';
 import { SCHEMA_VERSION, ITEM_TYPES, LEGACY_TYPE, WISH_STATUSES, SPRINT_KINDS, AREA_COLORS, areaCategory } from './constants.js';
 import { normalizeUrl, linkTitleFromUrl } from './urls.js';
+import { normalizeTracking } from './parcels.js';
 
 export const DEFAULTS = () => {
   const y = new Date().getFullYear();
@@ -47,6 +48,9 @@ export const DEFAULTS = () => {
       // when this device last brought the Canvas feed in. Device-only too:
       // each device fetches for itself, once a day
       canvasFeedAt: '',
+      // when this device last asked the carriers about the parcels on the
+      // wishlist. Device-only too, like the feed
+      trackingAt: '',
       gcal: {
         clientId: '',
         calendarId: 'primary',
@@ -107,6 +111,7 @@ export function migrate(raw) {
     price: Number.isFinite(Number(w.price)) && w.price !== null && w.price !== '' ? Number(w.price) : null,
     status: WISH_STATUSES.includes(w.status) ? w.status : 'wanted',
     eta: w.eta || null,
+    tracking: normalizeTracking(w.tracking),
     createdAt: w.createdAt || new Date().toISOString(),
     updatedAt: w.updatedAt || w.createdAt || new Date().toISOString()
   }));

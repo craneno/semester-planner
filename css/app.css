@@ -945,6 +945,11 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 .wish-eta.is-today { color: var(--warn); border-color: var(--warn); font-weight: 550; }
 .wish-eta.is-late { color: var(--danger); border-color: var(--danger); font-weight: 550; }
 .wish-eta-none { text-align: center; color: var(--ink-3); }
+/* the carrier's line under a tracked parcel: where it is, the hour it lands */
+.wish-track { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 0 0 2px; }
+.wish-track .eyebrow { color: var(--ink-3); }
+.wish-track .eyebrow.is-err { color: var(--danger); }
+.wish-track .eyebrow.is-live { color: var(--accent); }
 
 @media (max-width: 820px) {
   .wish-row { grid-template-columns: minmax(0, 1fr) 64px 100px; row-gap: 6px; }

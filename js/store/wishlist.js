@@ -7,6 +7,7 @@
 import { uid, today, diffDays } from '../util.js';
 import { WISH_STATUSES } from './constants.js';
 import { normalizeUrl } from './urls.js';
+import { CARRIERS, detectTracking, trackingUrl, normalizeTracking } from './parcels.js';
 
 /** Ordered, shipped: bought and not here yet. This is what an ETA is for. */
 export const WISH_IN_FLIGHT = ['ordered', 'shipped'];
@@ -64,10 +65,21 @@ export function parseWishAdd(input) {
   const prices = [...text.matchAll(priceRe)];
   if (prices.length) { price = Number(prices[prices.length - 1][1]); text = text.replace(priceRe, ' '); }
 
+  // a tracking number is a parcel already on its way: it names the carrier,
+  // and the carrier's page is its link unless one was given
+  const found = detectTracking(text);
+  const tracking = found ? { number: found.number, carrier: found.carrier } : null;
+  if (found) {
+    text = text.replace(found.raw, ' ');
+    if (!url) url = trackingUrl(found.carrier, found.number);
+  }
+
+  const title = text.replace(/\s+/g, ' ').trim();
   return {
-    title: text.replace(/\s+/g, ' ').trim() || 'Untitled',
+    title: title || (tracking ? `${CARRIERS[tracking.carrier]} parcel` : 'Untitled'),
     url,
-    price
+    price,
+    tracking
   };
 }
 
@@ -79,6 +91,9 @@ export function addWish(s, input, { status = 'wanted' } = {}) {
   const parsed = typeof input === 'string' ? parseWishAdd(input) : input;
   if (!parsed || !String(parsed.title || '').trim()) return null;
   const now = new Date().toISOString();
+  const tracking = normalizeTracking(parsed.tracking);
+  // a number in hand means it has shipped, whatever the default would be
+  if (tracking && status === 'wanted') status = 'shipped';
   const wish = {
     id: uid('w'),
     title: String(parsed.title).trim(),
@@ -86,6 +101,7 @@ export function addWish(s, input, { status = 'wanted' } = {}) {
     price: Number.isFinite(parsed.price) ? parsed.price : null,
     status: WISH_STATUSES.includes(status) ? status : 'wanted',
     eta: parsed.eta || null,
+    tracking,
     createdAt: now,
     updatedAt: now
   };
@@ -110,6 +126,7 @@ export function updateWish(s, id, patch) {
     }
   }
   if (next.status !== undefined && !WISH_STATUSES.includes(next.status)) delete next.status;
+  if (next.tracking !== undefined) next.tracking = normalizeTracking(next.tracking);
   // an ETA is a promise about a parcel; once it is here the date is history
   if (next.status === 'delivered') next.eta = null;
   Object.assign(w, next, { updatedAt: new Date().toISOString() });

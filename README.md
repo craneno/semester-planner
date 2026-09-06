@@ -162,6 +162,32 @@ exactly as it did before you ever connected an account.
 
 ---
 
+### Parcel tracking
+
+Paste a tracking number on the Wishlist — on its own, or with a name and a
+price — and the row becomes a parcel on its way: the carrier is read off the
+number (FedEx, UPS or USPS), the row links to the carrier's page, and the
+carrier is asked when it lands. The date goes in the ETA box, the row shows
+the hour window and the last scan, and a delivered parcel moves itself to
+Delivered. Every device asks once a day, and **Check parcels** asks now.
+
+The carriers want keys and send no CORS headers, so the asking runs on your
+Supabase project, as you, with the keys kept there:
+
+```sh
+supabase functions deploy track-parcel
+supabase secrets set FEDEX_CLIENT_ID=… FEDEX_CLIENT_SECRET=…
+supabase secrets set UPS_CLIENT_ID=… UPS_CLIENT_SECRET=…
+supabase secrets set USPS_CLIENT_ID=… USPS_CLIENT_SECRET=…
+```
+
+Set only the carriers you use. FedEx: developer.fedex.com, a project with the
+Track API. UPS: developer.ups.com, an app with Tracking. USPS:
+developer.usps.com, an app with the Tracking API (v3). Each carrier's sandbox
+can be pointed at with `FEDEX_API`, `UPS_API`, `USPS_API`. A carrier with no
+keys is not an error: the row says tracking is not set up, and the link to
+the carrier's page still works.
+
 ## Putting it on GitHub
 
 The repo *is* the site — no build step, so the workflow is just edit, commit, push.

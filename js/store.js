@@ -27,6 +27,7 @@ export { listBackups, readBackup } from './store/backups.js';
 export { sprintProgress } from './store/sprints.js';
 export { WISH_IN_FLIGHT, wishTotal, etaState, parseWishAdd } from './store/wishlist.js';
 export { HABIT_TARGET } from './store/habits.js';
+export { CARRIERS, detectTracking, trackingUrl, applyTracking, failTracking } from './store/parcels.js';
 
 const bind = (fn) => (...a) => fn(state, ...a);
 export const areaById = bind(A.areaById);
@@ -142,7 +143,7 @@ export function commit(fn, meta = {}) {
    restore — clears the stack: history from before the world moved is not
    safe to replay over it. */
 const UNDO_KEYS = ['semester', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
-const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas']);
+const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas', 'tracking']);
 export const undoSettings = { max: 10, coalesceMs: 800 };
 let undoStack = [], redoStack = [], lastLocalAt = 0;
 
