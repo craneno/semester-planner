@@ -459,16 +459,20 @@ const TYPE_LABEL = {
  * times, where it belongs. Everything else is a click away in the panel, and
  * a long form here would be slower than the drag it follows.
  */
-export function newBlockPrompt({ date, start, mins }, { onDone } = {}) {
+/**
+ * With no `start` (or `allDay: true`) it asks for an all-day plan instead —
+ * the rail above the week grid — which is a plan with a date and no time.
+ */
+export function newBlockPrompt({ date, start, mins, allDay = !start }, { onDone } = {}) {
   const hour12 = state.settings.hour12;
   // a tap at 23:30 asks for an hour; the day has half of one left
-  mins = Math.max(SNAP, Math.min(mins, DAY - toMin(start)));
+  if (!allDay) mins = Math.max(SNAP, Math.min(mins, DAY - toMin(start)));
   const draft = {
     title: '', type: 'event', areaId: defaultAreaId(),
-    start, mins,
+    start: allDay ? null : start, mins: allDay ? 0 : mins,
     // an input[type=time] cannot hold 24:00, so a range that runs to midnight
     // shows as 23:59 — and keeps its real length unless the field is touched
-    end: fromMin(Math.min(toMin(start) + mins, DAY - 1))
+    end: allDay ? null : fromMin(Math.min(toMin(start) + mins, DAY - 1))
   };
 
   const titleIn = h('input', {
@@ -477,7 +481,7 @@ export function newBlockPrompt({ date, start, mins }, { onDone } = {}) {
     oninput: (e) => { draft.title = e.target.value; },
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } }
   });
-  const startIn = h('input', {
+  const startIn = allDay ? null : h('input', {
     type: 'time', value: start, 'aria-label': 'Starts',
     onchange: (e) => {
       draft.start = e.target.value || draft.start;
@@ -485,7 +489,7 @@ export function newBlockPrompt({ date, start, mins }, { onDone } = {}) {
       span.textContent = fmtDuration(draft.mins);
     }
   });
-  const endIn = h('input', {
+  const endIn = allDay ? null : h('input', {
     type: 'time', value: draft.end, 'aria-label': 'Ends',
     onchange: (e) => {
       draft.end = e.target.value || draft.end;
@@ -493,7 +497,7 @@ export function newBlockPrompt({ date, start, mins }, { onDone } = {}) {
       span.textContent = fmtDuration(draft.mins);
     }
   });
-  const span = h('span', { class: 'eyebrow num' }, fmtDuration(mins));
+  const span = h('span', { class: 'eyebrow num' }, allDay ? 'All day' : fmtDuration(mins));
 
   // a fresh install has no areas at all, and an empty select reads as broken
   const areaIn = h('select', { 'aria-label': 'Area', onchange: (e) => { draft.areaId = e.target.value; } },
@@ -517,23 +521,23 @@ export function newBlockPrompt({ date, start, mins }, { onDone } = {}) {
       item = upsertItem({
         title, type: draft.type, areaId: draft.areaId || null,
         plan: { date, start: draft.start, mins: draft.mins },
-        estMins: draft.mins
+        estMins: allDay ? 60 : draft.mins
       });
     });
     closeModal();
     pushItem(item.id).catch(() => {});
-    toast(`${title} · ${fmtDate(date, { weekday: true })} ${fmtTime(draft.start, hour12)}`,
+    toast(`${title} · ${fmtDate(date, { weekday: true })} ${allDay ? 'all day' : fmtTime(draft.start, hour12)}`,
       { action: 'Edit', onAction: () => openItem(item.id) });
     onDone?.(item);
   }
 
   modal({
-    title: `New block · ${fmtDate(date, { weekday: true })}`,
+    title: `New ${allDay ? 'all-day' : 'block'} · ${fmtDate(date, { weekday: true })}`,
     body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
       h('div', { class: 'field' }, h('label', {}, 'What is it'), titleIn),
       h('div', { class: 'field' },
         h('label', {}, 'When'),
-        h('div', { class: 'time-range' }, startIn, h('span', {}, '→'), endIn, span)),
+        allDay ? span : h('div', { class: 'time-range' }, startIn, h('span', {}, '→'), endIn, span)),
       h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
         h('div', { class: 'field' }, h('label', {}, 'Area'), areaIn),
         h('div', { class: 'field' }, h('label', {}, 'Kind'), typeIn))),

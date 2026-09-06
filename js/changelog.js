@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v51', date: '2026-09-05',
+    title: 'All day, by a tap',
+    notes: [
+      'The all-day row above the week grid takes a click, or a tap on a phone: name it and it is planned for that day with no time, the way the tray and the grid already work. Before, the row only showed things and made nothing.'
+    ]
+  },
+  {
     version: 'v50', date: '2026-09-05',
     title: 'Behind means today',
     notes: [
