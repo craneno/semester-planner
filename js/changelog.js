@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v53', date: '2026-09-08',
+    title: 'A calendar for a life, a term for the courses',
+    notes: [
+      'Google Calendar is read from the day the planner began to a year ahead now, whatever the term says. Before, only the term was fetched, so an event made in Google on a day before the first day of term never showed here. The first day is in Settings → Calendar, worked out once from the earliest thing in the planner.',
+      'The term is only for courses now: when classes meet, the Semester chart, the Canvas import. A course can set its own first and last day on its page, blank meaning the term’s.',
+      'The Week tray keeps work due before the term, as long as it is due after the calendar began.'
+    ]
+  },
+  {
     version: 'v52', date: '2026-09-05',
     title: 'A number that knows when it lands',
     notes: [

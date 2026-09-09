@@ -263,10 +263,10 @@ export function renderWeek(root, { navigate } = {}) {
 
   /* ---- unscheduled tray ----
      Work with no block yet: due soon, or with no date at all. Due before the
-     term is not this term's work, however far behind it is. */
+     calendar began is not this planner's work, however far behind it is. */
   const loose = state.items
     .filter((t) => !t.done && !t.plan && !t.repeat
-      && (!t.due || (t.due >= state.semester.start && t.due <= addDays(days[6], 14))))
+      && (!t.due || (t.due >= state.calendar.start && t.due <= addDays(days[6], 14))))
     .sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : 1)
     .slice(0, 24);
 

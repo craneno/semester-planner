@@ -7,7 +7,7 @@ import {
   state, commit, toggleItem, upsertArea, deleteArea, areasInCategory, itemsForArea,
   nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress,
   linksForArea, updateLink, deleteLink, addLink, cardsForArea,
-  journalEntry, setJournalEntry, journalDates
+  journalEntry, setJournalEntry, journalDates, termOf
 } from '../store.js';
 import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta, reorderable } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -81,7 +81,8 @@ function areaGroup(a, { navigate, go }) {
     body.append(h('div', { class: 'eyebrow num area-when' },
       a.schedule.map((m) =>
         `${(m.days || []).map((d) => DOW[d]).join('/')} ${fmtTime(m.start, state.settings.hour12)}–${fmtTime(m.end, state.settings.hour12)}`
-        + (m.location ? ` · ${m.location}` : '')).join('   ')));
+        + (m.location ? ` · ${m.location}` : '')).join('   ')
+      + (a.from || a.until ? `   ${termOf(a).start} → ${termOf(a).end}` : '')));
   }
 
   if (!next.length) {
@@ -535,7 +536,16 @@ function editArea(area, categoryId, navigate) {
           h('label', { style: { flex: 1 } }, 'Recurring meetings'),
           picker.button),
         picker.host,
-        meetingsHost)),
+        meetingsHost),
+      h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
+        h('div', { class: 'field' },
+          h('label', {}, 'Meets from'),
+          h('input', { type: 'date', value: draft.from || '', onchange: (e) => { draft.from = e.target.value || null; } })),
+        h('div', { class: 'field' },
+          h('label', {}, 'Until'),
+          h('input', { type: 'date', value: draft.until || '', onchange: (e) => { draft.until = e.target.value || null; } }))),
+      h('div', { class: 'eyebrow', style: { marginTop: '-6px' } },
+        `Blank means the term, ${state.semester.start} → ${state.semester.end}. The meetings are drawn only between these days.`)),
     footer: [
       area && h('button', {
         class: 'btn danger', onclick: async () => {
@@ -557,6 +567,7 @@ function editArea(area, categoryId, navigate) {
       h('button', {
         class: 'btn primary', onclick: () => {
           if (!draft.name.trim()) { toast('Give the area a name first.'); return; }
+          if (draft.from && draft.until && draft.until < draft.from) { toast('The last day has to come after the first.'); return; }
           commit(() => upsertArea(area ? { ...draft, id: area.id } : draft));
           closeModal();
           navigate();

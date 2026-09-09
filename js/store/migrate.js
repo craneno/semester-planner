@@ -4,7 +4,7 @@
 // next bump brings back something deleted on purpose. A rename is the other
 // way round — see areaCategory() in constants.js.
 
-import { uid, tz } from '../util.js';
+import { uid, tz, today } from '../util.js';
 import { isRepeat } from '../repeat.js';
 import { SCHEMA_VERSION, ITEM_TYPES, LEGACY_TYPE, WISH_STATUSES, SPRINT_KINDS, AREA_COLORS, areaCategory } from './constants.js';
 import { normalizeUrl, linkTitleFromUrl } from './urls.js';
@@ -20,6 +20,9 @@ export const DEFAULTS = () => {
       start: fall ? `${y}-09-02` : `${y}-01-06`,
       end: fall ? `${y}-12-12` : `${y}-04-24`
     },
+    // the day the planner began. Google is read from here on; the term
+    // above is only for courses
+    calendar: { start: today() },
     areas: [],
     items: [],
     cards: [],          // captured notes, unfiled until given an areaId
@@ -57,6 +60,7 @@ export const DEFAULTS = () => {
         enabled: false,
         pushPlans: true,
         syncToken: '',
+        window: null,     // the days the token was made under: start, end
         lastSync: null
       },
       cloud: {
@@ -168,6 +172,10 @@ export function migrate(raw) {
     freewrite: typeof a.freewrite === 'string' ? a.freewrite : '',
     schedule: Array.isArray(a.schedule) ? a.schedule : [],
     grading: Array.isArray(a.grading) ? a.grading : [],
+    // the days its meetings run, when they are not the term's. Only when
+    // set: a key on every row would make each look edited to sync
+    ...(a.from ? { from: a.from } : {}),
+    ...(a.until ? { until: a.until } : {}),
     // Carried, not rebuilt. upsertArea() stamps an edit, but this normaliser
     // used to drop the stamp on the next load, so every area reached the sync
     // layer with no clock at all — and a stale copy could beat a fresh one
@@ -285,6 +293,21 @@ export function migrate(raw) {
     };
   });
 
+  // The calendar began when the planner did, not when the term does: a
+  // life is longer than a semester. A planner saved before this never wrote
+  // that down, so the earliest day anything sits on stands in — from the
+  // rows that sync, so every device works out the same day — and once
+  // written it is kept, so no later load moves it.
+  s.calendar = raw.calendar?.start ? { start: raw.calendar.start } : { start: earliestDay(s) };
+
   s.version = SCHEMA_VERSION;
   return s;
+}
+
+/** The earliest day anything in the planner sits on, today at the latest. */
+function earliestDay(s) {
+  const days = [today()];
+  for (const t of s.items) { if (t.plan?.date) days.push(t.plan.date); if (t.due) days.push(t.due); }
+  for (const d of Object.keys(s.notes)) if (/^\d{4}-\d{2}-\d{2}$/.test(d)) days.push(d);
+  return days.reduce((a, b) => (b < a ? b : a));
 }

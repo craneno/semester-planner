@@ -671,6 +671,55 @@ suite('Events — a class already on the schedule is not drawn twice', async ({ 
   check('the topbar sees each class once too', s.dayTimeline('2026-09-14').filter((x) => /thermo/i.test(x.title) && x.start === '10:30').length === 1);
 });
 
+/* The term is the courses' business, and a course may not keep to it: a
+   half-term seminar, a lab that starts a week late. Its own days win, blank
+   means the term's, and outside either nothing meets. */
+suite('Classes — a course keeps its own days', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [
+      { id: 'th', name: 'Thermodynamics', category: 'course', order: 0, schedule: [{ days: [1], start: '10:30', end: '11:35', tz: 'America/New_York' }] },
+      { id: 'sem', name: 'Seminar', category: 'course', order: 1, from: '2026-09-14', until: '2026-10-19', schedule: [{ days: [1], start: '13:00', end: '14:00', tz: 'America/New_York' }] }
+    ],
+    items: [], cards: [], notes: {}
+  });
+  const on = (d) => s.classesOn(d).map((c) => c.areaId).join();
+  check('the term is the default', s.termOf(s.areaById('th')).start === '2026-09-02' && s.termOf(s.areaById('sem')).start === '2026-09-14');
+  check('before its first day a course does not meet', on('2026-09-07') === 'th', on('2026-09-07'));
+  check('between its days it does', on('2026-09-14') === 'th,sem' && on('2026-10-19') === 'th,sem');
+  check('after its last day it stops, the term going on', on('2026-10-26') === 'th');
+  check('outside the term nothing meets', on('2026-08-31') === '' && on('2026-12-14') === '');
+  check('the keys are only there when set', !('from' in s.areaById('th')) && s.areaById('sem').until === '2026-10-19');
+  s.upsertArea({ id: 'sem', from: null, until: null });
+  check('blanked, they go rather than sit null and look edited', !('from' in s.areaById('sem')) && !('until' in s.areaById('sem')) && on('2026-09-07') === 'th,sem');
+});
+
+/* The calendar began when the planner did, not when the term does. A planner
+   from before never wrote that down, so the earliest day anything sits on
+   stands in, from the rows that sync so every device agrees; once written it
+   stays; and it travels in the meta row. */
+suite('Calendar start — the day the planner began', async ({ check }) => {
+  const { today } = await import('../js/util.js');
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-09', end: '2026-12-12' },
+    areas: [], cards: [],
+    items: [{ id: 'a', title: 'old', due: '2026-08-20' }, { id: 'b', title: 'planned', plan: { date: '2026-08-15', start: null, mins: 0 } }],
+    notes: { '2026-08-30': { focus: 'x', text: '', top3: [] } }
+  });
+  check('an older planner begins on the earliest day anything sits on', s.state.calendar.start === '2026-08-15', s.state.calendar.start);
+  check('...and the meta row carries it', s.snapshotRows().find((r) => r.kind === 'meta').data.calendar.start === '2026-08-15');
+  s.applyRow({ kind: 'meta', id: 'meta', data: { semester: s.state.semester, calendar: { start: '2026-08-01' } } });
+  check("...so another device's word is taken", s.state.calendar.start === '2026-08-01');
+  s.applyRow({ kind: 'meta', id: 'meta', data: { semester: s.state.semester } });
+  check("...and an older build's silence is not", s.state.calendar.start === '2026-08-01');
+  const t = await storeWith({ version: 20, semester: { name: 'x', start: '2026-09-09', end: '2026-12-12' }, calendar: { start: '2026-07-04' }, areas: [], items: [{ id: 'a', title: 'old', due: '2026-01-01' }], cards: [], notes: {} });
+  check('one written down is kept, however old the rows', t.state.calendar.start === '2026-07-04');
+  const u = await storeWith({ version: 20, semester: { name: 'x', start: '2026-09-09', end: '2026-12-12' }, areas: [], items: [], cards: [], notes: {} });
+  check('an empty planner begins today', u.state.calendar.start === today());
+});
+
 /* What is behind. What has to hold: a deadline gone by; a block booked on a
    day gone by, with no deadline, not ticked; not one ticked, not one on a
    day to come, not one with a deadline still ahead (that is upcoming's), and

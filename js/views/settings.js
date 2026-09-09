@@ -46,7 +46,17 @@ export function renderSettings(root, { navigate }) {
         type: 'date', value: state.semester.end,
         onchange: (e) => setTerm('end', e.target.value, navigate)
       }))),
+    h('div', { class: 'eyebrow' }, 'Only courses follow these days: when classes meet, the chart, the Canvas import. A course can set its own on its page.'),
     zoneRow(navigate)
+  ]));
+
+  /* ---------- calendar ---------- */
+  p.append(section('Calendar', [
+    field('First day', h('input', {
+      type: 'date', value: state.calendar.start,
+      onchange: (e) => setCalendarStart(e.target.value, navigate)
+    })),
+    h('div', { class: 'eyebrow' }, 'The day the planner began. Google Calendar is read from here on, a year ahead, whatever the term says.')
   ]));
 
   /* ---------- google calendar ---------- */
@@ -691,6 +701,15 @@ function fontSelect(role) {
 /* A term with no last day, or one before the first, made every class vanish
    from Week and Overview with nothing said: `classesOn` is empty outside the
    term. So the edit is refused and the box put back. */
+/* The day the calendar began. Google is read from it on, so a change reads
+   the lot again: the sync token only knows the window it was made under. */
+function setCalendarStart(value, navigate) {
+  if (!value) { toast('The calendar needs a first day.'); navigate(); return; }
+  commit(() => { state.calendar.start = value; });
+  G.sync();
+  navigate();
+}
+
 function setTerm(key, value, navigate) {
   const next = { ...state.semester, [key]: value };
   const bad = !next.start || !next.end ? 'The term needs both days.'

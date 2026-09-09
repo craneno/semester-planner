@@ -142,7 +142,7 @@ export function commit(fn, meta = {}) {
    keystrokes. A change from outside — the cloud, another tab, Google, a
    restore — clears the stack: history from before the world moved is not
    safe to replay over it. */
-const UNDO_KEYS = ['semester', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
+const UNDO_KEYS = ['semester', 'calendar', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
 const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas', 'tracking']);
 export const undoSettings = { max: 10, coalesceMs: 800 };
 let undoStack = [], redoStack = [], lastLocalAt = 0;
@@ -468,15 +468,18 @@ export function workloadFor(dates) {
   return { mins, count };
 }
 
+/** The days an area's meetings run: its own, or the term's. */
+export const termOf = (a) => ({ start: a.from || state.semester.start, end: a.until || state.semester.end });
+
 /** Recurring class meetings that land on a given date. */
 export function classesOn(date) {
   const d = new Date(date + 'T00:00:00');
   const dow = d.getDay();
-  const { start, end } = state.semester;
-  if (date < start || date > end) return [];
   const out = [];
   for (const a of state.areas) {
     if (a.archived) continue;
+    const { start, end } = termOf(a);
+    if (date < start || date > end) continue;
     for (const m of a.schedule || []) {
       if (!(m.days || []).includes(dow)) continue;
       const s = toMin(m.start), e = toMin(m.end);
@@ -929,6 +932,10 @@ export function upsertArea(patch) {
     };
     state.areas.push(a);
   }
+  // blank days mean the term's, and go rather than sit null: migrate drops
+  // them, so a null kept here would look edited to sync on every load
+  if (!a.from) delete a.from;
+  if (!a.until) delete a.until;
   return a;
 }
 
@@ -1112,7 +1119,7 @@ export function snapshotRows() {
   }
   const settings = {};
   for (const k of SYNCED_SETTINGS) settings[k] = state.settings[k];
-  rows.push({ kind: 'meta', id: 'meta', data: { semester: state.semester, settings } });
+  rows.push({ kind: 'meta', id: 'meta', data: { semester: state.semester, calendar: state.calendar, settings } });
   return rows;
 }
 
@@ -1151,6 +1158,7 @@ export function applyRow({ kind, id, data, deleted }) {
     case 'meta':
       if (deleted || !data) return false;
       if (data.semester) Object.assign(state.semester, data.semester);
+      if (data.calendar?.start) Object.assign(state.calendar, data.calendar);
       if (data.settings) for (const k of SYNCED_SETTINGS) {
         if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
       }

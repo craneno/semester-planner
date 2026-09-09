@@ -4,7 +4,8 @@
 // implicit redirect fallback for installed PWAs, where popups can't return
 // a result to the standalone window.
 //
-// Read:  incremental sync with syncToken, polled while the app is visible.
+// Read:  incremental sync with syncToken, polled while the app is visible,
+//        from the day the calendar began to a year ahead (pullWindow).
 // Write: planner blocks are pushed as events tagged with
 //        extendedProperties.private.plannerItemId, so a round trip never
 //        creates a duplicate.
@@ -13,7 +14,7 @@ import {
   state, commit, itemById, areaById, upsertItem, seriesById, splitOccurrence,
   repeats, occurrencesBetween
 } from './store.js';
-import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays } from './util.js';
+import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays, today } from './util.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 const SCOPES = [
@@ -290,14 +291,34 @@ function mode(list) {
   return best;
 }
 
-/** Pull a page set. Uses syncToken when we have one, else a bounded full sync. */
+/* ---------------- how much calendar ----------------
+   The planner is for a life, not a term: Google is read from the day the
+   calendar began, and a year ahead. The term is the courses' business. A
+   sync token only reports the window it was made under, so the window is
+   written down beside it, and a change — the start moved, or the year ahead
+   run down by a month — starts over from the top. */
+
+const AHEAD = 365;        // days ahead
+const AHEAD_SLACK = 30;   // this much short of a year ahead, and it is time to look again
+
+export function pullWindow(now = today()) {
+  return { start: state.calendar.start, end: addDays(now, AHEAD) };
+}
+
+/** Is the window a token was made under no longer the one wanted? */
+export function windowMoved(had, want = pullWindow()) {
+  return !had || had.start !== want.start || had.end < addDays(want.end, -AHEAD_SLACK);
+}
+
+/** Pull a page set. Uses syncToken when we have one, else a full sync of the window. */
 export async function sync({ full = false } = {}) {
   if (!cfg().enabled || !isConfigured()) return;
   if (!navigator.onLine) { setStatus('offline', 'Offline — changes are queued.'); return; }
   setStatus('syncing');
 
   const calId = encodeURIComponent(cfg().calendarId || 'primary');
-  const useToken = !full && cfg().syncToken;
+  const win = pullWindow();
+  const useToken = !full && cfg().syncToken && !windowMoved(cfg().window, win);
   let pageToken = null, nextSync = null;
   const incoming = [];
 
@@ -306,8 +327,8 @@ export async function sync({ full = false } = {}) {
       const params = useToken
         ? { syncToken: cfg().syncToken, singleEvents: true, showDeleted: true, maxResults: 2500, pageToken }
         : {
-            timeMin: toRfc3339(state.semester.start, '00:00'),
-            timeMax: toRfc3339(addDays(state.semester.end, 1), '00:00'),
+            timeMin: toRfc3339(win.start, '00:00'),
+            timeMax: toRfc3339(addDays(win.end, 1), '00:00'),
             singleEvents: true, showDeleted: true, maxResults: 2500, orderBy: 'startTime', pageToken
           };
       const data = await api(`/calendars/${calId}/events`, { params });
@@ -322,8 +343,9 @@ export async function sync({ full = false } = {}) {
     return;
   }
 
-  const changed = applyIncoming(incoming, { replace: !useToken });
+  const changed = applyIncoming(incoming, { replace: !useToken, win });
   cfg().syncToken = nextSync || cfg().syncToken;
+  if (!useToken) cfg().window = win;
   cfg().lastSync = new Date().toISOString();
   // the cursor and the timestamp are worth saving either way; the repaint is
   // only worth it when the calendar actually said something
@@ -337,7 +359,7 @@ export async function sync({ full = false } = {}) {
  * The answer matters: a quiet minute is the common case, and repainting the
  * screen for one takes the caret out of whatever is being written.
  */
-function applyIncoming(raw, { replace }) {
+function applyIncoming(raw, { replace, win }) {
   const byId = new Map(replace ? [] : state.events.map((e) => [e.id, e]));
   const was = JSON.stringify(state.events);
   let touched = false;
@@ -388,7 +410,7 @@ function applyIncoming(raw, { replace }) {
   }
 
   state.events = Array.from(byId.values())
-    .filter((e) => e.date >= addDays(state.semester.start, -7) && e.date <= addDays(state.semester.end, 7));
+    .filter((e) => e.date >= win.start && e.date <= win.end);
   return touched || JSON.stringify(state.events) !== was;
 }
 
@@ -479,8 +501,8 @@ function pauseAfter(err) {
 
 const HORIZON = 250;
 
-const windowStart = () => addDays(state.semester.start, -7);
-const windowEnd = () => addDays(state.semester.end, 7);
+const windowStart = () => pullWindow().start;
+const windowEnd = () => pullWindow().end;
 
 /** What a series should have on the calendar: day the rule named -> body. */
 function wantedFor(item) {

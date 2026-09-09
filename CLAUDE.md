@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v52**.
+Schema **20**, service worker **planner-v53**.
 
 ## Working with me
 
@@ -11,9 +11,8 @@ whether it sticks around, what a new field holds — ask before building: early,
 all at once, and only about what changes the work. Small calls are still yours.
 
 **Small words beat big ones.** Say it the short way — here, in commits, in code
-comments. Keep the real names exact (`syncToken`, tombstone, occurrence) and
-drop the dress-up around them. This file may run to **300 lines**; past that,
-cut a sentence and say what went.
+comments — and keep the real names exact (`syncToken`, tombstone, occurrence).
+This file may run to **300 lines**; past that, cut a sentence and say what went.
 
 ## Working on it
 
@@ -29,13 +28,13 @@ fetches with `cache: 'reload'` (Pages' `max-age=600` would fill the new cache
 with the old files) and **the fetch handler never writes to the cache**, so a
 page runs one whole deploy, never one version's JS against another's CSS.
 
-**When a change seems not to land**, it is nearly always a cache. A hash-only
-move does not reload — `#/overview` when you are already there keeps the same
-module instances, so `location.reload()`. Serve `no-store` on a new port: a new
-origin is a clean cache. **Never check with a cache-busting query string** —
-`sw.js` matches with `ignoreSearch: true` and `fetch(cache:'reload')` still goes
-through the worker, so both only *look* like reads off the network. The truth is
-DevTools → **Bypass for network**, `await caches.keys()`, or `curl` from outside.
+**When a change seems not to land**, it is a cache. A hash-only move does not
+reload — `#/overview` when already there keeps the module instances, so
+`location.reload()`. A new port is a clean cache (serve it `no-store`).
+**Never check with a cache-busting query string** — `sw.js` matches with
+`ignoreSearch: true` and `fetch(cache:'reload')` still goes through the
+worker, so both only *look* like the network. The truth is DevTools →
+**Bypass for network**, `await caches.keys()`, or `curl` from outside.
 
 ## State
 
@@ -56,8 +55,7 @@ only for `external`, `gcal`, `cloud`, `editor`, `restore`, `undo`, `redo`,
 `canvas`; tag one made from a
 floating panel, or the view under it will not repaint (`set()` in the editor
 and `tickItem` are). `modal()` focuses the first control in its *body*, never
-the ✕. Anything an Undo puts back is stamped now, or the server keeps the
-tombstone.
+the ✕.
 
 ## Cloud sync
 
@@ -125,7 +123,8 @@ up here, its hash recorded, or it would be pushed again for ever.
 | | |
 |---|---|
 | `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series |
-| `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite`, and a `schedule` of meetings, each stamped with the `tz` it is written in |
+| `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite`, and a `schedule` of meetings, each stamped with the `tz` it is written in; `from`/`until` (keys only when set) are the days it meets, else the term's (`termOf`) |
+| `state.semester` · `state.calendar` | the term (`name`, `start`, `end`) is for **courses only**: when classes meet, the chart, the Canvas import · `calendar.start` is the day the planner began (worked out once, from the earliest row): Google is read from it, the Week tray drops work due before it. Both in the `meta` row |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
 | `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they turn into — a wish with `tracking` is asked about once a day per device (`js/tracking.js`, `track-parcel` on the edge, `trackingAt` device-only); focuses and sprints on the chart |
 | `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror and writes waiting to go |
@@ -136,12 +135,14 @@ never a request**: `pushItem()` puts the item in `state.outbox` (one row per
 item) and `flushOutbox()` sends the lot `pushSettings.wait` after the last
 change — a drag session hit Google's rate limit when every drop went out at
 once. A 403 `rateLimitExceeded` is a pause (`backoffUntil`, doubling), not an
-error. An all-day plan goes
-as `start`/`end` **dates**, the end being the morning *after*. `ITEM_TYPES` is
-`event`, `task`, `meeting`, `homework`; no area puts it in General. `eventsOn`
-drops a Google event that **shadows a class** on the schedule that day (same
-start, and same end or a shared word), since a schedule read off Google is
-on Google still. The Canvas import keeps to the term (`inTerm`, two weeks'
+error. An all-day plan goes as `start`/`end` **dates**, the end being the
+morning *after*. **Google is read over `pullWindow()`** — `calendar.start` to
+a year ahead, never the term — and a token only reports the window it was
+made under, so `gcal.window` is kept beside it and `windowMoved()` starts
+over. `ITEM_TYPES` is `event`, `task`, `meeting`, `homework`; no area puts it
+in General. `eventsOn` drops a Google event that **shadows a class** on the
+schedule that day (same start, and same end or a shared word), since a
+schedule read off Google is on Google still. The Canvas import keeps to the term (`inTerm`, two weeks'
 slack): the feed carries every course still enrolled in. Each *seed*
 is pinned to the version that added it — `if (from < 5)`, never
 `< SCHEMA_VERSION`, or the next bump brings back something deleted on purpose.
@@ -207,9 +208,8 @@ all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`).
 **Overview is the day**: a 24-hour clock, opened at 8am, next to focus, top
 three, open work and the end-of-day note. `overdue()` is deadlines gone by
 *and* plain blocks booked on a day gone by with no deadline, unticked — a
-series only for its deadlines; `#nextup` says what is on now or next,
-on every screen. **The end-of-day note is the only thing that crosses a day**:
-`tomorrow` becomes the next morning's `focus` by way of `carryForward()`, from
+series only for its deadlines. **The end-of-day note is the only thing that
+crosses a day**: `tomorrow` becomes the next morning's `focus` by way of `carryForward()`, from
 the draw *before* anything reads the note, only when `pendingTomorrow()` says
 so (a `commit()` with no check would sync a row every visit), tagged
 `{ source: 'carry' }`, and marked spent (`tomorrowUsed`) either way.
@@ -278,7 +278,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1204 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1225 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

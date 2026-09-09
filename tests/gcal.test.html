@@ -180,6 +180,51 @@ suite('Calendar — pushes go out together', async ({ check }) => {
     s.state.outbox.length = 0;
   }
 });
+
+/* The planner is for a life, not a term: Google is read from the day the
+   calendar began to a year ahead. A sync token only reports the window it
+   was made under, so a window that moved — the start changed, or the year
+   ahead run down — reads the lot again. */
+suite('Calendar — read from the day the calendar began', async ({ check }) => {
+  const s = await sharedStoreWith(base);
+  const G = await import('../js/gcal.js');
+  const { today, addDays } = await import('../js/util.js');
+  const real = globalThis.fetch;
+  const gets = [];
+  globalThis.fetch = async (url, init = {}) => {
+    if ((init.method || 'GET') === 'GET') gets.push(new URL(String(url)));
+    return { ok: true, status: 200, json: async () => ({ items: [], nextSyncToken: 'tok-' + gets.length }), text: async () => '' };
+  };
+  const g = s.state.settings.gcal;
+  const had = { ...g }, cal0 = s.state.calendar.start;
+  Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary', syncToken: '', window: null });
+  G.gcal.token = { access_token: 'tok', expires_at: Date.now() + 3600e3 };
+  s.state.calendar.start = '2026-08-01';
+  const last = () => gets[gets.length - 1].searchParams;
+  try {
+    await G.sync();
+    check('the first read is from the day the calendar began', (last().get('timeMin') || '').startsWith('2026-08-01'), last().get('timeMin'));
+    check('...to a year ahead, not the end of term', (last().get('timeMax') || '').startsWith(addDays(today(), 366)), last().get('timeMax'));
+    check('...and the window is written down with the token', g.syncToken === 'tok-1' && g.window?.start === '2026-08-01' && g.window.end === addDays(today(), 365));
+    await G.sync();
+    check('the next read uses the token', last().get('syncToken') === 'tok-1' && !last().get('timeMin'));
+    s.state.calendar.start = '2026-07-01';
+    await G.sync();
+    check('a first day moved reads the lot again', (last().get('timeMin') || '').startsWith('2026-07-01') && g.window.start === '2026-07-01');
+    g.window = { ...g.window, end: addDays(today(), 300) };
+    await G.sync();
+    check('so does a year ahead run down by more than a month', !!last().get('timeMin') && g.window.end === addDays(today(), 365));
+    g.window = { ...g.window, end: addDays(today(), 350) };
+    await G.sync();
+    check('...but not by less', !!last().get('syncToken') && !last().get('timeMin'));
+    check('the term never comes into it', !gets.some((u) => (u.searchParams.get('timeMin') || '').startsWith(base.semester.start)));
+  } finally {
+    globalThis.fetch = real;
+    G.gcal.token = null;
+    Object.assign(g, had);
+    s.state.calendar.start = cal0;
+  }
+});
 </script>
 </body>
 </html>
