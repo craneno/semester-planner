@@ -46,10 +46,10 @@ function realDate(y, mo, d) {
 
 /** A month and day with no year mean this year, unless that day is already
  *  more than two weeks gone — "exam 3/4" typed in September is next March. */
-function yearFor(mo, d) {
-  const y = +today().slice(0, 4);
+function yearFor(mo, d, now = today()) {
+  const y = +now.slice(0, 4);
   const cand = realDate(y, mo, d);
-  if (cand && diffDays(cand, today()) <= 14) return cand;
+  if (cand && diffDays(cand, now) <= 14) return cand;
   return realDate(y + 1, mo, d) || cand;
 }
 
@@ -57,9 +57,10 @@ function yearFor(mo, d) {
  * Matches run on the text as typed, case folded by the regex and never by
  * `toLowerCase()`: "İstanbul" grows a code unit when lowered, and an index
  * taken from the lowered copy cut the wrong letters out of the title.
+ * `now` is the day the words are read from; a test fixes it.
  * @returns {{date, time, consumed: string[], spans: [number, number][]}|null}
  */
-export function parseWhen(text) {
+export function parseWhen(text, now = today()) {
   const consumed = [], spans = [];
   let date = null, time = null;
   const take = (m) => { consumed.push(m[0]); spans.push([m.index, m.index + m[0].length]); };
@@ -67,7 +68,7 @@ export function parseWhen(text) {
   let m = text.match(/\b(today|tonight|tomorrow|tmr|tmrw|tmw|tomorow|yesterday)\b/i);
   if (m) {
     const w = m[1].toLowerCase();
-    date = w === 'today' || w === 'tonight' ? today() : w === 'yesterday' ? addDays(today(), -1) : addDays(today(), 1);
+    date = w === 'today' || w === 'tonight' ? now : w === 'yesterday' ? addDays(now, -1) : addDays(now, 1);
     take(m);
   }
 
@@ -77,30 +78,30 @@ export function parseWhen(text) {
     if (m) {
       const n = /^\d/.test(m[1]) ? +m[1] : 1;
       const unit = m[2].toLowerCase();
-      date = unit === 'day' ? addDays(today(), n) : unit === 'week' ? addDays(today(), 7 * n) : addMonths(today(), n);
+      date = unit === 'day' ? addDays(now, n) : unit === 'week' ? addDays(now, 7 * n) : addMonths(now, n);
       take(m);
     }
   }
   if (!date) {
     // "next week" is a week from today; "next month" a month
     m = text.match(/\bnext\s+(week|month)\b/i);
-    if (m) { date = m[1].toLowerCase() === 'week' ? addDays(today(), 7) : addMonths(today(), 1); take(m); }
+    if (m) { date = m[1].toLowerCase() === 'week' ? addDays(now, 7) : addMonths(now, 1); take(m); }
   }
   if (!date) {
     m = text.match(new RegExp(`\\bnext\\s+${DOW_RE}\\b`, 'i'));
-    if (m) { date = nextDow(DOW_WORDS[m[1].toLowerCase()]); take(m); }
+    if (m) { date = nextDow(DOW_WORDS[m[1].toLowerCase()], now); take(m); }
   }
   if (!date) {
     // "fri", "this fri", "friday"
     m = text.match(new RegExp(`\\b(?:this\\s+)?${DOW_RE}\\b`, 'i'));
-    if (m) { date = nextDow(DOW_WORDS[m[1].toLowerCase()]); take(m); }
+    if (m) { date = nextDow(DOW_WORDS[m[1].toLowerCase()], now); take(m); }
   }
   if (!date) {
     // "sep 12", "Sept. 12th", "sep 12, 2026" — but not "Sep 3-5", a span of days
     m = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4})\b)?(?!\s*[-–/]\s*\d)/i);
     if (m) {
       const mi = MONTH_WORDS.indexOf(m[1].toLowerCase().slice(0, 3)) + 1;
-      const d = m[3] ? realDate(+m[3], mi, +m[2]) : yearFor(mi, +m[2]);
+      const d = m[3] ? realDate(+m[3], mi, +m[2]) : yearFor(mi, +m[2], now);
       if (d) { date = d; take(m); }
     }
   }
@@ -115,7 +116,7 @@ export function parseWhen(text) {
     m = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
     if (m) {
       const y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : null;
-      const d = y ? realDate(y, +m[1], +m[2]) : yearFor(+m[1], +m[2]);
+      const d = y ? realDate(y, +m[1], +m[2]) : yearFor(+m[1], +m[2], now);
       if (d) { date = d; take(m); }
     }
   }
@@ -178,10 +179,14 @@ export function parseRange(text) {
       return /pm/i.test(ampm) ? base + 12 : base;
     };
 
-    const sh = hour(m[1], m[3]);
-    const eh = hour(m[4], m[6] || m[3]);   // "9 to 11am" — a trailing meridiem covers both
+    // "9 to 11am", "7-9pm": a trailing meridiem covers both ends — unless that
+    // leaves no range, as "11-1pm" would (eleven at night to one), when the
+    // start is the other half of the day
     const sm = +(m[2] || 0), em = +(m[5] || 0);
     if (sm >= 60 || em >= 60) continue;
+    const eh = hour(m[4], m[6] || m[3]);
+    let sh = hour(m[1], m[3] || m[6]);
+    if (!m[3] && m[6] && eh * 60 + em <= sh * 60 + sm) sh = hour(m[1], /pm/i.test(m[6]) ? 'am' : 'pm');
     const start = sh * 60 + sm;
     let end = eh * 60 + em;
     if (end <= start) end += 12 * 60;                       // "11-1"
@@ -211,7 +216,7 @@ const daysIn = (str) => [...new Set(
   [...str.matchAll(/\b(sun|mon|tue|wed|thu|fri|sat)/gi)].map((x) => DOW_WORDS[x[1].toLowerCase()])
 )].sort((a, b) => a - b);
 
-export function parseQuickAdd(s, input) {
+export function parseQuickAdd(s, input, now = today()) {
   const raw = String(input ?? '').trim();
   let text = ' ' + raw + ' ';
   const out = { title: '', areaId: null, type: 'task', due: null, dueTime: null, plan: null, priority: 'normal', estMins: 60 };
@@ -340,7 +345,7 @@ export function parseQuickAdd(s, input) {
 
   let dated = false;   // a day was named, as against defaulted to today
   const grab = (from, to = text.length) => {
-    const w = parseWhen(text.slice(from, to));
+    const w = parseWhen(text.slice(from, to), now);
     if (!w) return null;
     if (w.date) dated = true;
     for (const [a, b] of w.spans) blank(from + a, b - a);
@@ -350,7 +355,7 @@ export function parseQuickAdd(s, input) {
   if (planKey) {
     blank(planIdx, planKey[0].length);
     const w = grab(planIdx, endOf(planIdx));
-    if (w) out.plan = { date: w.date || today(), start: w.time || null, mins: out.estMins };
+    if (w) out.plan = { date: w.date || now, start: w.time || null, mins: out.estMins };
   }
   if (dueKey) {
     blank(dueIdx, dueKey[0].length);
@@ -363,7 +368,7 @@ export function parseQuickAdd(s, input) {
   }
 
   if (range) {
-    out.plan = { date: out.due || out.plan?.date || today(), start: range.start, mins: range.mins };
+    out.plan = { date: out.due || out.plan?.date || now, start: range.start, mins: range.mins };
     out.due = null;
     out.dueTime = null;
     if (!hinted) out.type = 'event';
@@ -372,7 +377,7 @@ export function parseQuickAdd(s, input) {
   // "all day" wins over any time that came with the date: whichever day was
   // named is the whole of it, and a deadline for that day becomes the day
   if (allDay) {
-    out.plan = { date: out.plan?.date || out.due || today(), start: null, mins: 0 };
+    out.plan = { date: out.plan?.date || out.due || now, start: null, mins: 0 };
     out.due = null;
     out.dueTime = null;
     if (!hinted) out.type = 'event';
@@ -383,7 +388,7 @@ export function parseQuickAdd(s, input) {
     // the first day: the one named, else today if the rule lands on it, else
     // the nearest day it does — "every mon" typed on a Wednesday starts Monday
     const first = () => {
-      const t0 = today();
+      const t0 = now;
       if (repeat.freq !== 'weekly' || !repeat.days?.length) return t0;
       const dow = new Date(t0 + 'T00:00:00').getDay();
       if (repeat.days.includes(dow)) return t0;

@@ -17,7 +17,7 @@
    browser does: with a service worker registered, a stale cache would answer
    here too. Tick "Update on reload" in DevTools while developing. */
 import { suite } from './harness.js';
-import { CHANGELOG, APP_VERSION, CURRENT } from '../js/changelog.js';
+import { CHANGELOG, APP_VERSION } from '../js/changelog.js';
 
 const text = async (path) => {
   const r = await fetch(path, { cache: 'no-store' });
@@ -37,7 +37,7 @@ suite('Version — the changelog and the shell', async ({ check }) => {
     check('the changelog is that version',
       swVersion === `planner-${APP_VERSION}`,
       `sw.js says ${swVersion}, changelog says ${APP_VERSION}`);
-    check('the current release is the newest entry', CURRENT === CHANGELOG[0]);
+    // CURRENT is defined as CHANGELOG[0]; that it is the newest is the order check below
   }
 
   /* ---- the changelog itself ---- */
@@ -45,10 +45,13 @@ suite('Version — the changelog and the shell', async ({ check }) => {
   {
     const nums = CHANGELOG.map((r) => Number(r.version.replace(/^v/, '')));
     check('every version is vN', CHANGELOG.every((r) => /^v\d+$/.test(r.version)));
+    // strictly falling, so no number can appear twice either
     check('newest first', nums.every((n, i) => i === 0 || n < nums[i - 1]), nums.join(','));
-    check('no version appears twice', new Set(nums).size === nums.length);
     check('every release is dated',
       CHANGELOG.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date)));
+    const dates = CHANGELOG.map((r) => r.date);
+    check('...and the dates run newest first too', dates.every((d, i) => i === 0 || d <= dates[i - 1]),
+      dates.filter((d, i) => i > 0 && d > dates[i - 1]).join(','));
     check('every release says what changed',
       CHANGELOG.every((r) => r.notes.length && r.notes.every((n) => n.trim().length > 12)),
       'an empty release note is worse than no list at all');
@@ -71,7 +74,8 @@ suite('Version — the changelog and the shell', async ({ check }) => {
       const file = queue.shift();
       if (!shell.has('./' + file)) missing.push(file);
       const src = await text('../' + file);
-      for (const m of src.matchAll(/from\s+'([^']+)'/g)) {
+      // `from './x.js'`, a bare `import './x.js'`, and a lazy `import('./x.js')`
+      for (const m of src.matchAll(/(?:from\s+|import\s*\(?\s*)'([^']+)'/g)) {
         if (!m[1].startsWith('.')) continue;            // a CDN url is not ours to cache
         const next = rel(new URL(m[1], new URL(file, root)));
         if (!seen.has(next)) { seen.add(next); queue.push(next); }
@@ -85,6 +89,16 @@ suite('Version — the changelog and the shell', async ({ check }) => {
     check('the shell has no module the app cannot reach',
       [...shell].filter((p) => p.endsWith('.js')).every((p) => seen.has(p.slice(2))),
       [...shell].filter((p) => p.endsWith('.js') && !seen.has(p.slice(2))).join(', '));
+
+    // install is cache.addAll: one path that 404s and the new worker never
+    // installs, with nothing said. The css, the icons and the manifest are
+    // not imports, so the walk above never sees them
+    const gone = [];
+    for (const path of shell) {
+      const r = await fetch('../' + path.slice(2), { cache: 'no-store' }).catch(() => ({ ok: false, status: 'network' }));
+      if (!r.ok) gone.push(`${path} → ${r.status}`);
+    }
+    check('every path in the shell is really there', gone.length === 0, gone.join(', '));
   }
 
 });

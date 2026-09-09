@@ -20,70 +20,73 @@ const ev = (o) => ({ allDay: false, location: '', end: null, ...o });
 const weekly = (id, title, dates, start, end, location) =>
   dates.map((d) => ev({ id: id + d, recurringEventId: id, title, date: d, start, end, location }));
 
+/* Seeded once, before any suite: gcal.js reads the canonical store, and
+   import() caches, so the three suites below share this one state. Each
+   puts back what it touched — items, outbox, events, settings — in finally. */
+const s = await sharedStoreWith(base);
+
 suite('Calendar — recurring series detection', async ({ check }) => {
-  // gcal.js reads the canonical store, so this suite must share that instance
-  const s = await sharedStoreWith(base);
   const G = await import('../js/gcal.js');
   const only = (id, list) => list.find((x) => x.id === id);
 
-  /* a lecture Mon/Wed plus a Friday lab under one parent, one moved instance,
-     a weekly meeting, a one-off, and a repeating all-day event */
-  s.state.events = [
-    ...weekly('lec', 'Thermo Lecture', ['2026-09-07', '2026-09-14', '2026-09-21'], '10:30', '11:35', 'Snell 108'),
-    ...weekly('lec', 'Thermo Lecture', ['2026-09-09', '2026-09-16', '2026-09-23'], '10:30', '11:35', 'Snell 108'),
-    ...weekly('lec', 'Thermo Lecture', ['2026-09-11', '2026-09-18'], '14:00', '16:00', 'Lab 22'),
-    ev({ id: 'moved', recurringEventId: 'lec', title: 'Thermo Lecture', date: '2026-09-28', start: '08:00', end: '09:00' }),
-    ...weekly('ner', 'NER Weekly', ['2026-09-08', '2026-09-15', '2026-09-22'], '19:00', '20:30', 'Hayden'),
-    ...weekly('rare', 'Advisor 1:1', ['2026-09-10', '2026-09-24'], '15:00', '15:30', ''),
-    ev({ id: 'oneoff', recurringEventId: null, title: 'Coffee', date: '2026-09-10', start: '09:00' }),
-    ...weekly('hol', 'Reading day', ['2026-09-05', '2026-09-12'], null, null, '').map((e) => ({ ...e, allDay: true }))
-  ];
+  try {
+    /* a lecture Mon/Wed plus a Friday lab under one parent, one moved instance,
+       a weekly meeting, a one-off, and a repeating all-day event */
+    s.state.events = [
+      ...weekly('lec', 'Thermo Lecture', ['2026-09-07', '2026-09-14', '2026-09-21'], '10:30', '11:35', 'Snell 108'),
+      ...weekly('lec', 'Thermo Lecture', ['2026-09-09', '2026-09-16', '2026-09-23'], '10:30', '11:35', 'Snell 108'),
+      ...weekly('lec', 'Thermo Lecture', ['2026-09-11', '2026-09-18'], '14:00', '16:00', 'Lab 22'),
+      ev({ id: 'moved', recurringEventId: 'lec', title: 'Thermo Lecture', date: '2026-09-28', start: '08:00', end: '09:00' }),
+      ...weekly('ner', 'NER Weekly', ['2026-09-08', '2026-09-15', '2026-09-22'], '19:00', '20:30', 'Hayden'),
+      ...weekly('rare', 'Advisor 1:1', ['2026-09-10', '2026-09-24'], '15:00', '15:30', ''),
+      ev({ id: 'oneoff', recurringEventId: null, title: 'Coffee', date: '2026-09-10', start: '09:00' }),
+      ...weekly('hol', 'Reading day', ['2026-09-05', '2026-09-12'], null, null, '').map((e) => ({ ...e, allDay: true }))
+    ];
 
-  const series = G.recurringSeries();
-  const lec = only('lec', series);
-  const ner = only('ner', series);
+    const series = G.recurringSeries();
+    const lec = only('lec', series);
+    const ner = only('ner', series);
 
-  check('a repeating event is found', !!lec);
-  check('a one-off is not a series', !only('oneoff', series) && !series.some((x) => x.title === 'Coffee'));
-  check('an all-day series is skipped', !only('hol', series), 'they belong in the all-day rail, not a schedule');
-  check('a series below the threshold is skipped', !only('rare', series), '2 instances is not a pattern');
+    check('a repeating event is found', !!lec);
+    check('a one-off is not a series', !series.some((x) => x.title === 'Coffee'));
+    check('an all-day series is skipped', !only('hol', series), 'they belong in the all-day rail, not a schedule');
+    check('a series below the threshold is skipped', !only('rare', series), '2 instances is not a pattern');
 
-  check('the title comes from the instances', lec.title === 'Thermo Lecture');
-  check('the room comes from the instances', lec.location === 'Snell 108');
-  check('instances are counted', lec.count === 9, `got ${lec.count}`);   // 3 Mon + 3 Wed + 2 Fri + 1 moved
-  check('the range is reported', lec.first === '2026-09-07' && lec.last === '2026-09-28');
+    check('the title comes from the instances', lec.title === 'Thermo Lecture');
+    check('the room comes from the instances', lec.location === 'Snell 108');
+    check('instances are counted', lec.count === 9, `got ${lec.count}`);   // 3 Mon + 3 Wed + 2 Fri + 1 moved
+    check('the range is reported', lec.first === '2026-09-07' && lec.last === '2026-09-28');
 
-  /* the interesting part: one parent, two different weekly slots */
-  check('two distinct slots become two schedule rows', lec.schedule.length === 2,
-    `got ${lec.schedule.length}`);
-  const mw = lec.schedule.find((r) => r.start === '10:30');
-  const fri = lec.schedule.find((r) => r.start === '14:00');
-  check('same-time days are merged into one row', mw && mw.days.join() === '1,3', `got ${mw?.days}`);
-  check('the second slot keeps its own day', fri && fri.days.join() === '5', `got ${fri?.days}`);
-  check('each row keeps its own end time', mw.end === '11:35' && fri.end === '16:00');
-  check('each row keeps its own room', fri.location === 'Lab 22', `got ${fri.location}`);
-  check('a one-off moved instance is not in the schedule',
-    !lec.schedule.some((r) => r.start === '08:00'),
-    'a single rescheduled week would otherwise become a phantom weekly slot');
+    /* the interesting part: one parent, two different weekly slots */
+    check('two distinct slots become two schedule rows', lec.schedule.length === 2,
+      `got ${lec.schedule.length}`);
+    const mw = lec.schedule.find((r) => r.start === '10:30');
+    const fri = lec.schedule.find((r) => r.start === '14:00');
+    check('same-time days are merged into one row', mw && mw.days.join() === '1,3', `got ${mw?.days}`);
+    check('the second slot keeps its own day', fri && fri.days.join() === '5', `got ${fri?.days}`);
+    check('each row keeps its own end time', mw.end === '11:35' && fri.end === '16:00');
+    check('each row keeps its own room', fri.location === 'Lab 22', `got ${fri.location}`);
+    check('a one-off moved instance is not in the schedule',
+      !lec.schedule.some((r) => r.start === '08:00'),
+      'a single rescheduled week would otherwise become a phantom weekly slot');
 
-  check('a second series is separate', ner && ner.schedule.length === 1);
-  check('the meeting lands on its weekday', ner.schedule[0].days.join() === '2', `got ${ner.schedule[0].days}`);
-  check('busier series sort first', series[0].id === 'lec');
+    check('a second series is separate', ner && ner.schedule.length === 1);
+    check('the meeting lands on its weekday', ner.schedule[0].days.join() === '2', `got ${ner.schedule[0].days}`);
+    check('busier series sort first', series[0].id === 'lec');
 
-  /* the shape has to drop straight into an area */
-  const row = lec.schedule[0];
-  check('a schedule row is shaped like an area schedule',
-    Array.isArray(row.days) && 'start' in row && 'end' in row && 'location' in row);
+    /* the shape has to drop straight into an area */
+    const row = lec.schedule[0];
+    check('a schedule row is shaped like an area schedule',
+      Array.isArray(row.days) && 'start' in row && 'end' in row && 'location' in row);
 
-  s.state.events = [];
-  check('no events means no series', G.recurringSeries().length === 0);
+    s.state.events = [];
+    check('no events means no series', G.recurringSeries().length === 0);
 
-  /* ---- what a planned block becomes on Google ----
-     A block with a start is a span of time; one without is the whole day, and
-     Google says whole days in dates rather than times — `end.date` being the
-     morning after, not the same date twice. */
+    /* ---- what a planned block becomes on Google ----
+       A block with a start is a span of time; one without is the whole day, and
+       Google says whole days in dates rather than times — `end.date` being the
+       morning after, not the same date twice. */
 
-  {
     const item = (plan) => ({ id: 't1', title: 'Retreat', areaId: null, notes: '', due: null, plan });
 
     const allDay = G.eventBodyFor(item({ date: '2026-09-12', start: null, mins: 0 }));
@@ -101,6 +104,23 @@ suite('Calendar — recurring series detection', async ({ check }) => {
     check('both carry the id that makes it ours',
       allDay.extendedProperties.private.plannerItemId === 't1'
       && timed.extendedProperties.private.plannerItemId === 't1');
+
+    // the summary names the area; the description is the notes, then the deadline
+    s.state.areas.push({ id: 'a1', name: 'Thermo', category: 'course' });
+    const full = G.eventBodyFor({ id: 't2', title: 'Retreat', areaId: 'a1', notes: 'bring the notes', due: '2026-09-20',
+      plan: { date: '2026-09-12', start: '09:00', mins: 30 } });
+    check('the summary is the area and the title', full.summary === 'Thermo: Retreat', full.summary);
+    check('the description carries the notes, then the deadline', full.description === 'bring the notes\n\nDue 2026-09-20',
+      JSON.stringify(full.description));
+    check('no area, no prefix', G.eventBodyFor(item({ date: '2026-09-12', start: '09:00', mins: 30 })).summary === 'Retreat');
+
+    // how long: the block's own minutes, else the estimate, else an hour
+    const endOf = (extra) => G.eventBodyFor({ ...item({ date: '2026-09-12', start: '09:00', mins: 0 }), ...extra }).end.dateTime;
+    check('a block with no length takes the estimate', endOf({ estMins: 45 }).includes('09:45'), endOf({ estMins: 45 }));
+    check('...and an hour with no estimate either', endOf({}).includes('10:00'), endOf({}));
+  } finally {
+    s.state.events = [];
+    s.state.areas.length = 0;
   }
 });
 
@@ -109,7 +129,6 @@ suite('Calendar — recurring series detection', async ({ check }) => {
    spell; a rate limit is a pause that keeps the queue and sends again by
    itself, and is never shown as an error. */
 suite('Calendar — pushes go out together', async ({ check }) => {
-  const s = await sharedStoreWith(base);
   const G = await import('../js/gcal.js');
   // A hidden tab throttles a timer set from inside another timer harder
   // with every link in the chain, down to one a minute; a message hop after
@@ -120,14 +139,26 @@ suite('Calendar — pushes go out together', async ({ check }) => {
 
   const real = globalThis.fetch;
   const calls = [];
-  let answer = () => ({ ok: true, status: 200, json: async () => ({ id: 'ev-' + calls.length }), text: async () => '' });
-  globalThis.fetch = async (url, init = {}) => { calls.push({ method: init.method || 'GET', url: String(url) }); return answer(); };
+  // an id per POST, given as the POST comes in: one worked out later from
+  // the count of calls named whatever had been fetched in between
+  let posts = 0;
+  const ok = (init) => {
+    const id = init.method === 'POST' ? 'ev-' + (++posts) : 'ev-x';
+    return { ok: true, status: 200, json: async () => ({ id }), text: async () => '' };
+  };
+  let answer = ok;
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ method: init.method || 'GET', url: String(url), at: performance.now() });
+    return answer(init);
+  };
   const writes = () => calls.filter((c) => c.method !== 'GET');
+  const last = () => writes()[writes().length - 1];
 
   const g = s.state.settings.gcal;
+  const had = { settings: { ...G.pushSettings }, g: { ...g }, status: G.gcal.status, lastError: G.gcal.lastError, backoffUntil: G.gcal.backoffUntil };
   Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary' });
   G.gcal.token = { access_token: 'tok', expires_at: Date.now() + 3600e3 };
-  Object.assign(G.pushSettings, { wait: 300, maxWait: 600, backoff: 400, backoffMax: 1000 });
+  Object.assign(G.pushSettings, { wait: 300, maxWait: 600, backoff: 1200, backoffMax: 3000 });
   s.state.outbox.length = 0;
 
   try {
@@ -143,11 +174,18 @@ suite('Calendar — pushes go out together', async ({ check }) => {
     check('after a quiet spell, three moves are one write', writes().length === 1 && writes()[0].method === 'POST', JSON.stringify(writes()));
     check('...and the item has its event', s.itemById('g1').gcalId === 'ev-1' && s.state.outbox.length === 0);
 
-    // changes that keep coming still land within maxWait of the first, and
-    // never more often than one write per `wait` — measured against the
-    // clock, since a browser pane in the background stretches every timer
+    // changes that keep coming for longer than maxWait: the first of them
+    // still goes up by maxWait, and never more often than one write per
+    // `wait` — measured against the clock, since a browser pane in the
+    // background stretches every timer
+    // A pane behind another window rounds every timer up to the second, and
+    // then "by maxWait" cannot be told from "a second later": measure the
+    // drift first, and let the tight bound go only where the clock is coarse
+    const d0 = performance.now();
+    await new Promise((r) => setTimeout(r, 100));
+    const coarse = performance.now() - d0 > 400;
     const t0 = performance.now();
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 9; i++) {
       setTimeout(() => {
         s.upsertItem({ id: 'g1', plan: { date: '2026-09-10', start: `1${i}:00`, mins: 60 } });
         G.pushItem('g1');
@@ -155,7 +193,10 @@ suite('Calendar — pushes go out together', async ({ check }) => {
     }
     await tick(1500);
     const took = performance.now() - t0;
-    check('a run of changes still goes up before too long', writes().length >= 2 && writes()[1].method === 'PATCH', String(writes().length));
+    const second = writes()[1];
+    check('changes that keep coming still go up by maxWait after the first',
+      !!second && second.method === 'PATCH' && (coarse || second.at - t0 <= G.pushSettings.maxWait + 300),
+      second ? `${second.method} at ${Math.round(second.at - t0)}ms, maxWait ${G.pushSettings.maxWait}${coarse ? ' (timers coarse here: only the order is checked)' : ''}` : `${writes().length} writes`);
     check('...and never more often than one write per wait',
       writes().length - 1 <= Math.floor(took / G.pushSettings.wait) + 1, `${writes().length - 1} writes in ${Math.round(took)}ms`);
 
@@ -166,18 +207,59 @@ suite('Calendar — pushes go out together', async ({ check }) => {
     await tick(450);
     check('a rate limit is a pause, shown as waiting, not an error', G.gcal.status === 'waiting' && /pause/.test(G.gcal.message), G.gcal.status);
     check('...the change stays in line', s.state.outbox.some((o) => o.itemId === 'g1'));
-    check('...for as long as Google asked', G.gcal.backoffUntil > Date.now());
+    const left = G.gcal.backoffUntil - Date.now();
+    check('...for as long as Google asked', left > 0 && left <= G.pushSettings.backoff, `(${left}ms left of ${G.pushSettings.backoff})`);
     const n = writes().length;
-    answer = () => ({ ok: true, status: 200, json: async () => ({ id: 'ev-x' }), text: async () => '' });
-    await tick(600);
+    answer = ok;
+    await tick(1500);
     check('...and goes out by itself when the pause is over', writes().length === n + 1 && s.state.outbox.length === 0, `${writes().length} vs ${n}`);
     check('...back to ready', G.gcal.status === 'ready' && G.gcal.backoffUntil === 0);
+
+    // the event is gone from Google's side: forget the id and make it again
+    answer = (init) => init.method === 'PATCH' ? { ok: false, status: 404, text: async () => 'Not Found' } : ok(init);
+    s.upsertItem({ id: 'g1', plan: { date: '2026-09-12', start: '09:00', mins: 60 } });
+    await G.pushItem('g1');
+    await tick(450);
+    const tail = writes().slice(-2).map((c) => c.method).join(' ');
+    check('a 404 on the PATCH makes the event again', tail === 'PATCH POST' && s.itemById('g1').gcalId === 'ev-2',
+      `(${tail}, gcalId ${s.itemById('g1').gcalId})`);
+    answer = ok;
+
+    // ticked: the event is not wanted any more
+    s.upsertItem({ id: 'g1', done: true });
+    await G.pushItem('g1');
+    await tick(450);
+    check('a ticked item takes its event off the calendar',
+      last().method === 'DELETE' && /ev-2$/.test(last().url) && s.itemById('g1').gcalId === null, `${last().method} ${last().url}`);
+
+    // deleted: the item is gone from state by the time the queue goes out,
+    // so the delete has to carry the event id itself
+    s.upsertItem({ id: 'g1', done: false, plan: { date: '2026-09-12', start: '09:00', mins: 60 } });
+    await G.pushItem('g1');
+    await tick(450);   // a new event, ev-3
+    G.forgetItem(s.itemById('g1'));
+    const op = s.state.outbox.find((o) => o.itemId === 'g1');
+    check('forgetting an item queues a delete that carries the event id', op?.kind === 'delete' && op.ids?.[0] === 'ev-3', JSON.stringify(op));
+    s.deleteItem('g1');
+    await tick(450);
+    check('...sent from those ids once the item is gone',
+      last().method === 'DELETE' && /ev-3$/.test(last().url) && s.state.outbox.length === 0, `${last().method} ${last().url}`);
+
+    // Google is down: an error, and the change stays in line for next time
+    answer = () => ({ ok: false, status: 500, text: async () => 'Backend Error' });
+    s.upsertItem({ id: 'g2', title: 'Retry me', plan: { date: '2026-09-13', start: '09:00', mins: 60 } });
+    await G.pushItem('g2');
+    await tick(450);
+    check('a 5xx is an error, and the change stays in line',
+      G.gcal.status === 'error' && s.state.outbox.some((o) => o.itemId === 'g2'), `(${G.gcal.status}, outbox ${s.state.outbox.length})`);
   } finally {
     globalThis.fetch = real;
     G.gcal.token = null;
-    Object.assign(g, { enabled: false, pushPlans: true, clientId: '' });
-    Object.assign(G.pushSettings, { wait: 30000, maxWait: 90000, backoff: 60000, backoffMax: 900000 });
+    Object.assign(g, had.g);
+    Object.assign(G.pushSettings, had.settings);
+    Object.assign(G.gcal, { status: had.status, lastError: had.lastError, backoffUntil: had.backoffUntil });
     s.state.outbox.length = 0;
+    s.state.items.length = 0;
   }
 });
 
@@ -186,14 +268,24 @@ suite('Calendar — pushes go out together', async ({ check }) => {
    was made under, so a window that moved — the start changed, or the year
    ahead run down — reads the lot again. */
 suite('Calendar — read from the day the calendar began', async ({ check }) => {
-  const s = await sharedStoreWith(base);
   const G = await import('../js/gcal.js');
   const { today, addDays } = await import('../js/util.js');
   const real = globalThis.fetch;
   const gets = [];
+  const reply = (body) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
+  let mode = 'plain';   // plain | gone | paged — what the next read meets, once
+  const page1 = { id: 'pg1', summary: 'Page one', start: { date: today() }, end: { date: addDays(today(), 1) } };
+  const page2 = { id: 'pg2', summary: 'Page two', start: { date: addDays(today(), 1) }, end: { date: addDays(today(), 2) } };
   globalThis.fetch = async (url, init = {}) => {
-    if ((init.method || 'GET') === 'GET') gets.push(new URL(String(url)));
-    return { ok: true, status: 200, json: async () => ({ items: [], nextSyncToken: 'tok-' + gets.length }), text: async () => '' };
+    const u = new URL(String(url));
+    if ((init.method || 'GET') === 'GET') gets.push(u);
+    if (mode === 'gone' && u.searchParams.get('syncToken')) { mode = 'plain'; return { ok: false, status: 410, text: async () => '' }; }
+    if (mode === 'paged') {
+      if (u.searchParams.get('pageToken') !== 'p2') return reply({ items: [page1], nextPageToken: 'p2' });
+      mode = 'plain';
+      return reply({ items: [page2], nextSyncToken: 'tok-paged' });
+    }
+    return reply({ items: [], nextSyncToken: 'tok-' + gets.length });
   };
   const g = s.state.settings.gcal;
   const had = { ...g }, cal0 = s.state.calendar.start;
@@ -201,6 +293,15 @@ suite('Calendar — read from the day the calendar began', async ({ check }) => 
   G.gcal.token = { access_token: 'tok', expires_at: Date.now() + 3600e3 };
   s.state.calendar.start = '2026-08-01';
   const last = () => gets[gets.length - 1].searchParams;
+
+  // the slack is 30 days (AHEAD_SLACK): a year ahead run down by that much
+  // is still the window a token was made under; a day more is not
+  {
+    const want = { start: '2026-08-01', end: '2027-09-08' };
+    check('a window short of the year ahead by the slack has not moved', !G.windowMoved({ start: want.start, end: addDays(want.end, -30) }, want));
+    check('...one day more, and it has', G.windowMoved({ start: want.start, end: addDays(want.end, -31) }, want));
+  }
+
   try {
     await G.sync();
     check('the first read is from the day the calendar began', (last().get('timeMin') || '').startsWith('2026-08-01'), last().get('timeMin'));
@@ -208,6 +309,22 @@ suite('Calendar — read from the day the calendar began', async ({ check }) => 
     check('...and the window is written down with the token', g.syncToken === 'tok-1' && g.window?.start === '2026-08-01' && g.window.end === addDays(today(), 365));
     await G.sync();
     check('the next read uses the token', last().get('syncToken') === 'tok-1' && !last().get('timeMin'));
+
+    // Google will not honour the token any more: a 410, once, and the
+    // window is read again from the top, with no token in the ask
+    mode = 'gone';
+    const n = gets.length;
+    await G.sync();
+    check('a 410 on the token drops it and reads the window again',
+      gets.length === n + 2 && !!last().get('timeMin') && !last().get('syncToken'), `(${gets.length - n} reads, last asked ${last()})`);
+    check('...and the token that read gave is kept', g.syncToken === 'tok-' + gets.length, g.syncToken);
+
+    // two pages: the first with a page token and no sync token, the last with the sync token
+    mode = 'paged';
+    await G.sync();
+    check('a read of two pages takes both', s.state.events.map((e) => e.id).sort().join() === 'pg1,pg2', JSON.stringify(s.state.events.map((e) => e.id)));
+    check('...and keeps the token from the last page', g.syncToken === 'tok-paged' && last().get('pageToken') === 'p2', g.syncToken);
+
     s.state.calendar.start = '2026-07-01';
     await G.sync();
     check('a first day moved reads the lot again', (last().get('timeMin') || '').startsWith('2026-07-01') && g.window.start === '2026-07-01');
@@ -223,6 +340,7 @@ suite('Calendar — read from the day the calendar began', async ({ check }) => 
     G.gcal.token = null;
     Object.assign(g, had);
     s.state.calendar.start = cal0;
+    s.state.events = [];
   }
 });
 </script>

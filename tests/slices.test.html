@@ -12,7 +12,17 @@
    store.js can bind them to the live one and a test can hand them any plain
    object — no localStorage, no fresh instance, no waiting out a save(). This
    file is that promise, kept. */
-import { suite } from './harness.js';
+import { suite, sharedStoreWith } from './harness.js';
+import { SCHEMA_VERSION } from '../js/store/constants.js';
+
+// the barrel suite writes into the canonical store, so it is seeded once
+// here, before anything imports store.js
+const S = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'p1', name: 'General', category: 'personal', order: 0 }],
+  items: [], cards: [], links: [], wishlist: [], sprints: [], habits: [], habitLog: {}, notes: {}
+});
 
 const plain = () => ({
   areas: [
@@ -24,8 +34,8 @@ const plain = () => ({
 });
 
 suite('Slices — take a state, never own one', async ({ check }) => {
-  const [A, Cd, L, W, P, H, Q, U] = await Promise.all([
-    'areas', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'quickadd', 'urls'
+  const [A, Cd, L, W, P, H, Q, U, Pc] = await Promise.all([
+    'areas', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'quickadd', 'urls', 'parcels'
   ].map((m) => import(`../js/store/${m}.js`)));
   const before = localStorage.getItem('semesterPlanner.v1');
 
@@ -37,7 +47,8 @@ suite('Slices — take a state, never own one', async ({ check }) => {
 
   check('a wish lands in the state it was given', W.addWish(s, 'Calipers $30') !== null && s.wishlist.length === 1);
   check('...and not in any other', other.wishlist.length === 0);
-  check('a habit tick stamps the day', H.toggleHabit(s, '2026-09-01', 'h1') === true && !!s.habitLogAt['2026-09-01']);
+  check('a habit tick lands in the state it was given',
+    H.toggleHabit(s, '2026-09-01', 'h1') === true && s.habitLog['2026-09-01']?.includes('h1') && !other.habitLog['2026-09-01']);
   check('...and a streak reads it back', H.habitStreak(s, 'h1', '2026-09-01') === 1);
   check('a link finds its area by hint', L.parseLinkAdd(s, 'mcmaster.com/1 thermo').areaId === 'a1');
   check('...or falls back to the default', L.parseLinkAdd(s, 'mcmaster.com/1').areaId === 'p1');
@@ -47,13 +58,15 @@ suite('Slices — take a state, never own one', async ({ check }) => {
   check('a sprint goes to its area', !!sp && P.sprintsForArea(s, 'a1').length === 1);
   check('a card is captured unfiled', !!Cd.addCard(s, 'a thought').id && Cd.unfiledCards(s).length === 1);
   check('a URL is made safe without any state', U.normalizeUrl('javascript:alert(1)') === null && U.normalizeUrl('x.com') === 'https://x.com/');
+  const parcel = Pc.detectTracking('Calipers 1Z999AA10123456784');
+  check('a tracking number is spotted without any state',
+    parcel?.carrier === 'ups' && parcel.number === '1Z999AA10123456784', JSON.stringify(parcel));
 
   check('none of it touched localStorage', localStorage.getItem('semesterPlanner.v1') === before,
     'a slice that reached for storage would own state after all');
 });
 
 suite('Slices — the barrel binds them to the live state', async ({ check }) => {
-  const S = await import('../js/store.js');
   const W = await import('../js/store/wishlist.js');
   const n = S.state.wishlist.length;
   const w = S.addWish('Bound $1');
@@ -61,7 +74,7 @@ suite('Slices — the barrel binds them to the live state', async ({ check }) =>
   check('...and is the very row the slice sees', W.wishById(S.state, w.id) === w);
   S.deleteWish(w.id);
   check('...and leaves the same way', S.state.wishlist.length === n);
-  check('pure exports come through unchanged', S.normalizeUrl('x.com') === 'https://x.com/' && S.SCHEMA_VERSION === 20);
+  check('pure exports come through unchanged', S.normalizeUrl('x.com') === 'https://x.com/' && S.SCHEMA_VERSION === SCHEMA_VERSION);
 });
 </script>
 </body>

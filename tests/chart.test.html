@@ -29,9 +29,10 @@ const base = (over = {}) => ({
 
 suite('Semester chart — days, lanes and months', async ({ check }) => {
 
-  // semester.js reaches the canonical store through ui.js and editor.js, so a
-  // fresh instance would leave the two looking at different state
-  const s = await sharedStoreWith(base());
+  // semester.js reaches the canonical store through ui.js and editor.js, so
+  // it is seeded before the module loads, though nothing below reads it: all
+  // of this is maths on a range handed in
+  await sharedStoreWith(base());
   const chart = await import('../js/views/semester.js');
 
   const range = { start: '2026-09-01', end: '2026-12-01', days: 92 };
@@ -85,6 +86,30 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
       })());
     check('the first day of term is day zero', span({ due: '2026-09-01' }).from === 0);
     check('the last day of term is the last day', span({ due: '2026-12-01' }).to === 91);
+
+    // a series draws as its run — the first occurrence in the term to the
+    // last — since which Mondays is a question for the week, not the term
+    const weekly = (days, over = {}) => ({ freq: 'weekly', every: 1, days, until: null, count: null, ex: {}, ...over });
+    check('a series draws as its run, first occurrence to last',
+      (() => {
+        const x = span({ plan: { date: '2026-09-07', start: '09:00', mins: 60 }, repeat: weekly([1]) });
+        return x.repeat === true && x.from === 6 && x.to === 90 && !x.milestone;
+      })(), 'Mondays from the 7th of September to the 30th of November');
+    check('...and says how many times it runs',
+      span({ plan: { date: '2026-09-07' }, repeat: weekly([1]) }).runs === 13,
+      String(span({ plan: { date: '2026-09-07' }, repeat: weekly([1]) }).runs));
+    check('a deadline series that lands once is a milestone',
+      (() => {
+        const x = span({ due: '2026-09-15', repeat: weekly([2], { count: 1 }) });
+        return x.milestone && x.from === 14 && x.to === 14;
+      })());
+    check('...and one that lands more than once is a run, not a diamond',
+      span({ due: '2026-09-15', repeat: weekly([2]) }).milestone === false);
+    check('a series anchored before term starts at its first day inside it',
+      (() => { const x = span({ plan: { date: '2026-08-03' }, repeat: weekly([1]) }); return x.from === 6 && !x.clipStart; })(),
+      'the run is the occurrences in the term, so there is no cut end to draw');
+    check('a series that never lands in the term is off the chart',
+      span({ due: '2027-01-05', repeat: weekly([2]) }) === null);
   }
 
   /* ---- where a focus or a sprint sits ---- */
@@ -204,9 +229,18 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
         const p = pack({ from: 8, to: 12, head: 2, reserve: 12 }, { from: 14, to: 16 });
         return p.lanes === 1;
       })());
-    check('a head left of day zero still lands in the first free lane',
-      pack({ from: 1, to: 3, head: -6 }).rows[0].lane === 0,
-      'a term that starts inside a label’s width of day zero');
+    check('a head left of day zero is packed first, into the first lane',
+      (() => {
+        const p = pack({ from: 0, to: 2 }, { from: 1, to: 3, head: -6 });
+        return p.rows[0].head === -6 && p.rows[0].lane === 0;
+      })(), 'a term that starts inside a label’s width of day zero');
+    check('...and the bar its title is written over goes under it',
+      pack({ from: 0, to: 2 }, { from: 1, to: 3, head: -6 }).rows[1].lane === 1);
+    check('a bar that starts the day another ends takes a new lane',
+      pack({ from: 0, to: 4 }, { from: 4, to: 8 }).lanes === 2,
+      'a shared day is a shared day');
+    check('...and one that starts the day after shares its lane',
+      pack({ from: 0, to: 4 }, { from: 5, to: 8 }).lanes === 1);
     check('rows come back left to right',
       pack({ from: 30, to: 32 }, { from: 1, to: 2 }).rows[0].from === 1);
     check('nothing to draw is still one empty lane, not zero-height',
@@ -230,6 +264,15 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
       part[0].days === 16 && part[0].from === 0, String(part[0].days));
     check('...and the next band starts where the first one ends',
       part[1].from === 16);
+
+    // a term that runs over the year end: the step into January is a month
+    // roll like any other, and the year has to roll with it
+    const turn = chart.monthBands({ start: '2026-11-10', end: '2027-02-05', days: 88 });
+    check('a term across the year end names its months in order',
+      turn.map((b) => b.label).join() === 'Nov,Dec,Jan,Feb', turn.map((b) => b.label).join());
+    check('...and the bands still tile it',
+      turn.reduce((n, b) => n + b.days, 0) === 88 && turn[2].from === 52,
+      turn.map((b) => `${b.label}@${b.from}+${b.days}`).join(' '));
   }
 
   /* ---- fitting the term to the window ---- */
@@ -241,17 +284,22 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
     check('a short term does not get absurdly wide days', w(1600, 14) === 16, String(w(1600, 14)));
     check('a day is never zero or negative', w(100, 400) >= 4);
   }
+});
+
+/* The other half is the store's: which areas the chart asks for, and whether
+   the flag that keeps one off it survives a reload and a sync. None of it
+   needs semester.js, so a fresh instance will do. */
+suite('Semester chart — which areas are on it', async ({ check }) => {
 
   /* ---- which areas are on it at all ---- */
 
   {
+    const s = await storeWith(base());
     check('every area is on the chart until told otherwise',
       s.chartAreas().length === 4, String(s.chartAreas().length));
     check('courses come before projects, which come before personal',
       s.chartAreas().map((a) => a.name).join() === 'EE lab,Thermodynamics,Rocket,General',
       s.chartAreas().map((a) => a.name).join());
-    check('...and inside a category, the order they were dragged into',
-      s.chartAreas()[0].name === 'EE lab');
 
     s.commit(() => s.upsertArea({ id: 'x1', onChart: false }));
     check('an area can sit the chart out',
@@ -269,9 +317,6 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
   /* ---- the flag survives a reload and a sync ---- */
 
   {
-    // a fresh instance, not the shared one: import() caches, so a second
-    // sharedStoreWith would hand back the module already loaded above with the
-    // state it already has
     const r = await storeWith(base({
       areas: [
         { id: 'a1', name: 'Kept off', category: 'course', order: 0, onChart: false },

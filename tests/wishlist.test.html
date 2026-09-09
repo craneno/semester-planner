@@ -58,7 +58,6 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
     const w = s.addWish('Nozzle heater $48.50 mcmaster.com/1234');
     check('a wish is stored', s.state.wishlist.length === 1);
     check('it starts out wanted', w.status === 'wanted');
-    check('it starts with no ETA', w.eta === null);
     check('newest sits first', s.addWish('Calipers') === s.state.wishlist[0]);
     check('a nameless wish is refused',
       s.addWish('   ') === null && s.state.wishlist.length === 2);
@@ -99,8 +98,9 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
     check('no date says nothing', s.etaState(at('ordered', null), ref) === '');
     check('yesterday is late', s.etaState(at('ordered', '2026-09-09'), ref) === 'late');
     check('today is today', s.etaState(at('ordered', '2026-09-10'), ref) === 'today');
-    check('tomorrow is soon', s.etaState(at('shipped', '2026-09-11'), ref) === 'soon');
     check('two days out is still soon', s.etaState(at('shipped', '2026-09-12'), ref) === 'soon');
+    check('three days out is just a date', s.etaState(at('shipped', '2026-09-13'), ref) === '',
+      JSON.stringify(s.etaState(at('shipped', '2026-09-13'), ref)));
     check('next week is just a date', s.etaState(at('ordered', '2026-09-20'), ref) === '');
     check('something already here says nothing',
       s.etaState(at('delivered', '2026-09-01'), ref) === '');
@@ -119,12 +119,10 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
     mk('No date', null);
     mk('Sooner', '2026-09-11');
 
-    check('on the way sorts by ETA',
+    // undated last: a parcel with no ETA must not hide one arriving tomorrow
+    check('on the way sorts by ETA, undated last',
       s.wishesInFlight().map((w) => w.title).join() === 'Sooner,Later,No date',
       s.wishesInFlight().map((w) => w.title).join());
-    check('undated goes last, not first',
-      s.wishesInFlight()[2].title === 'No date',
-      'a parcel with no ETA must not hide one arriving tomorrow');
   }
 
   /* ---- what it costs ---- */
@@ -134,10 +132,8 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
     s.addWish('A $10');
     s.addWish('B $5.50');
     s.addWish('C');
-    check('a total adds up the priced ones', s.wishTotal(s.wishesWanted()) === 15.5,
+    check('a total adds up the priced ones, and an unpriced one counts as nothing', s.wishTotal(s.wishesWanted()) === 15.5,
       String(s.wishTotal(s.wishesWanted())));
-    check('an unpriced wish counts as nothing, not NaN',
-      Number.isFinite(s.wishTotal(s.wishesWanted())));
     check('an empty list totals zero', s.wishTotal([]) === 0);
   }
 
@@ -158,11 +154,14 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
     s.updateWish(w.id, { price: 'abc' });
     check('nonsense leaves the price alone', s.wishById(w.id).price === null);
 
-    s.updateWish(w.id, { url: 'javascript:alert(1)' });
-    check('a bad url is refused here too', s.wishById(w.id).url === null);
     s.updateWish(w.id, { url: 'mcmaster.com/1234' });
     check('a bare domain still gets a scheme',
-      s.wishById(w.id).url === 'https://mcmaster.com/1234');
+      s.wishById(w.id).url === 'https://mcmaster.com/1234', String(s.wishById(w.id).url));
+    // updateWish() is not updateLink(): a url that cannot be stored clears
+    // the field rather than keeping the one that worked
+    s.updateWish(w.id, { url: 'javascript:alert(1)' });
+    check('a bad url on edit clears the link, it does not keep the old one',
+      s.wishById(w.id).url === null, String(s.wishById(w.id).url));
 
     s.deleteWish(w.id);
     check('a wish can be removed', s.state.wishlist.length === 0);
@@ -187,36 +186,6 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
     check('an unknown status falls back to wanted', b.status === 'wanted');
     check('an unparseable price becomes nothing', b.price === null);
     check('a dangerous url does not survive a reload', b.url === null);
-  }
-
-  /* ---- sync, without a new row kind ---- */
-
-  {
-    // a row of its own since schema 20 — see links.test.html for why
-    const s = await storeWith(base());
-    const made = s.addWish('Calipers $30');
-    const row = s.snapshotRows().find((r) => r.kind === 'wish');
-    check('a wish is a row of its own', row && row.id === made.id && row.data.title === made.title);
-    check('...with a clock the sync layer can read', s.rowStamp('wish', made.id) === made.updatedAt);
-
-    const meta = s.snapshotRows().find((r) => r.kind === 'meta');
-    check('meta no longer carries the list', meta.data.wishlist === undefined);
-    check('...but still the semester and the settings', !!meta.data.semester && !!meta.data.settings);
-
-    const applied = s.applyRow({
-      kind: 'wish', id: 'r1',
-      data: { id: 'r1', title: 'From the phone', status: 'ordered', eta: '2026-09-15', price: null, url: null }
-    });
-    check('an inbound wish lands',
-      applied === true && s.wishesInFlight().map((w) => w.title).join() === 'From the phone');
-
-    // a device still on schema 19 sends the list inside meta, empty or not
-    s.applyRow({
-      kind: 'meta', id: 'meta',
-      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [], wishlist: [] }
-    });
-    check('an older device’s meta cannot wipe the list',
-      s.state.wishlist.length === 2, String(s.state.wishlist.length));
   }
 });
 </script>

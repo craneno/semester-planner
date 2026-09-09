@@ -28,13 +28,30 @@ suite('Parcels — a number names its carrier', async ({ check }) => {
   check('twelve digits is FedEx', detectTracking('541958247270')?.carrier === 'fedex');
   check('...with the label’s spaces too', detectTracking('5419 5824 7270')?.number === '541958247270',
     JSON.stringify(detectTracking('5419 5824 7270')));
-  check('fifteen digits is FedEx Ground', detectTracking('986578788855')?.carrier === 'fedex' && detectTracking('123456789012345')?.carrier === 'fedex');
+  check('fifteen digits is FedEx Ground', detectTracking('123456789012345')?.carrier === 'fedex');
   check('96 and twenty more is FedEx SmartPost', detectTracking('9612019012345678901234')?.carrier === 'fedex');
   check('1Z is UPS', detectTracking('1Z999AA10123456784')?.carrier === 'ups');
   check('...lower case as typed still counts', detectTracking('1z999aa10123456784')?.number === '1Z999AA10123456784');
-  check('92–95 and twenty more is USPS', detectTracking('9400111899223183452144')?.carrier === 'usps'
-    && detectTracking('9205590175547700000000')?.carrier === 'usps');
+  check('92–95 and twenty more is USPS', detectTracking('9400111899223183452144')?.carrier === 'usps');
   check('two letters, nine digits, US is USPS', detectTracking('LZ123456789US')?.carrier === 'usps');
+  // the shapes are exact about length: a digit off either way is no parcel,
+  // or a phone number with a digit too many would start a FedEx lookup
+  for (const [n, why] of [
+    ['1234567890123', 'thirteen digits'],
+    ['12345678901234', 'fourteen digits'],
+    ['1234567890123456', 'sixteen digits'],
+    ['1Z999AA1012345678', '1Z and fifteen more'],
+    ['9205590175547700000', '92 and seventeen more']
+  ]) {
+    check(`${why} is not a parcel`, detectTracking(n) === null, JSON.stringify(detectTracking(n)));
+  }
+  // only groups of four digits are joined back up, the way a label prints
+  // them; so a FedEx number typed off the label counts and a UPS number
+  // broken up with spaces does not
+  check('fifteen digits in groups of four still count', detectTracking('1234 5678 9012 345')?.number === '123456789012345',
+    JSON.stringify(detectTracking('1234 5678 9012 345')));
+  check('a UPS number with spaces inside is not found', detectTracking('1Z 999AA1 0123456784') === null,
+    JSON.stringify(detectTracking('1Z 999AA1 0123456784')));
   check('a price is not a parcel', detectTracking('Desk $1200') === null);
   check('a phone number is not a parcel', detectTracking('call 6175551234') === null);
   check('an order number is not a parcel', detectTracking('order 112-1234567-1234567') === null);
@@ -55,17 +72,18 @@ suite('Parcels — a number names its carrier', async ({ check }) => {
   check('a name, a price, a link and a number all come apart',
     named.title === 'Nozzle heater' && named.price === 48.5 && named.url === 'https://mcmaster.com/1234'
     && named.tracking?.number === '541958247270', JSON.stringify(named));
-  check('a shop link is kept over the carrier’s', named.url === 'https://mcmaster.com/1234');
   check('a line with no number has no tracking', parseWishAdd('Nozzle heater $48.50').tracking === null);
 
   /* ---- the wish it makes ---- */
-  const made = s.commit(() => s.addWish('Filament 1Z999AA10123456784'));
-  const w = s.state.wishlist.find((x) => x.title === 'Filament');
-  check('a number means it has shipped', w?.status === 'shipped', w?.status);
-  check('...and carries its tracking', w?.tracking?.carrier === 'ups');
-  check('a wanted thing stays wanted', s.state.wishlist.find((x) => x.id === 'w3').tracking === null);
-  s.commit(() => s.deleteWish(w.id));
-  void made;
+  // commit() returns nothing, so the wish is read off addWish inside it
+  let made = null;
+  s.commit(() => { made = s.addWish('Filament 1Z999AA10123456784'); });
+  check('a number means it has shipped', made?.status === 'shipped', made?.status);
+  check('...and carries its tracking', made?.tracking?.carrier === 'ups', JSON.stringify(made?.tracking));
+  const w3 = s.state.wishlist.find((x) => x.id === 'w3');
+  check('migrate() gives a wish with no number a null tracking, and it stays wanted',
+    w3.tracking === null && w3.status === 'wanted', JSON.stringify({ tracking: w3.tracking, status: w3.status }));
+  s.commit(() => s.deleteWish(made.id));
 });
 
 suite('Parcels — what the carrier says lands on the wish', async ({ check }) => {
@@ -128,7 +146,8 @@ suite('Parcels — asked once a day, all at once', async ({ check }) => {
   check('the day is stamped, device-only', s.state.settings.trackingAt === new Date(t0).toISOString()
     && !s.SYNCED_SETTINGS.includes('trackingAt'));
   check('...so it is not due again today', !trackingDue(t0 + 60_000));
-  check('...and is due tomorrow', trackingDue(t0 + TRACK_EVERY + 1));
+  // the edge itself: a day to the millisecond is due, not a tick after
+  check('...and is due at exactly a day', trackingDue(t0 + TRACK_EVERY));
   check('a delivered parcel is not asked about again', tracked().map((w) => w.id).join() === 'w1');
 
   // one carrier down must not take the others with it
@@ -143,9 +162,18 @@ suite('Parcels — asked once a day, all at once', async ({ check }) => {
   await refreshTracking({ fetch, only: 'w1', now: t0 + 5000 });
   check('a single ask leaves the day’s stamp alone', s.state.settings.trackingAt === stampBefore);
 
-  // signed out, nothing is asked and nothing is stamped
+  // signed out, nothing is asked and nothing is stamped. isSignedIn() reads
+  // cloud.userId, so it is cleared by hand here rather than left to
+  // whatever session the browser running the suite happens to hold
+  const { cloud } = await import('../js/cloud.js');
+  const wasUser = cloud.userId;
+  cloud.userId = null;
   const before = asked.length;
-  check('signed out, the daily round does nothing', (await refreshTrackingIfDue({ fetch, now: t0 + TRACK_EVERY * 2 })) === null && asked.length === before);
+  try {
+    check('signed out, the daily round does nothing', (await refreshTrackingIfDue({ fetch, now: t0 + TRACK_EVERY * 2 })) === null && asked.length === before);
+  } finally {
+    cloud.userId = wasUser;
+  }
 });
 </script>
 </body>

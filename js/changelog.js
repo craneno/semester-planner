@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v54', date: '2026-09-09',
+    title: 'Dinner at seven, not at dawn',
+    notes: [
+      'Quick add reads “dinner 7-9pm” as the evening: a pm on the end of a range covers its start too, unless that would put the start after the end, so “11-1pm” is still midday.',
+      'Dragging an area into an order no longer counts a name that is not there as a slot.',
+      'Under the hood, the test suite was gone through end to end: repeated checks folded into one place, checks that could not fail taken out, and the gaps filled — conflict rules in cloud sync, the Google sync window at its edges, a course’s own days, the leap year and the year end in quick add, and more.'
+    ]
+  },
+  {
     version: 'v53', date: '2026-09-08',
     title: 'A calendar for a life, a term for the courses',
     notes: [

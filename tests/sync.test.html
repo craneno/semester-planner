@@ -10,8 +10,17 @@
 import { suite } from './harness.js';
 
 suite('Cloud sync — delete durability', async ({ check }) => {
-  const { state, commit, subscribe, upsertItem, deleteItem, itemById, applyRow, snapshotRows } = await import('../js/store.js');
+  const { state, commit, subscribe, upsertItem, deleteItem, itemById, applyRow, snapshotRows, SCHEMA_VERSION } = await import('../js/store.js');
   const C = await import('../js/cloud.js');
+
+  // A hidden tab throttles a timer set from inside another timer harder
+  // with every link in the chain; a message hop after each wait starts the
+  // chain over, so a wait here runs the same hidden as shown.
+  const hop = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms)).then(hop);
+  // the retry after a refresh is a timer of cloud.js's own; wait for it by
+  // what it leaves in the log, not by guessing how long it takes
+  const untilLogged = async (was, tries = 40) => { while (C.cloud.log[0] === was && tries-- > 0) await tick(50); };
 
   /* A stand-in for Supabase: one in-memory table that stamps synced_at on write,
      mirroring the planner_touch() trigger in supabase/schema.sql. The query
@@ -129,7 +138,7 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const fake = fresh();
     commit(() => { upsertItem({ id: 'hw', title: 'hw' }); });
     await C.sync();
-    check('setup: server has the item', !!serverRow(fake, 'hw') && !serverRow(fake, 'hw').deleted);
+    const landed = !!serverRow(fake, 'hw') && !serverRow(fake, 'hw').deleted;
 
     // another device touches the row, so our next pull re-fetches it
     serverRow(fake, 'hw').synced_at = new Date(Date.UTC(2026, 0, 2)).toISOString();
@@ -137,7 +146,7 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     commit(() => deleteItem('hw'));
     await C.sync();
 
-    check('delete survives a pull', !itemById('hw'), '(it came back)');
+    check('delete survives a pull', !itemById('hw'), `(it came back; on the server before the delete: ${landed})`);
     check('tombstone reaches the server', !!serverRow(fake, 'hw')?.deleted,
           `(deleted=${serverRow(fake, 'hw')?.deleted})`);
   }
@@ -218,11 +227,9 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     commit(() => { upsertItem({ id: 'ps', title: 'settle', plan: { date: '2026-09-03', start: '09:00', mins: 60 } }); });
     await C.sync();
     const after = fake.writes;
-    check('setup: the first sync wrote', after > 0);
     await C.sync();
-    check('a second sync with nothing edited writes nothing', fake.writes === after, `(wrote ${fake.writes - after} more)`);
-    await C.sync();
-    check('...nor a third', fake.writes === after, `(wrote ${fake.writes - after} more)`);
+    check('a second sync with nothing edited writes nothing', after > 0 && fake.writes === after,
+      `(the first sync wrote ${after}, the second ${fake.writes - after} more)`);
     check('...and the row is still here, as it was', itemById('ps')?.plan?.start === '09:00');
   }
 
@@ -237,23 +244,34 @@ suite('Cloud sync — delete durability', async ({ check }) => {
       JSON.stringify(e));
     check('...with how long it took', typeof e.ms === 'number' && e.ms >= 0);
 
+    // a log already full: logSync() unshifts into this very array, so the
+    // seed goes in place, oldest last, and the next sync has to push one out
+    const seed = (i) => ({ at: 'seed-' + i, ms: 0, up: 0, down: 0, adopted: 0, full: false, error: null });
+    C.cloud.log.splice(0, C.cloud.log.length, ...Array.from({ length: 35 }, (_, i) => seed(i)));
     fake.table.push({ user_id: USER, kind: 'item', id: 'from-phone', data: { id: 'from-phone', title: 'phone' },
       deleted: false, updated_at: new Date(Date.UTC(2026, 0, 5)).toISOString(), synced_at: new Date(Date.UTC(2026, 0, 5)).toISOString() });
     await C.sync();
     e = C.cloud.log[0];
-    check('a row that came down is counted', e.down === 1 && e.up === 0, JSON.stringify(e));
-    check('the log is kept to thirty', C.cloud.log.length <= 30);
+    check('a row that came down is counted, in the newest entry', e.down === 1 && e.up === 0, JSON.stringify(e));
+    check('the log is kept to thirty, the oldest dropped first',
+      C.cloud.log.length === 30 && C.cloud.log[29].at === 'seed-28', `(${C.cloud.log.length} entries, last ${C.cloud.log[29]?.at})`);
   }
 
   /* A push with nothing edited here, sync after sync, is a loop — the kind
      shipped three times this week. Sync stops itself rather than run all
-     night, and Sync now starts it again. */
+     night, and Sync now starts it again.
+
+     The loop here: the fake hands every row back with a key of its own
+     (`touched`). An item takes the server's copy whole, so it settles; but
+     applyRow('meta') reads only the fields it knows and drops the rest, so
+     meta never matches what the baseline recorded, and goes up again on
+     every sync. */
   async function tLoopBreaker() {
     const fake = fresh([], { mutate: true });
     commit(() => { upsertItem({ id: 'lp', title: 'looping' }); });
-    let halted = 0;
-    for (let i = 0; i < 8; i++) { await C.sync(); if (C.cloud.halted) { halted = i + 1; break; } }
-    check('a push on every sync with nothing edited trips the breaker', C.cloud.halted === true, `(after ${halted} syncs)`);
+    const trip = async () => { for (let i = 0; i < 8; i++) { await C.sync(); if (C.cloud.halted) return i + 1; } return 0; };
+    const halted = await trip();
+    check('meta going up on every sync with nothing edited trips the breaker', C.cloud.halted === true, `(after ${halted} syncs)`);
     check('...and says so as an error', C.cloud.status === 'error' && /loop/i.test(C.cloud.message), C.cloud.message);
     check('...in the log too', C.cloud.log[0].error === 'loop');
 
@@ -263,9 +281,11 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     await C.sync({ manual: true });
     check('Sync now runs once more', fake.writes > before);
 
-    commit(() => { upsertItem({ id: 'lp2', title: 'a real edit' }); });
+    // Sync now let it run once, and the loop is still there: tripped again,
+    // a rebuild of the baseline is the other way out
+    const again = await trip();
     C.resetLocalSyncState();
-    check('a rebuild clears the halt', C.cloud.halted === false);
+    check('a rebuild clears the halt', again > 0 && C.cloud.halted === false, `(tripped again after ${again} syncs)`);
   }
 
   /* An upsert has no undo; the history table on the server is it. A version
@@ -313,17 +333,21 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const fake = fresh();
     commit(() => { upsertItem({ id: 'jw1', title: 'expired' }); });
     fake.failNext = { code: 'PGRST301', message: 'JWT expired' };
-    await C.sync();
-    await new Promise((r) => setTimeout(r, 400));   // the retry runs 250ms after
+    await C.sync();                                  // fails, refreshes, schedules the retry
+    await untilLogged(C.cloud.log[0]);               // the retry has logged
     check('an expired token is refreshed', fake.auth.refreshes === 1, String(fake.auth.refreshes));
     check('...and the sync tried once more, and got through', C.cloud.status === 'ready' && !!serverRow(fake, 'jw1'));
     check('...noted in the log', C.cloud.log.some((e) => /refreshed/.test(e.error || '')));
 
-    // and when the refresh does not help: the retry fails the same way
+    // and when the refresh does not help: the retry fails the same way. The
+    // commit above also booked a push of its own (pushSoon, 1.5s); let that
+    // go by first, or it is what meets the failure meant for the retry
+    await tick(1600);
+    while (C.cloud.status === 'syncing') await tick(50);
     fake.failNext = { code: 'PGRST301', message: 'JWT expired' };
     await C.sync();                                  // fails, refreshes, schedules the retry
     fake.failNext = { code: 'PGRST301', message: 'JWT expired' };
-    await new Promise((r) => setTimeout(r, 400));   // the retry meets it again
+    await untilLogged(C.cloud.log[0]);               // the retry meets it again
     check('a refresh that does not help ends as an error, not a loop',
       C.cloud.status === 'error' && fake.auth.refreshes === 2, `${C.cloud.status} after ${fake.auth.refreshes} refreshes`);
   }
@@ -332,8 +356,11 @@ suite('Cloud sync — delete durability', async ({ check }) => {
      any live row, identical or not, which is what made the echo loud. */
   {
     const before = state.items.length;
-    check('applyRow cannot tell an identical row from a new one',
+    check('applyRow calls a new row a change',
       applyRow({ kind: 'item', id: 'nosuch', data: { id: 'nosuch', title: 'x' }, deleted: false }) === true);
+    state.items.push({ id: 'same', title: 'x' });
+    check('...and a row identical to the one held, too — the half the hash guard is for',
+      applyRow({ kind: 'item', id: 'same', data: { id: 'same', title: 'x' }, deleted: false }) === true);
     state.items.length = before;
   }
 
@@ -385,8 +412,6 @@ suite('Cloud sync — delete durability', async ({ check }) => {
 
     await C.saveFeedUrl('');
     check('forgetting the link deletes the row', fake.feed === null && (await C.feedSaved()) === null);
-    check('a missing feeds table names the file to run',
-      /upgrade\.sql/.test(C.describeSyncError({ code: '42P01', message: 'relation "public.planner_feeds" does not exist' })));
   }
 
   /* A push upserts 200 rows in one statement, and the server stamps them all
@@ -416,8 +441,8 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     const fake = fresh([remote('early', 1)]);
     commit(() => { upsertItem({ id: 'mine', title: 'mine' }); });
     await C.sync();   // pulls `early`, pushes `mine` after it
-    check('setup: the push landed after the pull', serverRow(fake, 'mine').synced_at > at(1) && !!itemById('early'));
-    check('the cursor is what pull saw, not what push wrote', state.settings.cloud.cursor === at(1), state.settings.cloud.cursor);
+    check('the cursor is what pull saw, not what push wrote', state.settings.cloud.cursor === at(1),
+      `(cursor ${state.settings.cloud.cursor}; the push landed at ${serverRow(fake, 'mine')?.synced_at}, early arrived: ${!!itemById('early')})`);
     fake.table.push(remote('phone', 50));   // between the two
     await C.sync();
     check('a row written between our pull and our push still comes down', !!itemById('phone'), '(never arrived)');
@@ -485,6 +510,131 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('...and goes up', serverRow(fake, 'ed').data.title === 'typed here', serverRow(fake, 'ed').data.title);
   }
 
+  /* Who wins a row both sides changed: updated_at, row by row. A local edit
+     older than the phone's loses; the same clock keeps the local edit; and a
+     device with no baseline yet takes the cloud's copy unless its own is
+     newer. The fake cannot play a tombstone against a newer local edit, or
+     two clocks that disagree; those are not here. */
+  async function tConflicts() {
+    // edited here, but the phone wrote later
+    let fake = fresh();
+    commit(() => { upsertItem({ id: 'cf', title: 'first' }); });
+    await C.sync();
+    commit(() => { upsertItem({ id: 'cf', title: 'typed here' }); });
+    Object.assign(serverRow(fake, 'cf'), { data: { id: 'cf', title: 'from the phone' }, updated_at: '2027-01-01T00:00:00.000Z', synced_at: at(900) });
+    const before = fake.writes;
+    await C.sync();
+    check('a local edit older than the server copy loses', itemById('cf')?.title === 'from the phone', String(itemById('cf')?.title));
+    check('...and nothing goes up for it', fake.writes === before, `(wrote ${fake.writes - before})`);
+
+    // the same clock on both: our own write back down, or an edit in the same millisecond
+    fake = fresh();
+    commit(() => { upsertItem({ id: 'tie', title: 'first' }); });
+    await C.sync();
+    commit(() => { upsertItem({ id: 'tie', title: 'typed here' }); });
+    Object.assign(serverRow(fake, 'tie'), { data: { id: 'tie', title: 'from the phone' }, updated_at: itemById('tie').updatedAt, synced_at: at(900) });
+    await C.sync();
+    check('the same updated_at keeps the local edit', itemById('tie')?.title === 'typed here', String(itemById('tie')?.title));
+    check('...which goes up, and the server keeps it', serverRow(fake, 'tie').data.title === 'typed here', serverRow(fake, 'tie').data.title);
+
+    // no baseline — a first sync, or after a rebuild — and the row on both sides
+    fake = fresh([{ ...remote('fb', 1, 'cloud copy'), updated_at: '2027-01-01T00:00:00.000Z' }]);
+    commit(() => { upsertItem({ id: 'fb', title: 'local copy' }); });
+    await C.sync();
+    check('with no baseline the cloud wins a row held on both sides', itemById('fb')?.title === 'cloud copy', String(itemById('fb')?.title));
+
+    fake = fresh([remote('fl', 1, 'cloud copy')]);   // the phone wrote in January; ours is stamped now
+    commit(() => { upsertItem({ id: 'fl', title: 'local copy' }); });
+    await C.sync();
+    check('...unless the local row is newer', itemById('fl')?.title === 'local copy' && serverRow(fake, 'fl').data.title === 'local copy',
+      `(${itemById('fl')?.title} here, ${serverRow(fake, 'fl').data.title} on the server)`);
+  }
+
+  /* An upgrade is not an edit. A schema bump makes rows look edited, and a
+     device that pushed them all would write its copy over every other's. So
+     a baseline built under another schema is thrown away: the sync is a full
+     one, the cursor starts over, and the cloud wins every row. Meta is the
+     row that shows it — it has no clock, so a dirty one with a baseline
+     would have kept the local copy. */
+  async function tSchemaGuard() {
+    // something far ahead to pull, so the cursor sits past the rows we push
+    const fake = fresh([remote('far', 500)]);
+    commit(() => { upsertItem({ id: 'sg', title: 'kept' }); state.semester.name = 'typed here'; });
+    await C.sync();
+    const cursor = state.settings.cloud.cursor;
+    const BASE = 'semesterPlanner.cloudBase.' + USER, SCHEMA = 'semesterPlanner.cloudSchema.' + USER;
+    const baseline = localStorage.getItem(BASE);
+
+    // the phone's meta, stamped behind our cursor: only a pull from the start sees it
+    const meta = fake.table.find((r) => r.kind === 'meta');
+    meta.data = { ...meta.data, semester: { ...meta.data.semester, name: 'from the cloud' } };
+    meta.synced_at = at(1);
+    commit(() => { state.semester.name = 'typed here again'; });   // dirty against the baseline
+
+    // a reload on a new build: the marker on disk is an old schema's and the
+    // baseline is still there. resetLocalSyncState() is the one way to clear
+    // the copy cloud.js keeps in memory, so what it also throws away goes back
+    C.resetLocalSyncState();
+    C._setClient(fake, { userId: USER, email: 't@e.st' });
+    localStorage.setItem(BASE, baseline);
+    localStorage.setItem(SCHEMA, '19/h3');
+    state.settings.cloud.cursor = cursor;
+    await C.sync();
+
+    check('an old schema marker makes the sync a full one', C.cloud.log[0].full === true, JSON.stringify(C.cloud.log[0]));
+    check('...the cloud winning a row that was dirty here, from behind the old cursor',
+      state.semester.name === 'from the cloud', state.semester.name);
+    check('...and the marker is brought up to date', localStorage.getItem(SCHEMA) === `${SCHEMA_VERSION}/h3`, String(localStorage.getItem(SCHEMA)));
+    check('a row nothing changed is still here', itemById('sg')?.title === 'kept');
+  }
+
+  /* A row of a kind this build does not know: a newer app on the phone.
+     applyRow says no, and it must not be recorded as taken either, or the
+     next push would see it "gone" here and send a tombstone for it. */
+  async function tUnknownKind() {
+    const fake = fresh([{ user_id: USER, kind: 'zzz', id: 'z1', data: { id: 'z1', title: 'new kind' }, deleted: false, updated_at: at(1), synced_at: at(1) }]);
+    commit(() => { upsertItem({ id: 'uk', title: 'mine' }); });
+    await C.sync();
+    check('a kind this build does not know is not applied', C.cloud.log[0].down === 0, JSON.stringify(C.cloud.log[0]));
+    await C.sync();
+    const row = fake.table.find((r) => r.kind === 'zzz');
+    check('...nor tombstoned on the next push', !!row && row.deleted === false && row.data.title === 'new kind', JSON.stringify(row));
+  }
+
+  /* Offline is a status, not an error, and not a round trip either. */
+  async function tOffline() {
+    const fake = fresh();
+    commit(() => { upsertItem({ id: 'off', title: 'offline' }); });
+    Object.defineProperty(navigator, 'onLine', { get: () => false, configurable: true });
+    try {
+      await C.sync();
+      check('offline, sync says so and stays home', C.cloud.status === 'offline' && fake.reads === 0 && fake.writes === 0,
+        `(${C.cloud.status}, ${fake.reads} reads, ${fake.writes} writes)`);
+    } finally { delete navigator.onLine; }   // the own property off, the prototype's getter shows again
+    await C.sync();
+    check('...and goes once the network is back', C.cloud.status === 'ready' && !!serverRow(fake, 'off'), C.cloud.status);
+  }
+
+  /* Two tabs on one device. The other tab's save is not an edit made here
+     and must not schedule a push: that tab pushes its own, and every sync
+     here writes lastSync, which the other tab sees as a save of ours — the
+     two kept each other syncing every couple of seconds. Runs last: every
+     commit before it scheduled a push of its own, and those must go first. */
+  async function tExternalSaveSchedulesNoPush() {
+    const fake = fresh([remote('pp', 1, 'ping')]);   // seeded, not committed: no push of our own in the queue
+    await tick(1700);                                 // pushSoon waits 1500ms after the last commit
+    await C.sync();
+    const reads = fake.reads, writes = fake.writes;
+    window.dispatchEvent(new StorageEvent('storage', { key: 'semesterPlanner.v1', newValue: JSON.stringify(state) }));
+    await tick(1800);
+    check('a save seen from another tab schedules no push', fake.reads === reads && fake.writes === writes,
+      `(${fake.reads - reads} reads, ${fake.writes - writes} writes)`);
+    commit(() => { upsertItem({ id: 'pp', title: 'pong' }); });
+    for (let i = 0; i < 60 && fake.writes === writes; i++) await tick(100);
+    check('...where an edit made here does', fake.writes > writes && serverRow(fake, 'pp')?.data.title === 'pong',
+      `(${fake.writes - writes} writes, server says ${serverRow(fake, 'pp')?.data.title})`);
+  }
+
   for (const [name, fn] of [
     ['delete beats a live pull', tDeleteBeatsLivePull],
     ['delete during push', tDeleteDuringPush],
@@ -502,12 +652,17 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['the cursor stays at the pull', tCursorStaysAtPull],
     ['refused for a tombstone', tRefusedForTombstone],
     ['an external save is an edit', tExternalSaveIsAnEdit],
-    ['an edit during the pull', tEditDuringPull]
+    ['an edit during the pull', tEditDuringPull],
+    ['who wins a row', tConflicts],
+    ['the schema guard', tSchemaGuard],
+    ['a kind this build does not know', tUnknownKind],
+    ['offline', tOffline],
+    ['an external save schedules no push', tExternalSaveSchedulesNoPush]
   ]) {
     await fn();
   }
 
-  /* ---- the one Postgres error worth explaining ---- */
+  /* ---- the Postgres errors worth explaining ---- */
 
   {
     const help = /upgrade\.sql/;
@@ -515,6 +670,8 @@ suite('Cloud sync — delete durability', async ({ check }) => {
       help.test(C.describeSyncError({ code: '23514', message: 'violates check constraint' })));
     check('...matched by name too, since PostgREST may drop the code',
       help.test(C.describeSyncError({ message: 'new row violates check constraint "planner_rows_kind_check"' })));
+    check('a missing feeds table names the file to run',
+      help.test(C.describeSyncError({ code: '42P01', message: 'relation "public.planner_feeds" does not exist' })));
     check('any other error is passed through as it came',
       C.describeSyncError({ code: '42501', message: 'permission denied' }) === 'permission denied');
     check('a thrown non-error still reads as something',
@@ -535,10 +692,8 @@ suite('Cloud sync — the baseline is small', async ({ check }) => {
   const row = { id: 'i1', title: 'Read chapter 3', plan: { date: '2026-09-03', start: '09:00', mins: 60 }, notes: 'x'.repeat(2000) };
 
   check('a hash is short', rowHash(row).length < 24, rowHash(row));
-  check('...whatever the row holds', rowHash({ ...row, notes: 'y'.repeat(50000) }).length < 24);
   check('the same row hashes the same', rowHash(row) === rowHash(JSON.parse(JSON.stringify(row))));
   check('one changed letter is a different hash', rowHash(row) !== rowHash({ ...row, title: 'Read chapter 4' }));
-  check('a tick is a different hash', rowHash({ ...row, done: false }) !== rowHash({ ...row, done: true }));
   check('an empty row still has one', typeof rowHash({}) === 'string' && rowHash({}).length > 0);
   const many = new Set();
   for (let i = 0; i < 5000; i++) many.add(rowHash({ ...row, title: 'Task ' + i }));

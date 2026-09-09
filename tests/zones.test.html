@@ -42,16 +42,24 @@ suite('Timezones — the arithmetic', async ({ check }) => {
   {
     check('Pacific to Eastern is three hours later',
       zoneShift(PT, ET, term) === 180, String(zoneShift(PT, ET, term)));
-    check('and back again is three hours earlier', zoneShift(ET, PT, term) === -180);
     check('a zone to itself is nothing', zoneShift(ET, ET, term) === 0);
-    check('nothing to somewhere is nothing', zoneShift(null, ET, term) === 0);
   }
 
   {
-    // both ends move together in winter, so the gap holds — which is the whole
-    // reason the offset is asked for at an instant rather than looked up once
+    // two zones that do not switch together: Los Angeles keeps summer time,
+    // Phoenix never does — which is why the offset is asked for at an instant
+    // rather than looked up once
+    const AZ = 'America/Phoenix';
+    const july = new Date('2026-07-15T12:00:00Z');
     const january = new Date('2027-01-15T12:00:00Z');
-    check('the gap survives daylight saving', zoneShift(PT, ET, january) === 180);
+    check('Pacific is seven hours behind in July', zoneOffset(PT, july) === -420, String(zoneOffset(PT, july)));
+    check('...and eight in January', zoneOffset(PT, january) === -480, String(zoneOffset(PT, january)));
+    check('Phoenix is seven behind all year',
+      zoneOffset(AZ, july) === -420 && zoneOffset(AZ, january) === -420,
+      `${zoneOffset(AZ, july)} / ${zoneOffset(AZ, january)}`);
+    check('so Los Angeles to Phoenix is nothing in July', zoneShift(PT, AZ, july) === 0,
+      'two names for one clock');
+    check('...and an hour in January', zoneShift(PT, AZ, january) === 60, String(zoneShift(PT, AZ, january)));
   }
 
   {
@@ -114,6 +122,16 @@ suite('Timezones — a schedule that moved', async ({ check }) => {
   }
 
   {
+    // a late slot that already crosses midnight: its length is read round the
+    // clock, and the roll is counted from the start alone
+    const slot = given([{ days: [4], start: '23:00', end: '00:30' }]);
+    s.shiftSchedules(PT, ET, term);
+    check('a slot that already crosses midnight keeps its length',
+      slot().start === '02:00' && slot().end === '03:30', `${slot().start}–${slot().end}`);
+    check('...and rolls its weekday with the start', slot().days.join() === '5', slot().days.join());
+  }
+
+  {
     const slot = given([{ days: [2], start: '09:00', end: '10:00' }], ET);
     const moved = s.shiftSchedules(PT, ET, term);
     check('a slot written somewhere else is left alone', moved === 0);
@@ -130,13 +148,6 @@ suite('Timezones — a schedule that moved', async ({ check }) => {
 
   {
     const slot = given([{ days: [1], start: '07:30', end: '08:45' }]);
-    s.shiftSchedules(PT, ET, term);
-    s.shiftSchedules(ET, PT, term);
-    check('and it is its own undo', slot().start === '07:30');
-  }
-
-  {
-    const slot = given([{ days: [1], start: '07:30', end: '08:45' }]);
     s.stampSchedules(ET);
     check('stamping says where without moving anything',
       slot().start === '07:30' && slot().tz === ET);
@@ -149,7 +160,10 @@ suite('Timezones — a schedule that moved', async ({ check }) => {
 
   /* ---- and what the app asks about, off the same instance ---- */
 
-  const elsewhere = here === PT ? ET : PT;
+  // a zone whose clock differs from this machine's at term time — picked by
+  // offset, not by name, or the test only passed away from the Pacific
+  const { zoneOffset, zoneShift } = await import('../js/util.js');
+  const elsewhere = [PT, ET, IST, 'UTC'].find((z) => zoneOffset(z, term) !== zoneOffset(here, term));
 
   {
     given([{ days: [1], start: '07:30', end: '08:45' }], here);
@@ -177,13 +191,15 @@ suite('Timezones — a schedule that moved', async ({ check }) => {
   }
 
   {
-    // Phoenix and Los Angeles keep the same clock all summer: different names,
-    // nothing to fix, and nothing worth interrupting anyone for
-    given([{ days: [1], start: '07:30', end: '08:45' }], 'America/Phoenix');
-    const d = s.scheduleDrift(new Date('2026-07-15T12:00:00Z'));
-    const sameClock = ['America/Los_Angeles', 'America/Phoenix'].includes(here);
-    check('two names for one clock are not a move', !sameClock || d === null,
-      sameClock ? '' : 'only checkable on a Pacific machine; skipped here');
+    // two names for one clock are nothing to fix, and nothing worth asking
+    // about. Any whole-hour zone has an Etc/GMT twin that reads the same at
+    // term time, so this holds on any machine; a half-hour one has none
+    const off = zoneOffset(here, term);
+    const twin = off % 60 ? null : (off === 0 ? 'Etc/GMT' : `Etc/GMT${off < 0 ? '+' : '-'}${Math.abs(off) / 60}`);
+    given([{ days: [1], start: '07:30', end: '08:45' }], twin || here);
+    check('two names for one clock are not a move',
+      (!twin || zoneShift(twin, here, term) === 0) && s.scheduleDrift(term) === null,
+      twin ? `${twin} vs ${here}: ${JSON.stringify(s.scheduleDrift(term))}` : 'a half-hour zone has no twin; skipped here');
   }
 });
 

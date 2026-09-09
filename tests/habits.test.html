@@ -17,17 +17,13 @@ const base = (over = {}) => ({
   ...over
 });
 
-suite('Habits — ticking, streaks and sync', async ({ check }) => {
-
-  /* ---- the seed ---- */
-
+/* Each seed is pinned to the version that added it, so a habit deleted on
+   purpose does not come back at the next bump. */
+suite('Habits — the seed', async ({ check }) => {
   {
     const s = await storeWith({ version: 8, areas: [], items: [] });
     const names = s.activeHabits().map((x) => x.name);
-    check('a fresh upgrade seeds every starting habit', names.length === 6, names.join(' | '));
-    check('the three phone habits are separate rows',
-      names.filter((n) => n.startsWith('No phone')).length === 3, names.join(' | '));
-    check('...and they are in the order given',
+    check('a fresh upgrade seeds every starting habit, in the order given',
       names.join(' | ') === 'No phone — morning | No phone — eating | No phone — night | 10k steps or workout | Out of bed by 9:00 | Sunscreen',
       names.join(' | '));
   }
@@ -46,12 +42,9 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
     check('no seed once already on 10', s.activeHabits().length === 0,
       'a habit deleted on purpose must not come back at the next bump');
   }
-  {
-    const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Mine', order: 0 }] }));
-    check('an existing set of habits is left alone',
-      s.activeHabits().map((x) => x.name).join() === 'Mine');
-  }
+});
 
+suite('Habits — ticking and streaks', async ({ check }) => {
 
   /* ---- ticking ---- */
 
@@ -97,6 +90,8 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
     s.toggleHabit('2026-08-27', 'h1', true);
     check('today being untouched does not break the streak',
       s.habitStreak('h1', '2026-08-29') === 2, String(s.habitStreak('h1', '2026-08-29')));
+    check('...but yesterday untouched as well is no streak at all',
+      s.habitStreak('h1', '2026-08-30') === 0, String(s.habitStreak('h1', '2026-08-30')));
   }
 
   /* ---- the 21-day countdown ---- */
@@ -106,7 +101,6 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
     const ref = '2026-08-29';
     const back = (n) => new Date(Date.UTC(2026, 7, 29) - n * 86400000).toISOString().slice(0, 10);
 
-    check('the target is 21 days', s.HABIT_TARGET === 21);
     check('a habit with no run has the whole way to go',
       s.habitRemaining('h1', ref) === 21, String(s.habitRemaining('h1', ref)));
 
@@ -123,6 +117,9 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
       s.habitStreak('h1', ref) === 30 && s.habitRemaining('h1', ref) === 0,
       `streak ${s.habitStreak('h1', ref)}, remaining ${s.habitRemaining('h1', ref)}`);
   }
+});
+
+suite('Habits — editing, and the rows they sync as', async ({ check }) => {
 
   /* ---- editing ---- */
 
@@ -144,6 +141,21 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
       (s.state.habitLog['2026-08-28'] || []).includes('other'));
   }
   {
+    // a habit's ticks are spread over the term, a row a day, and every one
+    // of them has to go with it
+    const s = await storeWith(base({
+      habits: [{ id: 'h1', name: 'Steps', order: 0 }, { id: 'h2', name: 'Read', order: 1 }]
+    }));
+    for (const d of ['2026-08-20', '2026-08-21', '2026-08-22']) s.toggleHabit(d, 'h1', true);
+    s.toggleHabit('2026-08-21', 'h2', true);
+    s.deleteHabit('h1');
+    check('deleting takes its ticks off every day, not only one',
+      !Object.values(s.state.habitLog).some((l) => l.includes('h1')), JSON.stringify(s.state.habitLog));
+    check('...and a day left empty loses its clock too',
+      s.state.habitLogAt['2026-08-20'] === undefined && !!s.state.habitLogAt['2026-08-21'],
+      'an empty day is no row, so it needs no stamp; a day still holding another habit keeps one');
+  }
+  {
     const s = await storeWith(base({
       habits: [
         { id: 'h1', name: 'A', order: 0 }, { id: 'h2', name: 'B', order: 1 }, { id: 'h3', name: 'C', order: 2 }
@@ -153,39 +165,27 @@ suite('Habits — ticking, streaks and sync', async ({ check }) => {
     check('habits can be reordered', s.activeHabits().map((x) => x.name).join() === 'C,A,B');
     check('archived habits drop out of the list',
       (s.updateHabit('h1', { archived: true }), s.activeHabits().map((x) => x.name).join()) === 'C,B');
+
+    // archiving hides the row; it does not forget the history
+    s.toggleHabit('2026-08-28', 'h1', true);
+    check('an archived habit still answers for its ticks', s.habitDone('2026-08-28', 'h1') === true);
+    check('...and for its streak', s.habitStreak('h1', '2026-08-28') === 1, String(s.habitStreak('h1', '2026-08-28')));
   }
 
-  /* ---- sync: a row each, and a row per day of ticks, since schema 20 ----
-     Habits and the log used to ride inside `meta`. One row, no clock: two
-     devices ticking the same day fought over the whole map, and whoever
-     pushed last won. A habit is a row now, and each day's ticks are a row
-     keyed by the day, like a note. */
+  /* ---- a day of ticks is a row, since schema 20 ----
+     The log used to ride inside `meta`: one row, no clock, and two devices
+     ticking the same day fought over the whole map. Each day's ticks are a
+     row keyed by the day now, like a note. What reaches another device is
+     checked with every other row kind, in safety.test.html. */
 
   {
     const s = await storeWith(base({ habits: [{ id: 'h1', name: 'Steps', order: 0 }] }));
     s.toggleHabit('2026-08-28', 'h1', true);
-    const rows = s.snapshotRows();
-    check('a habit is a row of its own', rows.some((r) => r.kind === 'habit' && r.id === 'h1'));
-    const day = rows.find((r) => r.kind === 'habitlog');
+    const day = s.snapshotRows().find((r) => r.kind === 'habitlog');
     check('a day of ticks is a row keyed by the day', day && day.id === '2026-08-28' && day.data.ids.join() === 'h1');
     check('...stamped when it was ticked', !!day.data.updatedAt && s.rowStamp('habitlog', '2026-08-28') === day.data.updatedAt);
     s.toggleHabit('2026-08-28', 'h1', false);
     check('an empty day is no row at all', !s.snapshotRows().some((r) => r.kind === 'habitlog'));
-
-    const meta = rows.find((r) => r.kind === 'meta');
-    check('meta no longer carries habits', meta.data.habits === undefined && meta.data.habitLog === undefined);
-    check('...but still the semester and the settings', !!meta.data.semester && !!meta.data.settings);
-
-    const applied = s.applyRow({ kind: 'habit', id: 'r1', data: { id: 'r1', name: 'From the phone', order: 0 } });
-    check('an inbound habit lands',
-      applied === true && s.activeHabits().map((x) => x.name).join() === 'Steps,From the phone');
-    check('...and so does a day of its history',
-      s.applyRow({ kind: 'habitlog', id: '2026-08-20', data: { ids: ['r1'], updatedAt: '2026-08-20T20:00:00.000Z' } }) === true
-      && s.habitDone('2026-08-20', 'r1') === true);
-
-    // a device still on schema 19 sends habits inside meta, empty or not
-    s.applyRow({ kind: 'meta', id: 'meta', data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {} } });
-    check('an older device’s meta cannot wipe them', s.activeHabits().length === 2 && s.habitDone('2026-08-20', 'r1'));
   }
 });
 </script>

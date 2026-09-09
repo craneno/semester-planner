@@ -945,10 +945,12 @@ export function upsertArea(patch) {
  * compared within a category, so they need not be unique across all areas.
  */
 export function reorderAreas(categoryId, orderedIds) {
+  // an id nobody has takes no slot, or the rest would be numbered from one
+  const known = orderedIds.filter((id) => areaById(id));
   const rest = areasInCategory(categoryId, { includeArchived: true })
-    .filter((a) => !orderedIds.includes(a.id))
+    .filter((a) => !known.includes(a.id))
     .map((a) => a.id);
-  [...orderedIds, ...rest].forEach((id, i) => {
+  [...known, ...rest].forEach((id, i) => {
     const a = areaById(id);
     if (a) { a.order = i; a.updatedAt = new Date().toISOString(); }
   });

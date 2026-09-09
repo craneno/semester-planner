@@ -47,7 +47,9 @@ suite('Sidebar swipe — following the finger', async ({ check }) => {
 
   {
     check('a short drag in falls back closed', navSettle('open', 30, W, MIN) === false);
-    check('a flick past the minimum opens, even if most of it is still off-screen',
+    check('a flick of exactly the minimum is not a flick', navSettle('open', MIN, W, MIN) === false,
+      'past it, not at it');
+    check('a flick one past the minimum opens, even if most of it is still off-screen',
       navSettle('open', MIN + 1, W, MIN) === true);
     check('past halfway opens regardless', navSettle('open', W / 2 + 1, 4 * W, MIN * 20) === false
       && navSettle('open', W * 0.6, W, MIN * 20) === true,
@@ -56,24 +58,15 @@ suite('Sidebar swipe — following the finger', async ({ check }) => {
 
   {
     check('a short drag out falls back open', navSettle('close', -30, W, MIN) === true);
-    check('a flick out past the minimum closes', navSettle('close', -(MIN + 1), W, MIN) === false);
+    check('a flick out of exactly the minimum stays open', navSettle('close', -MIN, W, MIN) === true);
+    check('a flick out one past the minimum closes', navSettle('close', -(MIN + 1), W, MIN) === false);
     check('dragged past halfway out, it closes', navSettle('close', -(W * 0.6), W, MIN * 20) === false);
     check('dragged the wrong way, it stays open', navSettle('close', 80, W, MIN) === true);
   }
 
-  /* ---- a redraw under the finger ---- */
-
-  {
-    // A sync's redraw replaced the node the touch began on, and the browser
-    // sends no more of that touch to a node that is gone: the menu stuck
-    // halfway. Checked where it lives, in app.js.
-    const src = await fetch('../js/app.js').then((r) => r.text());
-    check('a redraw waits while a finger holds the menu',
-      /nav-dragging'\)\) \{ redrawHeld = true; return; \}/.test(src));
-    check('...and runs once the finger lifts', /if \(redrawHeld\) \{ redrawHeld = false; navigate\(\); \}/.test(src));
-    check('a menu left mid-way settles on the next touch', /if \(live\) settle\(\);/.test(src));
-    check('...or on its own after a moment', /stale = setTimeout\(settle, 2500\)/.test(src));
-  }
+  /* A touchcancel settles the menu the same way a touchend does, and a redraw
+     waits while a finger holds it — but both live in `wireNavSwipe` in app.js
+     as closures, with nothing exported, so neither is driven here. */
 });
 </script>
 </body>

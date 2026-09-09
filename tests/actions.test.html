@@ -22,6 +22,10 @@ const s = await sharedStoreWith({
   items: [], cards: [], notes: {}
 });
 
+// the newest toast is the last one appended; its button is the Undo
+const lastUndo = () => [...document.querySelectorAll('#toasts .toast button')].pop() || null;
+const undoLast = () => { const b = lastUndo(); b?.click(); return !!b; };
+
 suite('Push forward — today from behind, else tomorrow', async ({ check }) => {
   const A = await import('../js/actions.js');
   const T = today(), Y = addDays(T, -1), TM = addDays(T, 1);
@@ -38,25 +42,68 @@ suite('Push forward — today from behind, else tomorrow', async ({ check }) => 
   s.upsertItem({ id: 'p3', title: "today's", plan: { date: T, start: '09:00', mins: 60 } });
   s.upsertItem({ id: 'p4', title: 'no day' });
 
+  // each push is undone right after it, so no toast is folded into another's
   A.pushForward('p1');
   const p1 = s.itemById('p1');
   check('a block from behind lands today, at its time and length', p1.plan.date === T && p1.plan.start === '15:00' && p1.plan.mins === 90, JSON.stringify(p1.plan));
+  check('the toast offers Undo', lastUndo()?.textContent === 'Undo');
+  undoLast();
+  const p1back = s.itemById('p1').plan;
+  check('...and Undo puts the block back, start and length too',
+    p1back?.date === Y && p1back.start === '15:00' && p1back.mins === 90, JSON.stringify(p1back));
+
   A.pushForward('p2');
   const p2 = s.itemById('p2');
   check('a deadline from behind is due today, still a deadline', p2.due === T && p2.dueTime === '17:00' && p2.plan === null);
+  undoLast();
+  check('...and Undo puts the deadline back, due and time',
+    s.itemById('p2').due === addDays(T, -3) && s.itemById('p2').dueTime === '17:00' && s.itemById('p2').plan === null,
+    JSON.stringify([s.itemById('p2').due, s.itemById('p2').dueTime]));
+
   A.pushForward('p3');
   check("today's block goes to tomorrow", s.itemById('p3').plan.date === TM);
+  undoLast();
+
   A.pushForward('p4');
   const p4 = s.itemById('p4');
   check('a thing with no day gets tomorrow, all day', p4.plan?.date === TM && p4.plan.start === null && !p4.due);
-
-  check('nothing is remembered as done by it', !p1.done && !p2.done);
-  // the latest toast is the last push's; the ones before it said the same words and were folded
-  const undo = [...document.querySelectorAll('#toasts .toast button')].pop();
-  check('the toast offers Undo', !!undo && undo.textContent === 'Undo');
-  undo?.click();
-  check('...and Undo puts the old when back', s.itemById('p4').plan === null);
+  undoLast();
+  check('...and Undo takes the day away again', s.itemById('p4').plan === null, JSON.stringify(s.itemById('p4').plan));
   for (const id of ['p1', 'p2', 'p3', 'p4']) s.deleteItem(id);
+});
+
+suite('Small edits — tick, move, and what a push may touch', async ({ check }) => {
+  const A = await import('../js/actions.js');
+  const T = today(), Y = addDays(T, -1);
+
+  s.upsertItem({ id: 'k1', title: 'tick me', plan: { date: T, start: '09:00', mins: 60 } });
+  A.tickItem('k1', true);
+  check('a tick ticks', s.itemById('k1').done === true && !!s.itemById('k1').doneAt);
+  undoLast();
+  check('...and its Undo unticks', s.itemById('k1').done === false && s.itemById('k1').doneAt === null,
+    JSON.stringify([s.itemById('k1').done, s.itemById('k1').doneAt]));
+
+  A.moveItem('k1', { date: Y, start: '14:00', mins: 30 });
+  const moved = s.itemById('k1').plan;
+  check('a move lands the block where it was dragged', moved.date === Y && moved.start === '14:00' && moved.mins === 30, JSON.stringify(moved));
+  undoLast();
+  const back = s.itemById('k1').plan;
+  check('...and its Undo puts start and length back', back.date === T && back.start === '09:00' && back.mins === 60, JSON.stringify(back));
+
+  s.upsertItem({ id: 'r1', title: 'gym', plan: { date: Y, start: '07:00', mins: 60 }, repeat: { freq: 'daily', every: 1, days: [], until: null, count: null, ex: {} } });
+  s.upsertItem({ id: 'dn', title: 'finished', done: true });
+  check('a series rule cannot be pushed', A.canPush(s.itemById('r1')) === false);
+  check('one occurrence of it can', A.canPush(s.itemById(`r1@${Y}`)) === true, JSON.stringify(s.itemById(`r1@${Y}`)));
+  check('a done item cannot', A.canPush(s.itemById('dn')) === false);
+
+  // the push of one day lands in the rule's exceptions, not on the rule
+  A.pushForward(`r1@${Y}`);
+  const series = s.itemById('r1');
+  check('pushing an occurrence lands in the series’ exceptions', series.repeat.ex[Y]?.date === T, JSON.stringify(series.repeat.ex));
+  check('...and not on the series itself', series.plan.date === Y && series.plan.start === '07:00', JSON.stringify(series.plan));
+  undoLast();
+  check('...and its Undo puts that day back where it was', series.repeat.ex[Y]?.date === Y, JSON.stringify(series.repeat.ex));
+  for (const id of ['k1', 'r1', 'dn']) s.deleteItem(id);
 });
 </script>
 </body>

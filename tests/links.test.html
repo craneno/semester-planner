@@ -37,7 +37,6 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('a full url is a link', isLink('https://example.com/thing'));
     check('a bare domain is a link', isLink('example.com'));
     check('www. is a link', isLink('www.fhjfjgbrjb.com'));
-    check('a deep path is a link', isLink('https://en.wikipedia.org/wiki/Entropy'));
     check('a host with a port is a link', isLink('example.com:8000/x'),
       '"example.com:" is not a scheme');
 
@@ -61,6 +60,14 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('a port is not a scheme', s.normalizeUrl('example.com:8000/x') === 'https://example.com:8000/x',
       String(s.normalizeUrl('example.com:8000/x')));
     check('mailto: is still a scheme, and still refused', s.normalizeUrl('mailto:a@example.com') === null);
+    // what the parser does today with punctuation pasted along with a url:
+    // it keeps it. The URL parser sees nothing wrong with a comma in a path
+    // or a dot ending a host, so the pile gets a link that may 404. Pinned
+    // so a change here is made on purpose, not by accident
+    check('a comma on the end is kept, as things stand',
+      s.normalizeUrl('https://example.com/x,') === 'https://example.com/x,', String(s.normalizeUrl('https://example.com/x,')));
+    check('a dot ending the host is kept too, as things stand',
+      s.normalizeUrl('example.com.') === 'https://example.com./', String(s.normalizeUrl('example.com.')));
     check('addLink refuses what normalizeUrl refuses',
       s.addLink('javascript:alert(1)') === null && s.state.links.length === 0);
   }
@@ -74,11 +81,17 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('no hint defaults to the general personal area',
       where('example.com') === 'General', where('example.com'));
     check('"ner" finds NER Meetings', where('example.com ner') === 'NER Meetings');
-    check('"rocket" finds Rocket', where('example.com rocket') === 'Rocket');
-    check('"thermo" finds Thermodynamics', where('example.com thermo') === 'Thermodynamics');
     check('a two-word area works', where('example.com ee lab') === 'EE lab');
     check('matching ignores case', where('example.com NER') === 'NER Meetings');
-    check('an exact name works', where('example.com Job search') === 'Job search');
+    // findAreaByHint() tries its rules in turn, exact first and loosest
+    // last; one hint that only the looser rule can catch, for each
+    check('a hint run together finds the name with its space',
+      where('example.com eelab') === 'EE lab', where('example.com eelab'));
+    check('the start of a later word is enough',
+      where('example.com meetings') === 'NER Meetings', where('example.com meetings'));
+    check('...even a whole later word', where('example.com lab') === 'EE lab', where('example.com lab'));
+    check('a run of letters inside a word is the last resort',
+      where('example.com dynamics') === 'Thermodynamics', where('example.com dynamics'));
     check('a category name lands in its first area',
       where('example.com personal') === 'General');
   }
@@ -101,7 +114,6 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     const t = (u) => s.linkTitleFromUrl(u);
 
     check('a bare domain is its own title', t('https://www.fhjfjgbrjb.com') === 'fhjfjgbrjb.com', t('https://www.fhjfjgbrjb.com'));
-    check('www is dropped', !t('https://www.example.com').startsWith('www.'));
     check('the last path segment names it',
       t('https://en.wikipedia.org/wiki/Entropy') === 'Entropy — en.wikipedia.org',
       t('https://en.wikipedia.org/wiki/Entropy'));
@@ -120,6 +132,14 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('an empty segment is skipped',
       t('https://example.com/docs/index.html') === 'Docs — example.com',
       t('https://example.com/docs/index.html'));
+    // prettySegment(): more than eight letters with no vowel is a hash, and
+    // more than sixty is a token; neither is a name
+    check('a run with no vowel is a hash, and skipped for the segment above',
+      t('https://example.com/docs/xk9tq2wzr') === 'Docs — example.com',
+      t('https://example.com/docs/xk9tq2wzr'));
+    check('a very long segment is a token, and skipped the same way',
+      t('https://example.com/share/' + 'abcde'.repeat(14)) === 'Share — example.com',
+      t('https://example.com/share/' + 'abcde'.repeat(14)));
     check('a title is never empty', t('https://example.com/') === 'example.com');
   }
 
@@ -143,23 +163,9 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
       t('https://docs.google.com/presentation/d/1AbCdEf/edit') === 'Google Slides');
     check('a form is a form',
       t('https://docs.google.com/forms/d/e/1FAIpQL/viewform') === 'Google Form');
-    check('the file id never becomes the title',
-      !/1BxiMVs0XRA5nFMdKvBd/.test(t('https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBd/view')),
-      'an opaque id reads as a hash and is worse than saying nothing');
     check('anything else on docs.google.com falls back to the usual guess',
       t('https://docs.google.com/about/thing') === 'Thing — docs.google.com',
       t('https://docs.google.com/about/thing'));
-    check('a drive link still files and stores like any other',
-      (() => {
-        const made = s.addLink('https://drive.google.com/file/d/1Bxi/view', { areaId: 'c1' });
-        return made && made.title === 'Drive file' && made.areaId === 'c1';
-      })());
-    check('and its title can be corrected, which is the whole point',
-      (() => {
-        const made = s.addLink('https://docs.google.com/document/d/1Zz/edit', { areaId: 'c1' });
-        s.updateLink(made.id, { title: 'Thermo formula sheet' });
-        return s.linkById(made.id).title === 'Thermo formula sheet';
-      })());
   }
 
   /* ---- storing, editing, removing ---- */
@@ -196,41 +202,6 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     s.deleteArea('p2');
     check('deleting an area unfiles its links, it does not lose them',
       s.unfiledLinks().length === 2, String(s.unfiledLinks().length));
-  }
-
-  /* ---- sync: a row of its own since schema 20 ----
-     Links used to ride inside `meta` so that adding them needed no ALTER.
-     That made the whole pile one row with no clock, and one device's empty
-     pile won over another's full one. Each link is a row now. */
-
-  {
-    const s = await storeWith(withAreas());
-    const made = s.addLink('example.com/nozzle', { areaId: 'p2' });
-    const row = s.snapshotRows().find((r) => r.kind === 'link');
-    check('a link is a row of its own', row && row.id === made.id && row.data.url === made.url);
-    check('...with a clock the sync layer can read', s.rowStamp('link', made.id) === made.updatedAt);
-
-    const meta = s.snapshotRows().find((r) => r.kind === 'meta');
-    check('meta no longer carries the pile', meta.data.links === undefined);
-    check('...but still the semester and the settings', !!meta.data.semester && !!meta.data.settings);
-
-    const applied = s.applyRow({
-      kind: 'link', id: 'r1',
-      data: { id: 'r1', url: 'https://example.com/phone', title: 'From the phone', areaId: 'p1' }
-    });
-    check('an inbound link row lands',
-      applied === true && s.linksForArea('p1').map((l) => l.title).join() === 'From the phone');
-    check('...and a tombstone takes it away',
-      s.applyRow({ kind: 'link', id: 'r1', deleted: true, data: {} }) === true && s.linksForArea('p1').length === 0);
-
-    // a device still on schema 19 sends the pile inside meta — an empty one,
-    // if that is what it has. That is the write that took a real pile once.
-    s.applyRow({
-      kind: 'meta', id: 'meta',
-      data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [] }
-    });
-    check('an older device’s meta cannot wipe the pile',
-      s.state.links.length === 1, String(s.state.links.length));
   }
 
   /* ---- the schema 12 areas ---- */

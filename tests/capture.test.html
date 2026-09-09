@@ -8,6 +8,7 @@
 <body>
 <script type="module">
 import { suite, storeWith } from './harness.js';
+import { SCHEMA_VERSION } from '../js/store/constants.js';
 
 const base = (over = {}) => ({
   version: 6,
@@ -60,9 +61,9 @@ suite('Capture — notecards and filing', async ({ check }) => {
     const card = s.addCard('call advisor thu 2pm 30m');
     const item = s.cardToItem(card.id, { as: 'timed' });
     // a block and only a block: booked and owed at once, it was drawn twice
-    check('a timed task parses the date out of the text', !!item.plan?.date, `got ${item.plan?.date}`);
+    check('a timed task parses the date out of the text: "thu" books a Thursday',
+      !!item.plan?.date && new Date(item.plan.date + 'T00:00:00').getDay() === 4, `got ${item.plan?.date}`);
     check('a timed task keeps the time', item.plan?.start === '14:00', `got ${item.plan?.start}`);
-    check('a timed task books a block', !!item.plan && item.plan.start === '14:00');
     check('the block is not also a deadline', item.due === null && item.dueTime === null, `got ${item.due} ${item.dueTime}`);
     check('the block uses the stated duration', item.plan.mins === 30, `got ${item.plan?.mins}`);
     check('the parsed noise is out of the title', item.title === 'call advisor', `got "${item.title}"`);
@@ -72,8 +73,10 @@ suite('Capture — notecards and filing', async ({ check }) => {
     const s = await storeWith(base());
     const card = s.addCard('undated thing');
     const item = s.cardToItem(card.id, { as: 'timed' });
-    check('a timed task with no date in the text still books today',
-      !!item.plan && !!item.plan.date && item.due === null);
+    const { today } = await import('../js/util.js');
+    // cardToItem() falls back to today at nine when the text names no day
+    check('a timed task with no date in the text books today at nine',
+      item.plan?.date === today() && item.plan.start === '09:00' && item.due === null, JSON.stringify(item.plan));
   }
 
   {
@@ -139,8 +142,6 @@ suite('Capture — notecards and filing', async ({ check }) => {
     check('upgrading from 6 runs every later seed, in order',
       s.state.areas.map((a) => a.name).join() === 'Thermo,General,Job search,Journal',
       s.state.areas.map((a) => a.name).join());
-    check('...and not one from a version already passed',
-      !s.state.areas.some((a) => a.name === 'Rocket'));
   }
   {
     const s = await storeWith({
@@ -150,8 +151,6 @@ suite('Capture — notecards and filing', async ({ check }) => {
     check('a Journal is seeded under Personal on 16',
       s.areasInCategory('personal').map((a) => a.name).join() === 'General,Journal',
       s.areasInCategory('personal').map((a) => a.name).join());
-    check('...as an area like any other, so work and notes can be filed in it',
-      s.state.areas.find((a) => a.name === 'Journal').category === 'personal');
   }
   {
     const s = await storeWith({
@@ -171,8 +170,7 @@ suite('Capture — notecards and filing', async ({ check }) => {
       s.state.areas.length === 1, s.state.areas.map((a) => a.name).join());
   }
   {
-    const current = (await storeWith(null)).SCHEMA_VERSION;
-    const s = await storeWith({ version: current, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
+    const s = await storeWith({ version: SCHEMA_VERSION, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
     check('nothing is seeded once already current', s.state.areas.length === 1,
       s.state.areas.map((a) => a.name).join());
   }

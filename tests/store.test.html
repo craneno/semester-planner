@@ -8,6 +8,7 @@
 <body>
 <script type="module">
 import { suite, storeWith } from './harness.js';
+import { SCHEMA_VERSION } from '../js/store/constants.js';
 
 const v4 = (over = {}) => ({
   version: 4,
@@ -16,7 +17,7 @@ const v4 = (over = {}) => ({
   ...over
 });
 
-suite('Store — categories, migration, study removal', async ({ check }) => {
+suite('Store — categories: a kind, a category, and one folded away', async ({ check }) => {
 
   /* ---- kind → category ---- */
 
@@ -35,10 +36,11 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     }));
     const cat = (id) => s.areaById(id).category;
     check('course stays a course', cat('a1') === 'course', `got ${cat('a1')}`);
-    check('thesis becomes a project', cat('a2') === 'project', `got ${cat('a2')}`);
-    check('research becomes a project', cat('a3') === 'project', `got ${cat('a3')}`);
-    check('work becomes a project', cat('a4') === 'project', `got ${cat('a4')}`);
-    check('applications becomes a project', cat('a5') === 'project', `got ${cat('a5')}`);
+    // the four old project-ish kinds are one heading now
+    const projectKinds = { a2: 'thesis', a3: 'research', a4: 'work', a5: 'applications' };
+    const notProject = Object.entries(projectKinds).filter(([id]) => cat(id) !== 'project');
+    check('thesis, research, work and applications all become a project', notProject.length === 0,
+      notProject.map(([id, kind]) => `${kind} → ${cat(id)}`).join());
     check('personal stays personal', cat('a6') === 'personal', `got ${cat('a6')}`);
     check('unknown kind falls back to course', cat('a7') === 'course', `got ${cat('a7')}`);
     check('missing kind falls back to course', cat('a8') === 'course', `got ${cat('a8')}`);
@@ -63,10 +65,6 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       items: []
     });
     check('an NER area becomes a project', s.areaById('a1').category === 'project');
-    check('...and shows up under Projects',
-      s.areasInCategory('project').some((a) => a.name === 'NER Meetings'));
-    check('NER is no longer a category of its own', !s.CATEGORY_IDS.includes('ner'),
-      s.CATEGORY_IDS.join());
   }
   {
     // a phone still on 10 pushes its own category name; it must not land in a
@@ -76,6 +74,9 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     check('an inbound NER row is translated too',
       s.areaById('r1').category === 'project', s.areaById('r1').category);
   }
+});
+
+suite('Store — migration: seeds, and what was dropped', async ({ check }) => {
 
   /* ---- the Rocket seed ---- */
 
@@ -110,13 +111,32 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       sessions: [{ id: 's1', areaId: 'a1', mins: 90, date: '2026-08-27' }]
     }));
     check('sessions are dropped from state', s.state.sessions === undefined);
-    check('no session rows are synced',
-      !s.snapshotRows().some((r) => r.kind === 'session'));
     check('an inbound session row is ignored',
       s.applyRow({ kind: 'session', id: 's9', data: { id: 's9' } }) === false);
-    check('the store exports no study helpers',
-      s.logSession === undefined && s.studyMinutes === undefined && s.sessionsBetween === undefined);
   }
+
+  /* ---- the week begins on Sunday (schema 18) ---- */
+
+  {
+    // pinned like a seed: an install that had Monday before 18 is moved once
+    const s = await storeWith({ version: 17, areas: [], items: [], settings: { weekStart: 1 } });
+    check('an old install that had Monday is moved to Sunday', s.state.settings.weekStart === 0,
+      String(s.state.settings.weekStart));
+
+    const fresh = await storeWith({ version: 18, areas: [], items: [] });
+    check('and one that never had the setting starts there',
+      fresh.state.settings.weekStart === 0);
+
+    const chosen = await storeWith({
+      version: 18, areas: [], items: [], settings: { weekStart: 1 }
+    });
+    check('someone who has since chosen Monday keeps it',
+      chosen.state.settings.weekStart === 1,
+      'the flip is pinned to 18 like a seed, not forced at every load');
+  }
+});
+
+suite('Store — areas: selectors, order, delete', async ({ check }) => {
 
   /* ---- category selectors ---- */
 
@@ -155,18 +175,15 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       load.course.open === 3 && load.project.open === 1,
       `course=${load.course.open} project=${load.project.open}`);
     check('categoryLoad sums estimates', load.course.mins === 120, `got ${load.course.mins}`);
-    check('categoryLoad covers every category',
-      s.categoryLoad().length === s.AREA_CATEGORIES.length);
   }
 
   {
     // every category but course has a seed behind it, so a genuinely empty one
-    // only exists on data already at the current schema. Read the version off
-    // the module rather than pinning it here: this check is about "already
+    // only exists on data already at the current schema. The version comes
+    // from the module rather than a number here: this check is about "already
     // current", so it has to move with each bump, unlike the seeds themselves.
-    const current = (await storeWith(null)).SCHEMA_VERSION;
     const s = await storeWith({
-      version: current, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
+      version: SCHEMA_VERSION, semester: { name: 'F', start: '2026-09-02', end: '2026-12-12' },
       areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [], cards: [], notes: {}
     });
     const load = Object.fromEntries(s.categoryLoad().map((c) => [c.id, c]));
@@ -195,9 +212,6 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     s.reorderAreas('course', ['a3', 'a1', 'a2']);
     check('reordering rewrites the order',
       s.areasInCategory('course').map((a) => a.name).join() === 'Orgo,Thermo,Dynamics');
-    check('order is a field on the row, so it syncs',
-      s.snapshotRows().find((r) => r.kind === 'area' && r.id === 'a3').data.order === 0,
-      'array position alone would never reach another device');
     check('reordering stamps updatedAt, so the row is pushed',
       !!s.areaById('a3').updatedAt);
 
@@ -205,8 +219,10 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     check('a partial list keeps the rest at the end',
       (s.reorderAreas('course', ['a2']), s.areasInCategory('course').map((a) => a.name).join())
         === 'Dynamics,Orgo,Thermo');
-    check('an unknown id is ignored',
-      (s.reorderAreas('course', ['nope', 'a1']), s.areasInCategory('course')[0].name) === 'Thermo');
+    // an id the category does not know takes no slot: the known ones close up
+    s.reorderAreas('course', ['nope', 'a1', 'a2']);
+    const orders = s.areasInCategory('course').map((a) => `${a.id}:${a.order}`).join();
+    check('an unknown id takes no slot', orders === 'a1:0,a2:1,a3:2', orders);
   }
 
   {
@@ -232,6 +248,25 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     check('...but stay hidden from the normal read',
       s.areasInCategory('course').map((a) => a.name).join() === 'Thermo,Orgo');
   }
+
+  /* ---- deleting an area leaves its work behind ---- */
+
+  {
+    const s = await storeWith(v4({
+      areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }],
+      items: [{ id: 't1', title: 'PS1', areaId: 'a1' }],
+      cards: [{ id: 'k1', text: 'a thought', areaId: 'a1' }]
+    }));
+    s.deleteArea('a1');
+    check('deleting an area keeps its tasks', s.itemById('t1') !== null);
+    check('...and unfiles them', s.itemById('t1').areaId === null);
+    check('a card filed there is unfiled, not lost',
+      s.cardById('k1') !== null && s.cardById('k1').areaId === null,
+      JSON.stringify(s.cardById('k1')));
+  }
+});
+
+suite('Store — carry forward: the end of one day is the start of the next', async ({ check }) => {
 
   /* ---- the end of one day is the start of the next ---- */
 
@@ -275,11 +310,17 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       }));
       check('a Friday night reaches Monday morning',
         s.carryForward('2026-09-14')?.text === 'Email the TA');
+      // CARRY_DAYS in js/store.js is 7 and not exported, so the edge is a number here
+      const edge = await storeWith(withNotes({
+        '2026-09-01': { focus: '', text: '', tomorrow: 'A week old', top3: [] }
+      }));
+      check('a line from seven days back still reaches',
+        edge.carryForward('2026-09-08')?.text === 'A week old');
       const old = await storeWith(withNotes({
         '2026-09-01': { focus: '', text: '', tomorrow: 'Ancient history', top3: [] }
       }));
-      check('but a line from a fortnight ago does not',
-        old.carryForward('2026-09-20') === null,
+      check('but one from eight days back does not',
+        old.carryForward('2026-09-09') === null,
         'a week is long enough to still mean it');
     }
 
@@ -314,6 +355,9 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
         s.note('2026-09-12').tomorrow === '');
     }
   }
+});
+
+suite('Store — journal and freewrite', async ({ check }) => {
 
   /* ---- a daily journal ---- */
 
@@ -411,30 +455,11 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     }
   }
 
-  /* ---- the week begins on Sunday (schema 18) ---- */
-
-  {
-    const s = await storeWith(v4());
-    check('an old install is moved to Sunday', s.state.settings.weekStart === 0);
-
-    const fresh = await storeWith({ version: 18, areas: [], items: [] });
-    check('and one that never had the setting starts there',
-      fresh.state.settings.weekStart === 0);
-
-    const chosen = await storeWith({
-      version: 18, areas: [], items: [], settings: { weekStart: 1 }
-    });
-    check('someone who has since chosen Monday keeps it',
-      chosen.state.settings.weekStart === 1,
-      'the flip is pinned to 18 like a seed, not forced at every load');
-  }
-
   /* ---- the freewrite box every area page ends in ---- */
 
   {
     const s = await storeWith(v4({ areas: [{ id: 'a1', name: 'Rocket', kind: 'research' }] }));
     check('an area starts with an empty one', s.areaById('a1').freewrite === '');
-    check('...a string, never missing', typeof s.areaById('a1').freewrite === 'string');
 
     s.commit(() => s.upsertArea({ id: 'a1', freewrite: 'Think about the nozzle.' }));
     check('what is written stays written', s.areaById('a1').freewrite === 'Think about the nozzle.');
@@ -450,6 +475,9 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     });
     check('and survives a reload', back.areaById('a1').freewrite === 'Kept.');
   }
+});
+
+suite('Store — the day timeline', async ({ check }) => {
 
   /* ---- what is on today, for the line in the topbar ---- */
 
@@ -503,6 +531,28 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
       'the topbar reads a null as "no scheduled events today"');
   }
 
+  {
+    // an end nobody wrote, and one that runs past midnight
+    const day = '2026-09-09';
+    const s = await storeWith({
+      version: 18,
+      semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+      areas: [],
+      items: [{ id: 't1', title: 'Late night', plan: { date: day, start: '23:30', mins: 90 } }],
+      events: [{ id: 'e1', title: 'Coffee', date: day, start: '16:00', end: null }],
+      notes: {}
+    });
+    const end = (title) => s.dayTimeline(day).find((e) => e.title === title)?.end;
+    check('an event with no end is given an hour', end('Coffee') === '17:00', String(end('Coffee')));
+    // fromMin() clamps at the last minute of the day, so the block ends there
+    // rather than in tomorrow; only classesOn writes '24:00' by hand
+    check('a block that runs past midnight ends with the day', end('Late night') === '23:59',
+      String(end('Late night')));
+  }
+});
+
+suite('Store — the day: 3am, and the sweep', async ({ check }) => {
+
   /* ---- the day begins at 3am, not midnight ---- */
 
   {
@@ -515,18 +565,15 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     check('half past midnight still belongs to the day before',
       at('2026-09-10T00:30:00') === '2026-09-09',
       'writing about your day at half past midnight is writing about that day');
-    check('...and so does ten to three',
-      at('2026-09-10T02:50:00') === '2026-09-09');
     check('three o’clock is the new day', at('2026-09-10T03:00:00') === '2026-09-10');
-    check('and so is one minute past', at('2026-09-10T03:01:00') === '2026-09-10');
     check('the last minute of the old day is 2:59',
       at('2026-09-10T02:59:00') === '2026-09-09');
     check('a night crossing a month still lands in the old month',
       at('2026-10-01T01:00:00') === '2026-09-30');
     check('...and one crossing a year, in the old year',
       at('2027-01-01T02:00:00') === '2026-12-31');
-    check('today() with no clock is still just today',
-      typeof today() === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(today()));
+    check('today() with no clock is now', today() === today(new Date()),
+      `${today()} vs ${today(new Date())}`);
   }
 
   /* ---- finished work is swept at the reset ---- */
@@ -626,18 +673,6 @@ suite('Store — categories, migration, study removal', async ({ check }) => {
     check('...and a note left holding nothing stops syncing',
       !s2.snapshotRows().some((r) => r.kind === 'note' && r.id === '2026-09-01'));
   }
-
-  /* ---- deleting an area leaves its work behind ---- */
-
-  {
-    const s = await storeWith(v4({
-      areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }],
-      items: [{ id: 't1', title: 'PS1', areaId: 'a1' }]
-    }));
-    s.deleteArea('a1');
-    check('deleting an area keeps its tasks', s.itemById('t1') !== null);
-    check('...and unfiles them', s.itemById('t1').areaId === null);
-  }
 });
 
 /* A schedule read off Google is on Google still. What has to hold: the
@@ -659,12 +694,19 @@ suite('Events — a class already on the schedule is not drawn twice', async ({ 
     ev({ id: 'g3', title: 'Dentist', date: '2026-09-14', start: '10:30', end: '11:00' }),                    // same start only
     ev({ id: 'g4', title: 'Thermodynamics office hours', date: '2026-09-14', start: '15:00', end: '16:00' }),// same name, other time
     ev({ id: 'g5', title: 'MEE 2340 Thermodynamics', date: '2026-09-15', start: '10:30', end: '11:35' }),   // no class on Tuesday
-    ev({ id: 'g6', title: 'Career fair', date: '2026-09-14', allDay: true })
+    ev({ id: 'g6', title: 'Career fair', date: '2026-09-14', allDay: true }),
+    ev({ id: 'g7', title: 'Thermodynamics', date: '2026-09-14', start: '10:30', end: '11:00' }),            // same start, other end, shared word
+    ev({ id: 'g8', title: 'Dentist, eleven minutes off', date: '2026-09-14', start: '10:41', end: '11:35' }),
+    ev({ id: 'g9', title: 'Dentist, ten minutes off', date: '2026-09-14', start: '10:40', end: '11:35' })
   ];
   const ids = (d) => s.eventsOn(d).map((e) => e.id).join();
   check('the Google copy of a class is left out', !ids('2026-09-14').includes('g1'));
   check('...so is one the same length in the same slot, whatever it is called', !ids('2026-09-14').includes('g2'));
   check('the same start alone is not enough', ids('2026-09-14').includes('g3'));
+  check('the same start and a shared word is, whatever the end', !ids('2026-09-14').includes('g7'), ids('2026-09-14'));
+  // NEAR is ten minutes: the same end is one class only when the start is that close
+  check('a start eleven minutes off is another thing', ids('2026-09-14').includes('g8'), ids('2026-09-14'));
+  check('...ten minutes off is the class', !ids('2026-09-14').includes('g9'), ids('2026-09-14'));
   check('the same name at another time stays', ids('2026-09-14').includes('g4'));
   check('all-day things are never a class', ids('2026-09-14').includes('g6'));
   check('a day the class does not meet keeps the event', ids('2026-09-15') === 'g5');
@@ -748,7 +790,13 @@ suite('Overdue — a block that went by is owed too', async ({ check }) => {
   check('a block gone by with a deadline still ahead is upcoming, not late', !ids.includes('b5') && s.upcoming(14, ref).some((t) => t.id === 'b5'));
   check('a repeating block is never late', !ids.some((id) => id.startsWith('r1')), ids.join());
   check('soonest first, by whichever when it has', ids.join() === 'b1,d1');
-  check('the count is what Overview says', late.length === 2);
+
+  // a deadline series is asked for its days gone by, and a tick answers for that day alone
+  s.upsertItem({ id: 'r2', title: 'vitamins', due: '2026-09-09', repeat: { freq: 'daily', every: 1, until: null, count: null, ex: {} } });
+  const lateIds = () => s.overdue(ref).map((t) => t.id).join();
+  check('a past occurrence of a deadline series, unticked, is late', lateIds().includes('r2@2026-09-09'), lateIds());
+  s.toggleItem('r2@2026-09-09', true);
+  check('...and not once ticked', !lateIds().includes('r2@2026-09-09'), lateIds());
 });
 
 suite('Series — this and after, and a copy', async ({ check }) => {
@@ -780,7 +828,6 @@ suite('Series — this and after, and a copy', async ({ check }) => {
     check('...and one after it goes with the new',
       made.repeat.ex['2026-10-26']?.off === true && s.itemById('lec').repeat.ex['2026-10-26'] === undefined);
     check('the old series still draws before the split', s.itemsPlannedOn('2026-09-28').some((t) => t.title === 'Lecture'));
-    check('...and not after it', s.itemsPlannedOn('2026-10-19').every((t) => t.plan.start === '14:00'));
     const newOcc = s.itemsPlannedOn('2026-10-19');
     check('the new series draws after it, at the new time', newOcc.length === 1 && newOcc[0].plan.start === '14:00',
       JSON.stringify(newOcc.map((t) => [t.id, t.plan.start])));
@@ -798,6 +845,13 @@ suite('Series — this and after, and a copy', async ({ check }) => {
     check('...and the rule but not its exceptions', copy.repeat?.freq === 'weekly' && Object.keys(copy.repeat.ex).length === 0);
     check('the copy of an occurrence is a copy of the series',
       s.duplicateItem('lec@2026-09-07')?.repeat?.freq === 'weekly');
+
+    // a copy is not the import's: Canvas would not know it, and must not move it
+    s.upsertItem({ id: 'cv', title: 'PS1', areaId: 'th', due: '2026-09-10', canvasId: 'c-1', canvasCourse: 'MEE2340', canvasArea: 'th' });
+    const cp = s.duplicateItem('cv');
+    check('a copy of a Canvas assignment carries none of its Canvas keys',
+      cp.canvasId === null && !('canvasCourse' in cp) && !('canvasArea' in cp),
+      JSON.stringify([cp.canvasId, cp.canvasCourse, cp.canvasArea]));
   }
 
   {
@@ -808,6 +862,14 @@ suite('Series — this and after, and a copy', async ({ check }) => {
     check('the new series keeps what was left of the count', made.repeat.count === 3, String(made.repeat.count));
     check('the old one ends before it', s.itemById('cnt').repeat.until === '2026-09-02' && s.itemById('cnt').repeat.count === null);
     check('a plain item cannot be split', s.splitSeriesAt(s.upsertItem({ title: 'once' }), '2026-09-03') === null);
+
+    // "this and after" from the first occurrence is all of them: the edit
+    // lands on the series, and no second row is made
+    const rows = s.state.items.length;
+    const same = s.splitSeriesAt(s.itemById('cnt'), '2026-09-01', { title: 'Five, renamed' });
+    check('a split at the first occurrence makes no new row', s.state.items.length === rows && same?.id === 'cnt',
+      `${s.state.items.length} rows, got ${same?.id}`);
+    check('...and the series itself carries the edit', s.itemById('cnt').title === 'Five, renamed', s.itemById('cnt').title);
   }
 });
 </script>

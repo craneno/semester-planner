@@ -18,6 +18,7 @@
      a row must carry the time it was really edited, not the time it was sent,
      and there must be a copy on this device that no sync can reach. */
 import { suite, storeWith } from './harness.js';
+import { today } from '../js/util.js';
 
 const base = (over = {}) => ({
   version: 20,
@@ -34,7 +35,9 @@ suite('Safety — a row says when it was really edited', async ({ check }) => {
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-30T12:00:00.000Z'
     }],
-    items: [{ id: 't1', title: 'apply', areaId: 'c1', updatedAt: '2026-08-30T12:00:00.000Z' }]
+    items: [{ id: 't1', title: 'apply', areaId: 'c1', updatedAt: '2026-08-30T12:00:00.000Z' }],
+    cards: [{ id: 'k1', text: 'a card', updatedAt: '2026-08-30T12:00:00.000Z' }],
+    notes: { '2026-08-30': { focus: 'f', text: '', tomorrow: '', top3: [], journal: {}, updatedAt: '2026-08-30T12:00:00.000Z' } }
   }));
 
   {
@@ -50,6 +53,9 @@ suite('Safety — a row says when it was really edited', async ({ check }) => {
     check('sync can read an area’s clock',
       s.rowStamp('area', 'c1') === '2026-08-30T12:00:00.000Z', String(s.rowStamp('area', 'c1')));
     check('...an item’s, as before', s.rowStamp('item', 't1') === '2026-08-30T12:00:00.000Z');
+    check('...a card’s', s.rowStamp('card', 'k1') === '2026-08-30T12:00:00.000Z', String(s.rowStamp('card', 'k1')));
+    check('...and a day’s note, by its date', s.rowStamp('note', '2026-08-30') === '2026-08-30T12:00:00.000Z',
+      String(s.rowStamp('note', '2026-08-30')));
     check('...and says so plainly when there is none', s.rowStamp('area', 'nope') === null);
   }
 
@@ -67,25 +73,13 @@ suite('Safety — a row says when it was really edited', async ({ check }) => {
   }
 });
 
-suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
-  // The shape of the fix, checked where it lives: cloud.js keeps the schema
-  // its baseline was built under, and a bump throws the baseline away so the
-  // cloud wins every row before the new shape is sent anywhere.
-  const src = await fetch('../js/cloud.js').then((r) => r.text());
-
-  check('the baseline records the schema it was built under',
-    /SCHEMA_KEY|baselineSchema/.test(src));
-  check('a bump clears the baseline the same way a full sync does',
-    /upgraded[\s\S]{0,120}storeBaseline\(null\)/.test(src),
-    'with no baseline, winner() gives every row to the cloud');
-  check('and the schema is only recorded once the sync has finished',
-    /storeBaseline\(pushed\.hashes\);\s+storeSchema\(\);/.test(src),
-    'recording it early would let a failed sync count as agreed');
-
-  check('a push sends the row’s own edit time',
-    /updated_at: rowStamp\(r\.kind, r\.id\) \|\| now/.test(src),
-    'not the clock at push time, or an upgrade dates itself newer than every real edit');
-
+suite('Safety — did you run upgrade.sql? The server is the backstop', async ({ check, log }) => {
+  /* The sync layer's own behaviour — its edit times, the read-back hash, a
+     tab's save, the channel echo — is driven in sync.test.html. What the
+     client cannot check by running is the database: the trigger that drops
+     a stale write, the history that is the only way back from a bad sync,
+     and the kinds the CHECK constraint allows. Both SQL files must say the
+     same, since upgrade.sql is what an existing project runs by hand. */
   const schema = await fetch('../supabase/schema.sql').then((r) => r.text());
   const upgrade = await fetch('../supabase/upgrade.sql').then((r) => r.text());
   for (const [name, sql] of [['schema.sql', schema], ['upgrade.sql', upgrade]]) {
@@ -94,50 +88,18 @@ suite('Safety — an upgrade is not an edit', async ({ check, log }) => {
     check(`...and still lets a delete through in ${name}`,
       /NEW\.deleted is distinct from true/.test(sql),
       'a tombstone is a real decision');
-  }
-  log('The trigger is the only guard a bad build cannot get past.');
-
-  // An upsert has no undo. A history table filled by a trigger is the way
-  // back from a bad sync — the backups on one device are not, since the
-  // bad sync reaches every device in seconds.
-  for (const [name, sql] of [['schema.sql', schema], ['upgrade.sql', upgrade]]) {
     check(`${name} keeps a history of every row`, /create table if not exists public\.planner_rows_history/.test(sql));
     check(`...filled after update or delete in ${name}`,
       /after update or delete on public\.planner_rows[\s\S]{0,80}planner_rows_keep_history/.test(sql));
     check(`...that a user can read but never write in ${name}`,
       /"planner_rows_history owner"[\s\S]{0,120}for select/.test(sql) && /security definer/.test(sql));
+    check(`${name} allows the schema-20 kinds`, /'link', 'wish', 'sprint', 'habit', 'habitlog'/.test(sql),
+      'a new kind needs an ALTER the user has to run');
   }
-  check('the app can read history and put a version back', /export async function history/.test(src) && /export function restore/.test(src));
-  check('...stamping it now, or the trigger would drop it as stale',
-    /data\.updatedAt = new Date\(\)\.toISOString\(\)/.test(src));
-
-  // A save seen from another tab is not an edit either. The other tab pushes
-  // its own; and every sync writes `lastSync`, so a push for it would have
-  // two tabs on one device syncing each other for ever.
-  check('a save from another tab does not schedule a push',
-    /subscribe\(\(meta\) => \{[\s\S]{0,600}if \(meta\?\.external\) return;\s*if \(cfg\(\)\.enabled && isSignedIn\(\)\) pushSoon\(\);/.test(src),
-    'two open tabs kept each other syncing every couple of seconds');
-  check('our own write coming down the channel does not start a sync',
-    /payload\?\.new[\s\S]{0,200}currentHashes\(\)\[key\(r\.kind, r\.id\)\] === hash\(r\.data\)\) return;/.test(src),
-    'a round trip and a status flicker for nothing');
-
-  // The baseline must survive localStorage refusing it. On a full phone the
-  // write failed quietly, every sync then pushed the whole store, and each
-  // push came back down the channel as the next sync — one a second.
-  check('the baseline is held in memory as well as on disk',
-    /mem\.uid === cloud\.userId && mem\.has\) return mem\.base/.test(src),
-    'a baseline that did not save turns one push into a push a second');
-  check('...and a write that fails says so', /cloud\.storageFull = true/.test(src),
-    'so Settings can say why the device is busy');
-  check('the hash is short, not the row’s JSON', /Math\.imul\(h1 \^ ch/.test(src) && !/const hash = \(data\) => JSON\.stringify/.test(src),
-    'the old baseline was a second copy of the store, and it is what filled the phone');
-  check('a baseline of the old shape is thrown away like an old schema',
-    /AGREED = `\$\{SCHEMA_VERSION\}\/h3`/.test(src) && /baselineSchema\(\) !== AGREED/.test(src),
-    'whole-JSON hashes never match short ones, and every row would look edited');
+  log('The trigger is the only guard a bad build cannot get past.');
 });
 
 suite('Safety — a copy this device keeps', async ({ check }) => {
-  const KEY = 'semesterPlanner.v1';
   const BAK = 'semesterPlanner.bak.';
   const clear = () => {
     for (const k of Object.keys(localStorage)) if (k.startsWith(BAK)) localStorage.removeItem(k);
@@ -167,14 +129,14 @@ suite('Safety — a copy this device keeps', async ({ check }) => {
 
   {
     // the copy is taken before anything is written, so a second load on the
-    // same day must not overwrite it with whatever happened since
-    const first = localStorage.getItem(BAK + '2000-01-01');
-    localStorage.setItem(BAK + '2000-01-01', JSON.stringify({ marker: 'kept' }));
+    // same day must not overwrite it with whatever happened since. The key
+    // is BAK + today(): a marker under it is what a load would overwrite.
+    clear();
+    localStorage.setItem(BAK + today(), JSON.stringify({ marker: 'kept' }));
     await storeWith(base());
     check('a copy already taken is left alone',
-      JSON.parse(localStorage.getItem(BAK + '2000-01-01')).marker === 'kept',
+      JSON.parse(localStorage.getItem(BAK + today()) || '{}').marker === 'kept',
       'one a day, and it is the state at the start of the day');
-    if (first === null) localStorage.removeItem(BAK + '2000-01-01');
   }
 
   {
@@ -192,96 +154,120 @@ suite('Safety — a copy this device keeps', async ({ check }) => {
       localStorage.setItem(BAK + d, JSON.stringify({ day: d }));
     }
     const s = await storeWith(base());
-    const dailies = s.listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label));
-    check('old copies are dropped rather than piling up for ever', dailies.length <= 5,
+    const dailies = s.listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label)).map((b) => b.label);
+    check('old copies are dropped rather than piling up for ever', dailies.length === 5,
       String(dailies.length));
+    // six seeded and today's makes seven; the two oldest go, by name
     check('...and the newest are the ones kept',
-      dailies[0].label > dailies[dailies.length - 1].label || dailies.length === 1,
-      dailies.map((b) => b.label).join());
+      dailies.join() === [today(), '2026-08-30', '2026-08-29', '2026-08-28', '2026-08-27'].join(),
+      dailies.join());
     clear();
-  }
-
-  {
-    check('the copies are not in the store, so nothing can sync them away',
-      !JSON.stringify(JSON.parse(localStorage.getItem(KEY) || '{}')).includes('backedUpAt'));
   }
 });
 
 suite('Safety — each thing its own row', async ({ check }) => {
-  // These used to ride together inside `meta`: one row, no clock, and a
-  // clash settled by whoever pushed last — which is how a whole pile of
-  // links went at once. Now each is a row with a clock of its own.
+  /* These used to ride together inside `meta`: one row, no clock, and a
+     clash settled by whoever pushed last — which is how a whole pile of
+     links went at once. Now each is a row with a clock of its own. One
+     table, every kind through the same six claims, so a kind cannot be
+     forgotten the way the wishlist's tests once were. */
+  const AT = '2026-09-01T00:00:00.000Z';
   const s = await storeWith({
     version: 20,
     semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
     areas: [], items: [], cards: [], notes: {},
-    links: [{ id: 'l1', url: 'https://a.example', title: 'a', updatedAt: '2026-09-01T00:00:00.000Z' }],
-    wishlist: [{ id: 'w1', title: 'boots', updatedAt: '2026-09-01T00:00:00.000Z' }],
-    sprints: [{ id: 's1', title: 'push', start: '2026-09-07', end: '2026-09-20', updatedAt: '2026-09-01T00:00:00.000Z' }],
+    links: [{ id: 'l1', url: 'https://a.example', title: 'a', updatedAt: AT }],
+    wishlist: [{ id: 'w1', title: 'boots', updatedAt: AT }],
+    sprints: [{ id: 's1', title: 'push', start: '2026-09-07', end: '2026-09-20', updatedAt: AT }],
     habits: [{ id: 'h1', name: 'Sunscreen', createdAt: '2026-08-30T00:00:00.000Z' }],
     habitLog: { '2026-09-01': ['h1'] },
     habitLogAt: { '2026-09-01': '2026-09-01T09:00:00.000Z' }
   });
 
-  {
-    const rows = s.snapshotRows();
-    const kinds = (k) => rows.filter((r) => r.kind === k);
-    check('a link is a row', kinds('link').length === 1 && kinds('link')[0].id === 'l1');
-    check('a wish is a row', kinds('wish').length === 1);
-    check('a sprint is a row', kinds('sprint').length === 1);
-    check('a habit is a row', kinds('habit').length === 1);
-    check('a day of ticks is a row, keyed by the day',
-      kinds('habitlog').length === 1 && kinds('habitlog')[0].id === '2026-09-01'
-      && JSON.stringify(kinds('habitlog')[0].data.ids) === '["h1"]');
-    const meta = kinds('meta')[0].data;
-    check('meta carries the semester and the settings and nothing else',
-      meta.semester && meta.settings && meta.links === undefined && meta.habits === undefined && meta.habitLog === undefined,
-      Object.keys(meta).join());
+  // kind, the pile it left in meta, the seeded id, how the app reads one
+  // back, and a row as another device would send it
+  const KINDS = [
+    { kind: 'link', pile: 'links', id: 'l1', find: (id) => s.linkById(id),
+      inbound: { id: 'l2', url: 'https://b.example', title: 'b' } },
+    { kind: 'wish', pile: 'wishlist', id: 'w1', find: (id) => s.wishById(id),
+      inbound: { id: 'w2', title: 'calipers', status: 'wanted' } },
+    { kind: 'sprint', pile: 'sprints', id: 's1', find: (id) => s.sprintById(id),
+      inbound: { id: 's2', title: 'ship it', start: '2026-10-01', end: '2026-10-14', kind: 'sprint', deliverables: [] } },
+    { kind: 'habit', pile: 'habits', id: 'h1', find: (id) => s.activeHabits().find((x) => x.id === id) || null,
+      inbound: { id: 'h2', name: 'Stretch', order: 1 } },
+    { kind: 'habitlog', pile: 'habitLog', id: '2026-09-01', find: (date) => (s.habitDone(date, 'h1') ? { id: date } : null),
+      inbound: { ids: ['h1'], updatedAt: '2026-09-03T08:00:00.000Z' }, inboundId: '2026-09-03' }
+  ];
+  // what a device still on schema 19 sends: the piles inside meta, all empty
+  const oldMeta = { kind: 'meta', id: 'meta', data: { semester: s.state.semester, settings: {}, habits: [], habitLog: {}, links: [], wishlist: [], sprints: [] } };
+
+  for (const k of KINDS) {
+    const row = s.snapshotRows().find((r) => r.kind === k.kind && r.id === k.id);
+    check(`a ${k.kind} is a row of its own`, !!row, `${k.kind}: no row with id ${k.id}`);
+    check(`...with the clock sync reads off it`, !!row && s.rowStamp(k.kind, k.id) === row.data.updatedAt,
+      `${k.kind}: rowStamp ${s.rowStamp(k.kind, k.id)} vs row ${row?.data.updatedAt}`);
+    const meta = s.snapshotRows().find((r) => r.kind === 'meta').data;
+    check(`...and meta no longer carries the ${k.pile}`, meta[k.pile] === undefined, `${k.kind}: meta has ${k.pile}`);
+
+    const inId = k.inboundId || k.inbound.id;
+    check(`a ${k.kind} from the cloud lands where the app reads it`,
+      s.applyRow({ kind: k.kind, id: inId, data: k.inbound }) === true && !!k.find(inId),
+      `${k.kind}: ${inId} not found after applyRow`);
+    check(`...and a tombstone takes the ${k.kind} away`,
+      s.applyRow({ kind: k.kind, id: inId, deleted: true, data: {} }) === true && k.find(inId) === null,
+      `${k.kind}: ${inId} still there`);
+    s.applyRow(oldMeta);
+    check(`an old build’s empty ${k.pile} inside meta cannot wipe the ${k.kind}`, !!k.find(k.id),
+      `${k.kind}: ${k.id} gone after a schema-19 meta`);
   }
 
   {
-    check('a link has its clock', s.rowStamp('link', 'l1') === '2026-09-01T00:00:00.000Z');
-    check('a wish has its clock', s.rowStamp('wish', 'w1') === '2026-09-01T00:00:00.000Z');
-    check('a sprint has its clock', s.rowStamp('sprint', 's1') === '2026-09-01T00:00:00.000Z');
+    const meta = s.snapshotRows().find((r) => r.kind === 'meta').data;
+    check('meta is the semester, the calendar and the settings, and nothing else',
+      Object.keys(meta).sort().join() === 'calendar,semester,settings', Object.keys(meta).sort().join());
+    const ticks = s.snapshotRows().find((r) => r.kind === 'habitlog' && r.id === '2026-09-01');
+    check('a day of ticks is keyed by the day and carries its ids', JSON.stringify(ticks?.data.ids) === '["h1"]',
+      JSON.stringify(ticks?.data));
     check('a habit with no edit yet reads its creation', s.rowStamp('habit', 'h1') === '2026-08-30T00:00:00.000Z',
       String(s.rowStamp('habit', 'h1')));
-    check('a day of ticks has the time of its last tick', s.rowStamp('habitlog', '2026-09-01') === '2026-09-01T09:00:00.000Z');
+  }
+
+  {
+    // the sync clock on a day of ticks: an ISO stamp rowStamp can read, moved by the tick
     s.toggleHabit('2026-09-02', 'h1', true);
-    check('a tick stamps its day', s.rowStamp('habitlog', '2026-09-02') > '2026-09-01T09:00:00.000Z');
+    const at = s.rowStamp('habitlog', '2026-09-02');
+    check('a tick stamps its day with a clock sync can read', /^\d{4}-\d{2}-\d{2}T/.test(at) && at > '2026-09-01T09:00:00.000Z', String(at));
     s.toggleHabit('2026-09-02', 'h1', false);
     check('unticking the last one drops the day and its clock',
       !s.state.habitLog['2026-09-02'] && !s.state.habitLogAt['2026-09-02']);
-  }
-
-  {
-    check('a link from the cloud lands', s.applyRow({ kind: 'link', id: 'l2', data: { id: 'l2', url: 'https://b.example', title: 'b' } })
-      && s.state.links.some((l) => l.id === 'l2'));
-    check('...and a tombstone takes it away', s.applyRow({ kind: 'link', id: 'l2', deleted: true, data: {} })
-      && !s.state.links.some((l) => l.id === 'l2'));
     check('a day of ticks from the cloud lands with its clock',
       s.applyRow({ kind: 'habitlog', id: '2026-09-03', data: { ids: ['h1'], updatedAt: '2026-09-03T08:00:00.000Z' } })
-      && JSON.stringify(s.state.habitLog['2026-09-03']) === '["h1"]' && s.state.habitLogAt['2026-09-03'] === '2026-09-03T08:00:00.000Z');
+      && s.state.habitLogAt['2026-09-03'] === '2026-09-03T08:00:00.000Z');
     check('...and an empty one clears the day', s.applyRow({ kind: 'habitlog', id: '2026-09-03', data: { ids: [] } })
       && !s.state.habitLog['2026-09-03']);
-    // the case that took the links: an old build's meta with an empty pile
-    const before = s.state.links.length;
-    s.applyRow({ kind: 'meta', id: 'meta', data: { semester: s.state.semester, settings: {}, links: [], wishlist: [], habits: [] } });
-    check('an old build’s empty pile inside meta is ignored', s.state.links.length === before && s.state.wishlist.length === 1 && s.state.habits.length === 1);
-  }
-
-  {
-    const src = await fetch('../js/cloud.js').then((r) => r.text());
-    check('a push reads back what the server kept', /\.select\('kind,id,data,deleted,synced_at'\)/.test(src));
-    check('...and takes a row that came back different', /kept === hashes\[k\]\) continue;[\s\S]{0,80}applyRow\(row\)/.test(src),
-      'the server refused our copy; its copy is the newer one');
-    check('...recording the server’s hash, not ours', /hashes\[k\] = kept;/.test(src),
-      'or the same stale copy would be pushed again on every sync');
-    for (const f of ['schema.sql', 'upgrade.sql']) {
-      const sql = await fetch('../supabase/' + f).then((r) => r.text());
-      check(`${f} allows the new kinds`, /'link', 'wish', 'sprint', 'habit', 'habitlog'/.test(sql));
-    }
   }
 });
+
+suite('Safety — no device credential rides in any row', async ({ check }) => {
+  // Google tokens, the Supabase keys and the cursors belong to the device.
+  // Settings sync by list (SYNCED_SETTINGS); anything off it must stay put.
+  const s = await storeWith(base({
+    settings: {
+      weekStart: 1, tzSeen: 'America/New_York', canvasFeedAt: '2026-09-01T00:00:00.000Z', trackingAt: '2026-09-01T00:00:00.000Z',
+      gcal: { clientId: 'cid-secret', calendarId: 'primary', enabled: true, pushPlans: true, syncToken: 'tok-secret', window: null, lastSync: null },
+      cloud: { url: 'https://x.supabase.co', anonKey: 'anon-secret', enabled: true, cursor: 'cur-secret', lastSync: null }
+    }
+  }));
+  const wire = JSON.stringify(s.snapshotRows());
+  for (const secret of ['cid-secret', 'tok-secret', 'x.supabase.co', 'anon-secret', 'cur-secret']) {
+    check(`no row carries ${secret}`, !wire.includes(secret));
+  }
+  const synced = s.snapshotRows().find((r) => r.kind === 'meta').data.settings;
+  const leaked = ['gcal', 'cloud', 'cursor', 'tzSeen', 'canvasFeedAt', 'trackingAt'].filter((k) => k in synced);
+  check('the synced settings hold no device key', leaked.length === 0, leaked.join());
+  check('...while a listed one still travels', synced.weekStart === 1, JSON.stringify(synced));
+});
+
 suite('Safety — a row that lands comes back out the same', async ({ check }) => {
   /* Two devices must agree on a row's bytes, or each push comes straight
      back: A sends, B keeps it in a different shape, B's next snapshot no
@@ -289,17 +275,24 @@ suite('Safety — a row that lands comes back out the same', async ({ check }) =
      a ping-pong on every push, for ever. The hash is the JSON, so key order
      counts, and so does a field one side fills in and the other leaves out. */
   const a = await storeWith(base({
-    areas: [{
-      id: 'c1', name: 'Thermo', category: 'course', order: 0, freewrite: 'hi',
-      schedule: [{ day: 1, start: '10:30', end: '11:35', tz: 'America/New_York' }]
-    }],
+    areas: [
+      {
+        id: 'c1', name: 'Thermo', category: 'course', order: 0, freewrite: 'hi',
+        schedule: [{ days: [1], start: '10:30', end: '11:35', tz: 'America/New_York' }]
+      },
+      // a course on its own days: the keys are there only when set
+      { id: 'c2', name: 'Seminar', category: 'course', order: 1, from: '2026-09-14', until: '2026-10-19', schedule: [] }
+    ],
     items: [
       {
         id: 'i1', areaId: 'c1', title: 'Read', type: 'task',
         plan: { date: '2026-09-03', start: '09:00', mins: 60 },
         repeat: { freq: 'weekly', ex: {} }, subtasks: [{ id: 's1', text: 'p1', done: false }]
       },
-      { id: 'i2', areaId: 'c1', title: 'PS1', type: 'homework', due: '2026-09-10', dueTime: '23:59', estMins: 90 }
+      { id: 'i2', areaId: 'c1', title: 'PS1', type: 'homework', due: '2026-09-10', dueTime: '23:59', estMins: 90 },
+      // from Canvas: one moved by hand (null), one still where the import put it
+      { id: 'i3', areaId: 'c1', title: 'PS2', due: '2026-09-17', canvasId: 'cv-3', canvasCourse: 'MEE2340', canvasArea: null },
+      { id: 'i4', areaId: 'c1', title: 'PS3', due: '2026-09-24', canvasId: 'cv-4', canvasCourse: 'MEE2340', canvasArea: 'c1' }
     ],
     cards: [{ id: 'k1', areaId: null, text: 'a card' }],
     links: [{ id: 'l1', url: 'https://x.y/z', title: 'x', areaId: null }],
@@ -335,6 +328,19 @@ suite('Safety — a row that lands comes back out the same', async ({ check }) =
   const drift = sent.filter((r) => again.get(key(r)) !== hash(r.data));
   check('...and after a reload, or every restart would push the whole store', drift.length === 0,
     drift.map(key).join());
+
+  // the keys that are only there when set: absent stays absent, null stays
+  // null, set stays set — a key filled in on one side is a row that never settles
+  const c1 = c.areaById('c1'), c2 = c.areaById('c2');
+  check('an area with no days of its own comes back without the keys', !('from' in c1) && !('until' in c1),
+    JSON.stringify([c1.from, c1.until]));
+  check('...and one with them keeps them', c2.from === '2026-09-14' && c2.until === '2026-10-19',
+    JSON.stringify([c2.from, c2.until]));
+  const i1 = c.itemById('i1'), i3 = c.itemById('i3'), i4 = c.itemById('i4');
+  check('an item never from Canvas comes back without canvasArea', !('canvasArea' in i1) && !('canvasCourse' in i1),
+    JSON.stringify([i1.canvasArea, i1.canvasCourse]));
+  check('one moved by hand keeps its null', 'canvasArea' in i3 && i3.canvasArea === null, JSON.stringify(i3.canvasArea));
+  check('one still where the import put it keeps the area', i4.canvasArea === 'c1', JSON.stringify(i4.canvasArea));
 });
 </script>
 </body>

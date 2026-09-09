@@ -43,6 +43,15 @@ suite('Repeat — the rule', async ({ check }) => {
     check('nothing before the anchor',
       repeatDates(R({ freq: 'daily' }), '2026-09-07', '2026-09-01', '2026-09-08').join()
       === '2026-09-07,2026-09-08');
+
+    // a step counted in hours would skip or repeat the day the clocks go
+    // back, and one counted inside the month would fall off the year end
+    const fall = repeatDates(R({ freq: 'daily' }), '2026-10-30', '2026-10-30', '2026-11-03');
+    check('the day the clocks go back is one day, not two or none',
+      fall.join() === '2026-10-30,2026-10-31,2026-11-01,2026-11-02,2026-11-03', fall.join());
+    const turn = repeatDates(R({ freq: 'daily' }), '2026-12-30', '2026-12-30', '2027-01-02');
+    check('the year end is one step too',
+      turn.join() === '2026-12-30,2026-12-31,2027-01-01,2027-01-02', turn.join());
   }
 
   /* ---- weekly, which is the one people actually use ---- */
@@ -73,8 +82,6 @@ suite('Repeat — the rule', async ({ check }) => {
     const m = repeatDates(R({ freq: 'monthly' }), '2026-01-31', '2026-01-01', '2026-06-30');
     check('monthly on the 31st skips the months without one',
       m.join() === '2026-01-31,2026-03-31,2026-05-31', m.join());
-    check('...rather than sliding to the 1st or the 28th',
-      !m.some((d) => d.endsWith('-03-01') || d.endsWith('-02-28')));
 
     check('monthly on a day every month has is every month',
       repeatDates(R({ freq: 'monthly' }), '2026-09-15', '2026-09-01', '2026-12-31').length === 4);
@@ -110,8 +117,9 @@ suite('Repeat — the rule', async ({ check }) => {
       === '2026-09-07,2026-09-09,2026-09-14');
     check('a count of 0 is no count',
       repeatDates(R({ freq: 'daily', count: 0 }), '2026-09-07', '2026-09-07', '2026-09-11').length === 5);
-    check('...and is not said', !describeRepeat(R({ freq: 'daily', count: 0 }), '2026-09-07').includes('times'),
-      describeRepeat(R({ freq: 'daily', count: 0 }), '2026-09-07'));
+    check('an until is said as the last day',
+      describeRepeat(R({ freq: 'daily', until: '2026-09-09' }), '2026-09-07') === 'Every day, until 2026-09-09',
+      describeRepeat(R({ freq: 'daily', until: '2026-09-09' }), '2026-09-07'));
     check('a count typed as text still counts',
       repeatDates(R({ freq: 'daily', count: '2' }), '2026-09-07', '2026-09-01', '2026-12-31').length === 2);
   }
@@ -216,6 +224,25 @@ suite('Repeat — occurrences', async ({ check }) => {
     check('an id for nothing is null', s.itemById('nope@2026-09-14') === null);
   }
 
+  /* ---- an anchor on a day the rule does not name ---- */
+
+  {
+    // planned on a Tuesday, repeating Mondays and Wednesdays: the anchor is
+    // where the count starts, not an occurrence of its own
+    s.state.items.length = 0;
+    s.upsertItem({
+      id: 'odd', title: 'Odd one', areaId: 'c1', type: 'meeting',
+      plan: { date: '2026-09-08', start: '09:00', mins: 60 },
+      repeat: { freq: 'weekly', every: 1, days: [1, 3], until: null, count: null, ex: {} }
+    });
+    check('the anchor day is not an occurrence when the rule skips it',
+      s.itemById('odd@2026-09-08') === null);
+    check('...so nothing is drawn there', s.itemsPlannedOn('2026-09-08').length === 0);
+    check('the first occurrence is the next day the rule names',
+      s.itemsPlannedOn('2026-09-09').map((o) => o.id).join() === 'odd@2026-09-09',
+      s.itemsPlannedOn('2026-09-09').map((o) => o.id).join());
+  }
+
   /* ---- ticking one ---- */
 
   {
@@ -258,6 +285,19 @@ suite('Repeat — occurrences', async ({ check }) => {
     check('...and the one before it is not', s.itemsPlannedOn('2026-09-16').length === 1);
   }
 
+  /* ---- ending a run before it began ---- */
+
+  {
+    // a rule that never fires would sit in every list and every sync unseen
+    seed();
+    s.endSeriesBefore(s.itemById('sync'), '2026-09-07');
+    check('ending a series at its first day deletes it',
+      s.state.items.length === 0, String(s.state.items.length));
+    seed();
+    s.endSeriesBefore(s.itemById('sync'), '2026-09-01');
+    check('...and so does ending it before that', s.itemById('sync') === null);
+  }
+
   /* ---- what an occurrence owns, and what it does not ---- */
 
   {
@@ -269,6 +309,47 @@ suite('Repeat — occurrences', async ({ check }) => {
     check('an area belongs to the series whichever day you changed it from',
       item.areaId === null && s.itemById('sync@2026-09-16').areaId === null);
     check('...and so do notes', item.notes === 'once');
+  }
+
+  /* ---- an occurrence is a copy ---- */
+
+  {
+    // the screens hold copies; a write to one goes nowhere, which is why
+    // every edit goes through upsertItem, toggleItem or deleteItem
+    const item = seed();
+    s.itemById('sync@2026-09-14').done = true;
+    check('writing to an occurrence changes nothing',
+      s.itemById('sync@2026-09-14').done === false);
+    check('...and leaves no exception behind', !item.repeat.ex['2026-09-14']);
+  }
+
+  /* ---- one day that is the other kind ---- */
+
+  {
+    // a Monday standup owed by five instead of held: `mode` on its exception
+    seed();
+    s.upsertItem({ id: 'sync@2026-09-14', plan: null, due: '2026-09-14', dueTime: '17:00' });
+    check('one day of a block series can be owed instead',
+      s.itemsDueOn('2026-09-14').map((o) => o.id).join() === 'sync@2026-09-14',
+      s.itemsDueOn('2026-09-14').map((o) => o.id).join());
+    check('...and is off the calendar that day', s.itemsPlannedOn('2026-09-14').length === 0);
+    check('...at the time it was owed', s.itemById('sync@2026-09-14').dueTime === '17:00');
+    check('...while the next day of the series is still a block',
+      s.itemsPlannedOn('2026-09-16').length === 1 && s.itemsDueOn('2026-09-16').length === 0);
+
+    // and the other way: one Friday's reading booked as an afternoon
+    s.upsertItem({
+      id: 'read', title: 'Weekly reading', areaId: 'c1', due: '2026-09-04', plan: null,
+      repeat: { freq: 'weekly', every: 1, days: [5], until: null, count: null, ex: {} }
+    });
+    s.upsertItem({ id: 'read@2026-09-11', plan: { date: '2026-09-11', start: '14:00', mins: 45 } });
+    check('one day of a deadline series can be booked as a block',
+      s.itemsPlannedOn('2026-09-11').map((o) => o.id).join() === 'read@2026-09-11',
+      s.itemsPlannedOn('2026-09-11').map((o) => o.id).join());
+    check('...and is not owed that day', s.itemsDueOn('2026-09-11').length === 0);
+    check('...for the time it was given',
+      s.itemById('read@2026-09-11').plan.start === '14:00' && s.itemById('read@2026-09-11').plan.mins === 45,
+      JSON.stringify(s.itemById('read@2026-09-11').plan));
   }
 
   /* ---- the selectors that count ---- */
@@ -298,11 +379,13 @@ suite('Repeat — occurrences', async ({ check }) => {
     const item = seed();
     s.toggleItem('sync@2026-09-07', true);
     s.upsertItem({ id: 'sync@2026-09-09', plan: { date: '2026-09-10' } });
+    s.toggleItem('sync@2026-09-09', true);
     s.sweepDone('2026-09-30');
     check('an old tick is swept', !item.repeat.ex['2026-09-07'],
       'a term of ticking would grow the row without end');
-    check('...but a moved day is not', item.repeat.ex['2026-09-09'].date === '2026-09-10',
-      'that one is not just a tick, and losing it would move the day back');
+    check('...but a moved day is not, ticked or not',
+      item.repeat.ex['2026-09-09']?.date === '2026-09-10',
+      'the exception holds more than the tick, and losing it would move the day back');
 
     s.toggleItem('sync@2026-10-05', true);
     s.sweepDone('2026-10-01');

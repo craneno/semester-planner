@@ -9,9 +9,9 @@
 <script type="module">
 /* A band on the chart is the same object either way; `kind` decides whether it
    is asked for deliverables. What is worth testing is not the drawing — that
-   lives in chart.test.html — but that a band survives a reload, that it reaches
-   another device without a new Postgres row kind, and that the deliverables it
-   carries cannot rot into half-objects. */
+   lives in chart.test.html — but that a band survives a reload and that the
+   deliverables it carries cannot rot into half-objects. What reaches another
+   device is checked with every other row kind, in safety.test.html. */
 import { suite, storeWith } from './harness.js';
 
 const base = (over = {}) => ({
@@ -80,7 +80,8 @@ suite('Focuses and sprints — bands on the chart', async ({ check }) => {
     const p = s.sprintById('s1');
 
     check('deliverables come back in order',
-      p.deliverables.map((d) => d.text)[0] === 'Three hot fires logged by Oct 12');
+      p.deliverables.map((d) => d.text).join() === 'Three hot fires logged by Oct 12,Data reduced,No id yet',
+      p.deliverables.map((d) => d.text).join());
     check('a blank one is dropped', !p.deliverables.some((d) => !d.text.trim()));
     check('one with no id is given one', p.deliverables[2].id && p.deliverables[2].text === 'No id yet');
     check('done survives', p.deliverables[0].done === true && p.deliverables[1].done === false);
@@ -93,8 +94,6 @@ suite('Focuses and sprints — bands on the chart', async ({ check }) => {
     check('a sprint with no list reports no progress',
       s.sprintProgress(s.sprintById('s1')) === null,
       'zero would draw an empty bar and read as failure');
-    check('a focus reports none either',
-      s.sprintProgress(s.upsertSprint({ areaId: 'p1', start: '2026-09-01', end: '2026-09-08' })) === null);
 
     s.commit(() => s.addDeliverable('s1', '  Nozzle drawing released  '));
     check('a deliverable is added trimmed',
@@ -120,14 +119,18 @@ suite('Focuses and sprints — bands on the chart', async ({ check }) => {
     check('...and is a focus unless it is asked to be a sprint', made.kind === 'focus');
     check('...and remembers when it was made', !!made.createdAt);
 
+    // a stamp is milliseconds, and the edit would land in the same one
+    const stamp = made.updatedAt;
+    await new Promise((r) => setTimeout(r, 2));
     s.commit(() => s.upsertSprint({ id: made.id, kind: 'sprint', title: 'Midterms week' }));
     check('an edit lands on the same band', s.state.sprints.length === 1);
     check('...and keeps the dates it was not asked about',
       s.sprintById(made.id).start === '2026-10-05');
-    check('changing it stamps a new time', s.sprintById(made.id).updatedAt >= made.createdAt);
+    check('changing it stamps a new time', s.sprintById(made.id).updatedAt > stamp,
+      `${stamp} -> ${s.sprintById(made.id).updatedAt}`);
 
     s.commit(() => s.upsertSprint({ id: made.id, start: '2026-11-01', end: '2026-10-01' }));
-    check('dragging the end before the start turns it round, it does not vanish',
+    check('an edit that drags the end before the start is turned round by upsertSprint too, not only by migrate',
       s.sprintById(made.id).start === '2026-10-01' && s.sprintById(made.id).end === '2026-11-01');
 
     s.commit(() => s.deleteSprint(made.id));
@@ -152,34 +155,6 @@ suite('Focuses and sprints — bands on the chart', async ({ check }) => {
     check('deleting an area takes its bands with it',
       s.state.sprints.map((p) => p.id).join() === 's3',
       'a band is drawn in its area lane and nowhere else — an orphan is unreachable');
-  }
-
-  /* ---- reaching another device ---- */
-
-  {
-    // a row each since schema 20 — they rode in meta before, one row with no
-    // clock, and a whole chart could be lost to one stale push
-    const s = await storeWith(base({ sprints: [band({ kind: 'sprint' })] }));
-    const rows = s.snapshotRows();
-
-    const row = rows.find((r) => r.kind === 'sprint');
-    check('a band is a row of its own', row && row.id === 's1' && row.data.kind === 'sprint');
-    check('...with a clock the sync layer can read', s.rowStamp('sprint', 's1') === s.state.sprints[0].updatedAt);
-    const meta = rows.find((r) => r.kind === 'meta');
-    check('meta no longer carries them', meta.data.sprints === undefined);
-    check('no device credential rides in meta',
-      meta.data.settings.gcal === undefined && meta.data.settings.cloud === undefined
-      && meta.data.settings.cursor === undefined);
-
-    s.applyRow({ kind: 'sprint', id: 'sX', data: band({ id: 'sX', title: 'From the phone' }) });
-    check('an inbound band lands beside the rest', s.state.sprints.map((p) => p.id).join() === 's1,sX');
-    check('...and a tombstone takes one away',
-      s.applyRow({ kind: 'sprint', id: 'sX', deleted: true, data: {} }) === true
-      && s.state.sprints.map((p) => p.id).join() === 's1');
-
-    // a device still on schema 19 sends them inside meta, empty or not
-    s.applyRow({ kind: 'meta', id: 'meta', data: { habits: [], sprints: [] } });
-    check('an older device’s meta cannot wipe the chart', s.state.sprints.length === 1);
   }
 });
 </script>
