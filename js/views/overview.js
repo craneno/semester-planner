@@ -15,7 +15,7 @@ import {
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
-import { openEvent } from '../eventedit.js';
+import { openEvent, openClass } from '../eventedit.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
@@ -157,7 +157,10 @@ function todayColumn(day, { navigate, go }) {
 
   for (const c of classesOn(day)) {
     const s = toMin(c.start), e = toMin(c.end) || s + 60;
-    lanes.append(block({ start: s, mins: e - s, cls: 'class', color: c.color, title: c.title, sub: c.location }));
+    lanes.append(block({
+      start: s, mins: e - s, cls: 'class', color: c.color, title: c.title, sub: c.location,
+      onclick: () => openClass(c, day, { navigate })
+    }));
   }
   for (const e of eventsOn(day).filter((x) => !x.allDay && x.start)) {
     const s = toMin(e.start), en = toMin(e.end) || s + 60;

@@ -418,6 +418,35 @@ suite('Calendar — Google\'s own events, edited in place', async ({ check }) =>
     const del = writes()[writes().length - 1];
     check('...and off Google with one DELETE', del.method === 'DELETE' && /\/events\/heads$/.test(del.url) && s.state.outbox.length === 0, JSON.stringify(del));
 
+    // every time of a repeating event: one day stands for the rule
+    const series = () => s.state.events.filter((x) => x.recurringEventId === 'lab');
+    s.state.events = [
+      ev({ id: 'lab_1', recurringEventId: 'lab', title: 'Lab', date: '2026-09-08', start: '14:00', end: '15:00', endDate: '2026-09-08' }),
+      ev({ id: 'lab_2', recurringEventId: 'lab', title: 'Lab', date: '2026-09-15', start: '14:00', end: '15:00', endDate: '2026-09-15' }),
+      ev({ id: 'other', title: 'Other', date: '2026-09-15', start: '14:00', end: '15:00', endDate: '2026-09-15' })
+    ];
+    const rule = { id: 'lab', summary: 'Lab', start: { dateTime: '2026-09-01T14:00:00-04:00' }, end: { dateTime: '2026-09-01T15:00:00-04:00' } };
+    answer = (init) => init.method === 'GET'
+      ? { ok: true, status: 200, json: async () => rule, text: async () => '' }
+      : { ok: true, status: 200, json: async () => ({ id: 'lab' }), text: async () => '' };
+    check('every time: each day of it changes here at once',
+      G.editEvent('lab_1', { title: 'Lab, moved', start: '16:00', end: '17:00' }, { all: true })
+      && series().every((x) => x.title === 'Lab, moved' && x.start === '16:00' && x.end === '17:00')
+      && series().map((x) => x.date).join() === '2026-09-08,2026-09-15', JSON.stringify(series()));
+    check('...and not another event at the same time', s.state.events.find((x) => x.id === 'other').title === 'Other');
+    check('...one op in line, for the rule', s.state.outbox.length === 1 && s.state.outbox[0].eventId === 'lab' && s.state.outbox[0].series === true, JSON.stringify(s.state.outbox));
+    const before = calls.length;
+    await tick(450);
+    const sent = calls.slice(before);
+    check('the rule is read first, for the day it starts', sent[0]?.method === 'GET' && /\/events\/lab$/.test(sent[0].url), JSON.stringify(sent.map((x) => x.method + ' ' + x.url)));
+    check('...then changed on that day, at the new time', sent[1]?.method === 'PATCH' && /\/events\/lab$/.test(sent[1].url)
+      && sent[1].body.summary === 'Lab, moved' && /^2026-09-01T16:00/.test(sent[1].body.start.dateTime) && /^2026-09-01T17:00/.test(sent[1].body.end.dateTime), JSON.stringify(sent[1]?.body));
+    check('delete every time takes each day off the screen', G.removeEvent('lab_2', { all: true }) && series().length === 0 && s.state.events.some((x) => x.id === 'other'));
+    answer = () => ({ ok: true, status: 204, json: async () => null, text: async () => '' });
+    await tick(450);
+    const d2 = writes()[writes().length - 1];
+    check('...and the rule off Google', d2.method === 'DELETE' && /\/events\/lab$/.test(d2.url), JSON.stringify(d2));
+
     seed();
     g.pushPlans = false;
     const n = writes().length;

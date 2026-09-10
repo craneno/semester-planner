@@ -412,8 +412,12 @@ function applyIncoming(raw, { replace, win }) {
   // an edit still in line is not undone by a pull that got in first: the
   // queue is laid over what came down, and the send will make Google agree
   for (const op of state.outbox) {
-    if (op.kind === 'event' && byId.has(op.eventId)) byId.set(op.eventId, { ...byId.get(op.eventId), ...op.patch });
-    if (op.kind === 'event-delete') byId.delete(op.eventId);
+    if (op.kind === 'event' && op.series) { for (const x of byId.values()) if (x.recurringEventId === op.eventId) seriesPatch(x, op.patch); }
+    else if (op.kind === 'event' && byId.has(op.eventId)) byId.set(op.eventId, { ...byId.get(op.eventId), ...op.patch });
+    if (op.kind === 'event-delete') {
+      byId.delete(op.eventId);
+      if (op.series) for (const [k, x] of byId) if (x.recurringEventId === op.eventId) byId.delete(k);
+    }
   }
 
   state.events = Array.from(byId.values())
@@ -472,14 +476,39 @@ export function eventBodyOf(e) {
   return { ...when, summary: e.title };
 }
 
+/** What a change to every time of a repeating event does to one of its days:
+ *  the name and the time of day; the day and all-day are each one's own. */
+function seriesPatch(x, patch) {
+  if (patch.title != null) x.title = patch.title;
+  if (x.allDay) return;
+  if (patch.start) x.start = patch.start;
+  if (patch.end) x.end = patch.end;
+  if (x.start && x.end) x.endDate = toMin(x.end) <= toMin(x.start) ? addDays(x.date, 1) : x.date;
+}
+
 /**
  * Change one of Google's events: any of `title`, `date`, `start`, `end`,
- * `allDay`. A timed end at or before its start is the next morning's.
+ * `allDay`. A timed end at or before its start is the next morning's. With
+ * `all`, one day of a repeating event stands for every day of it, and the
+ * change goes to the rule itself — the name and the time of day.
  * @returns {boolean} false when there is no such event, or two-way sync is off
  */
-export function editEvent(id, fields) {
+export function editEvent(id, fields, { all = false } = {}) {
   const e = state.events.find((x) => x.id === id);
   if (!e || !canEditEvents()) return false;
+  if (all && e.recurringEventId) {
+    const parent = e.recurringEventId;
+    const patch = {};
+    if (fields.title != null) patch.title = fields.title;
+    if (fields.start) patch.start = fields.start;
+    if (fields.end) patch.end = fields.end;
+    commit(() => { for (const x of state.events) if (x.recurringEventId === parent) seriesPatch(x, patch); }, { source: 'editor' });
+    const key = `event:${parent}`;
+    const prev = state.outbox.find((o) => o.itemId === key);
+    queue({ kind: 'event', itemId: key, eventId: parent, series: true, patch: { ...(prev?.patch || {}), ...patch } });
+    scheduleFlush();
+    return true;
+  }
   const next = { ...e, ...fields };
   if (next.allDay) { next.start = null; next.end = null; next.endDate = addDays(next.date, 1); }
   else next.endDate = toMin(next.end) <= toMin(next.start) ? addDays(next.date, 1) : next.date;
@@ -492,16 +521,52 @@ export function editEvent(id, fields) {
   return true;
 }
 
-/** Take one of Google's events off the calendar: here now, there soon. */
-export function removeEvent(id) {
-  if (!canEditEvents() || !state.events.some((x) => x.id === id)) return false;
-  commit(() => { state.events = state.events.filter((x) => x.id !== id); }, { source: 'editor' });
-  queue({ kind: 'event-delete', itemId: `event:${id}`, eventId: id, ids: [id] });
+/** Take one of Google's events off the calendar: here now, there soon.
+ *  With `all`, every time of a repeating one — the rule itself goes. */
+export function removeEvent(id, { all = false } = {}) {
+  const e = state.events.find((x) => x.id === id);
+  if (!canEditEvents() || !e) return false;
+  const parent = all && e.recurringEventId;
+  commit(() => {
+    state.events = state.events.filter((x) => x.id !== id && !(parent && x.recurringEventId === parent));
+  }, { source: 'editor' });
+  if (parent) queue({ kind: 'event-delete', itemId: `event:${parent}`, eventId: parent, series: true, ids: [parent] });
+  else queue({ kind: 'event-delete', itemId: `event:${id}`, eventId: id, ids: [id] });
   scheduleFlush();
   return true;
 }
 
+/* Every time of a repeating event: the rule's own start is its first day's,
+   so a new time of day is written on that day, read back first — written on
+   any other, Google would move the whole run there. */
+async function pushSeriesEdit(op) {
+  if (!navigator.onLine || !isSignedIn()) { queue(op); return; }
+  const calId = encodeURIComponent(cfg().calendarId || 'primary');
+  try {
+    const rule = await api(`/calendars/${calId}/events/${encodeURIComponent(op.eventId)}`);
+    const body = {};
+    if (op.patch.title != null) body.summary = op.patch.title;
+    const first = rule?.start?.dateTime ? fromRfc3339(rule.start.dateTime) : null;
+    if (first && (op.patch.start || op.patch.end)) {
+      const st = op.patch.start || first.time;
+      const was = rule.end?.dateTime ? fromRfc3339(rule.end.dateTime) : null;
+      const en = op.patch.end || was?.time || fromMin(toMin(st) + 60);
+      const endDate = toMin(en) <= toMin(st) ? addDays(first.date, 1) : first.date;
+      body.start = { dateTime: toRfc3339(first.date, st), timeZone: tz() };
+      body.end = { dateTime: toRfc3339(endDate, en), timeZone: tz() };
+    }
+    if (Object.keys(body).length) await api(`/calendars/${calId}/events/${encodeURIComponent(op.eventId)}`, { method: 'PATCH', body });
+  } catch (err) {
+    if (gone(err)) { state.events = state.events.filter((x) => x.recurringEventId !== op.eventId); commit(null, { source: 'gcal' }); return; }
+    queue(op);
+    if (isRateLimit(err)) { pauseAfter(err); return; }
+    gcal.lastError = err;
+    setStatus('error', err.message);
+  }
+}
+
 async function pushEvent(op) {
+  if (op.series) return pushSeriesEdit(op);
   const e = state.events.find((x) => x.id === op.eventId);
   if (!e) return;   // gone meanwhile: its delete is in line, or a pull took it
   if (!navigator.onLine || !isSignedIn()) { queue(op); return; }

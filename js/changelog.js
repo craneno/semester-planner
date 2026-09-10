@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v56', date: '2026-09-10',
+    title: 'This day, or every time',
+    notes: [
+      'A class block now opens that one day of the class: move it, put it in another room, or cancel it for the day, with an Undo. Every week is a step on from there, into the course’s meeting times.',
+      'A repeating Google event asks the same: only this day, or every time it repeats. Every time changes the name and the time of day on Google’s rule itself, and Delete every time takes the rule away.'
+    ]
+  },
+  {
     version: 'v55', date: '2026-09-10',
     title: 'Google’s events, in hand',
     notes: [

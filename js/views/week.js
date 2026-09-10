@@ -10,8 +10,7 @@ import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem, editEvent, canEditEvents } from '../gcal.js';
-import { openEvent } from '../eventedit.js';
-import { openAreaEditor } from './areas.js';
+import { openEvent, openClass } from '../eventedit.js';
 import { moveItem } from '../actions.js';
 
 let anchor = today();          // any date inside the shown week
@@ -188,9 +187,9 @@ export function renderWeek(root, { navigate } = {}) {
           top: top(s) + 'px', height: hgt + 'px',
           '--c': c.color, '--bg': hexAlpha(c.color, 0.18)
         },
-        title: `${c.title} · ${fmtTime(c.start, hour12)}–${fmtTime(c.end, hour12)}${c.location ? ' · ' + c.location : ''}`,
-        // a class is the area's schedule: the click opens that, on the times
-        onclick: () => openAreaEditor(c.areaId, navigate, { focus: 'meetings' })
+        title: `${c.title} · ${fmtTime(c.start, hour12)}–${fmtTime(c.end, hour12)}${c.location ? ' · ' + c.location : ''}${c.moved ? ' · moved this day' : ''}`,
+        // this one day of the class; every week is a step on from there
+        onclick: () => openClass(c, d, { navigate })
       },
       h('div', { class: 't' }, fmtTime(c.start, hour12)),
       h('div', { class: 'n' }, c.title)));

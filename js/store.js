@@ -480,21 +480,45 @@ export function classesOn(date) {
     if (a.archived) continue;
     const { start, end } = termOf(a);
     if (date < start || date > end) continue;
-    for (const m of a.schedule || []) {
+    for (const [slot, m] of (a.schedule || []).entries()) {
       if (!(m.days || []).includes(dow)) continue;
-      const s = toMin(m.start), e = toMin(m.end);
+      // one day of the rule can be cancelled or moved: an exception on the
+      // slot keyed by the day, like repeat.ex on an item (setClassDay)
+      const x = m.ex?.[date];
+      if (x === null) continue;
+      const st = x?.start || m.start, en = x?.end || m.end;
+      const s = toMin(st), e = toMin(en);
       out.push({
-        kind: 'class', areaId: a.id, title: a.name, color: a.color,
-        start: m.start,
+        kind: 'class', areaId: a.id, slot, title: a.name, color: a.color,
+        start: st,
         // one that runs past midnight ends this day at midnight, for every
         // screen that draws it; read as written it was a sliver, ending
         // before it began
-        end: e == null ? fromMin(s + 60) : e > s ? m.end : '24:00',
-        location: m.location || a.location || ''
+        end: e == null ? fromMin(s + 60) : e > s ? en : '24:00',
+        location: (x?.location ?? m.location) || a.location || '',
+        moved: !!x
       });
     }
   }
   return out.sort((x, y) => toMin(x.start) - toMin(y.start));
+}
+
+/**
+ * One day of a class, as an exception on its slot: `null` cancels that day,
+ * `{ start, end, location? }` moves it, `undefined` puts the rule back. The
+ * area is stamped, so the change syncs as the area row it lives in.
+ * @returns {boolean} false when there is no such slot
+ */
+export function setClassDay(areaId, slot, date, value) {
+  const a = areaById(areaId);
+  const m = a?.schedule?.[slot];
+  if (!m) return false;
+  const ex = { ...(m.ex || {}) };
+  if (value === undefined) delete ex[date];
+  else ex[date] = value === null ? null : { ...value };
+  if (Object.keys(ex).length) m.ex = ex; else delete m.ex;
+  a.updatedAt = new Date().toISOString();
+  return true;
 }
 
 /* ---------------- a schedule that has moved ----------------
@@ -516,6 +540,14 @@ function shiftSlot(m, mins) {
   m.start = fromMin(((moved % 1440) + 1440) % 1440);
   if (dur !== null) m.end = fromMin((toMin(m.start) + dur) % 1440);
   if (roll) m.days = (m.days || []).map((d) => (((d + roll) % 7) + 7) % 7);
+  // a day moved by hand was written in the same clock, so it moves too
+  for (const x of Object.values(m.ex || {})) {
+    if (!x?.start) continue;
+    const xs = toMin(x.start), xe = toMin(x.end);
+    const xd = Number.isFinite(xe) ? (xe - xs + 1440) % 1440 : null;
+    x.start = fromMin((((xs + mins) % 1440) + 1440) % 1440);
+    if (xd !== null) x.end = fromMin((toMin(x.start) + xd) % 1440);
+  }
 }
 
 /**
