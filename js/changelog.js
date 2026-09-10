@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v55', date: '2026-09-10',
+    title: 'Google’s events, in hand',
+    notes: [
+      'A Google Calendar event can be changed here: click it for its name, day and times, or drag it on the week like a block. The change goes to Google the same way a block does, with an Undo, and the rest of the event — guests, colour, description — is left alone. Delete is there too, behind a check.',
+      'A class block on the week opens its course’s meeting times.'
+    ]
+  },
+  {
     version: 'v54', date: '2026-09-09',
     title: 'Dinner at seven, not at dawn',
     notes: [

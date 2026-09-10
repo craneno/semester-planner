@@ -4,7 +4,7 @@
 // everything it serves came from the same deploy. Anything not in the shell
 // (Google APIs, PDF.js) goes straight to the network.
 
-const VERSION = 'planner-v54';
+const VERSION = 'planner-v55';
 const SHELL = [
   './',
   './index.html',
@@ -27,6 +27,7 @@ const SHELL = [
   './js/util.js',
   './js/ui.js',
   './js/editor.js',
+  './js/eventedit.js',
   './js/gcal.js',
   './js/cloud.js',
   './js/appearance.js',

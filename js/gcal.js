@@ -409,6 +409,13 @@ function applyIncoming(raw, { replace, win }) {
     byId.set(n.id, n);
   }
 
+  // an edit still in line is not undone by a pull that got in first: the
+  // queue is laid over what came down, and the send will make Google agree
+  for (const op of state.outbox) {
+    if (op.kind === 'event' && byId.has(op.eventId)) byId.set(op.eventId, { ...byId.get(op.eventId), ...op.patch });
+    if (op.kind === 'event-delete') byId.delete(op.eventId);
+  }
+
   state.events = Array.from(byId.values())
     .filter((e) => e.date >= win.start && e.date <= win.end);
   return touched || JSON.stringify(state.events) !== was;
@@ -443,6 +450,72 @@ export function eventBodyFor(item) {
     extendedProperties: { private: { plannerItemId: item.id } },
     source: { title: 'Semester Planner', url: location.origin + location.pathname }
   };
+}
+
+/* ---------------- Google's own events ----------------
+   An event read off Google is Google's: drawn outlined, and it stays so. An
+   edit here is sent to it in place — the name and the when, nothing else of
+   it touched — through the same queue as a block, keyed `event:<id>`, so a
+   run of edits is one PATCH and a delete after them is one DELETE. The
+   mirror is patched at once, so the screen says what was asked. */
+
+export const canEditEvents = () => !!(cfg().enabled && cfg().pushPlans && isConfigured());
+
+/** What Google is told about one of its own events. */
+export function eventBodyOf(e) {
+  const when = e.allDay
+    ? { start: { date: e.date }, end: { date: e.endDate > e.date ? e.endDate : addDays(e.date, 1) } }
+    : {
+      start: { dateTime: toRfc3339(e.date, e.start), timeZone: tz() },
+      end: { dateTime: toRfc3339(e.endDate || e.date, e.end), timeZone: tz() }
+    };
+  return { ...when, summary: e.title };
+}
+
+/**
+ * Change one of Google's events: any of `title`, `date`, `start`, `end`,
+ * `allDay`. A timed end at or before its start is the next morning's.
+ * @returns {boolean} false when there is no such event, or two-way sync is off
+ */
+export function editEvent(id, fields) {
+  const e = state.events.find((x) => x.id === id);
+  if (!e || !canEditEvents()) return false;
+  const next = { ...e, ...fields };
+  if (next.allDay) { next.start = null; next.end = null; next.endDate = addDays(next.date, 1); }
+  else next.endDate = toMin(next.end) <= toMin(next.start) ? addDays(next.date, 1) : next.date;
+  const patch = { title: next.title, date: next.date, start: next.start, end: next.end, allDay: !!next.allDay, endDate: next.endDate };
+  commit(() => Object.assign(e, patch), { source: 'editor' });
+  const key = `event:${id}`;
+  const prev = state.outbox.find((o) => o.itemId === key);
+  queue({ kind: 'event', itemId: key, eventId: id, patch: { ...(prev?.patch || {}), ...patch } });
+  scheduleFlush();
+  return true;
+}
+
+/** Take one of Google's events off the calendar: here now, there soon. */
+export function removeEvent(id) {
+  if (!canEditEvents() || !state.events.some((x) => x.id === id)) return false;
+  commit(() => { state.events = state.events.filter((x) => x.id !== id); }, { source: 'editor' });
+  queue({ kind: 'event-delete', itemId: `event:${id}`, eventId: id, ids: [id] });
+  scheduleFlush();
+  return true;
+}
+
+async function pushEvent(op) {
+  const e = state.events.find((x) => x.id === op.eventId);
+  if (!e) return;   // gone meanwhile: its delete is in line, or a pull took it
+  if (!navigator.onLine || !isSignedIn()) { queue(op); return; }
+  const calId = encodeURIComponent(cfg().calendarId || 'primary');
+  try {
+    await api(`/calendars/${calId}/events/${encodeURIComponent(e.id)}`, { method: 'PATCH', body: eventBodyOf(e) });
+  } catch (err) {
+    // Google no longer has it: nothing to change, and nothing to show
+    if (gone(err)) { state.events = state.events.filter((x) => x.id !== e.id); commit(null, { source: 'gcal' }); return; }
+    queue(op);
+    if (isRateLimit(err)) { pauseAfter(err); return; }
+    gcal.lastError = err;
+    setStatus('error', err.message);
+  }
 }
 
 /* ---------------- the queue ----------------
@@ -616,6 +689,8 @@ async function deleteGone(op) {
 
 /** The push itself, now. Throws nothing: a failure re-queues the op. */
 async function pushNow(op) {
+  if (op.kind === 'event') return pushEvent(op);
+  if (op.kind === 'event-delete') return deleteGone(op);
   const item = seriesById(op.itemId);
   if (!cfg().enabled || !cfg().pushPlans || !isConfigured()) return;
   // gone from state: only a delete that brought its event ids along has

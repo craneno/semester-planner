@@ -15,6 +15,7 @@ import {
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
+import { openEvent } from '../eventedit.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
 import { pushItem } from '../gcal.js';
@@ -163,7 +164,7 @@ function todayColumn(day, { navigate, go }) {
     lanes.append(block({
       start: s, mins: en - s, cls: 'ext', color: null,
       title: e.title, sub: e.location || 'Google Calendar',
-      onclick: () => e.link && window.open(e.link, '_blank', 'noopener')
+      onclick: () => openEvent(e.id, { after: navigate })
     }));
   }
   /* Planned work is the only thing here that can be taken hold of: a class

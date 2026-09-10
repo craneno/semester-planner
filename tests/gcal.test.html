@@ -343,6 +343,98 @@ suite('Calendar — read from the day the calendar began', async ({ check }) => 
     s.state.events = [];
   }
 });
+
+/* Google's own events, changed in place. What has to hold: the mirror says
+   the change at once; a run of edits is one PATCH, with the name and the
+   when and nothing else; a pull that gets in first cannot put the old copy
+   back; a delete is one DELETE and the event is gone here at once; a PATCH
+   on an event Google no longer has drops it here too; and with two-way
+   sync off nothing is touched. */
+suite('Calendar — Google\'s own events, edited in place', async ({ check }) => {
+  const G = await import('../js/gcal.js');
+  const hop = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms)).then(hop);
+
+  const real = globalThis.fetch;
+  const calls = [];
+  let answer = () => ({ ok: true, status: 200, json: async () => ({ items: [], nextSyncToken: 'tok-ev' }), text: async () => '' });
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ method: init.method || 'GET', url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    return answer(init, String(url));
+  };
+  const writes = () => calls.filter((x) => x.method !== 'GET');
+
+  const g = s.state.settings.gcal;
+  const had = { settings: { ...G.pushSettings }, g: { ...g }, status: G.gcal.status, lastError: G.gcal.lastError, backoffUntil: G.gcal.backoffUntil };
+  // the pull keeps only what falls in the window, which begins the day the
+  // calendar did — today, in this seed — so the calendar begins earlier here
+  const cal0 = s.state.calendar.start;
+  s.state.calendar.start = '2026-08-01';
+  Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary', syncToken: 'tok-ev', window: G.pullWindow() });
+  G.gcal.token = { access_token: 'tok', expires_at: Date.now() + 3600e3 };
+  Object.assign(G.pushSettings, { wait: 300, maxWait: 600, backoff: 1200, backoffMax: 3000 });
+  s.state.outbox.length = 0;
+  const heads = () => s.state.events.find((x) => x.id === 'heads');
+  const seed = () => { s.state.events = [ev({ id: 'heads', title: 'Heads', date: '2026-09-08', start: '18:30', end: '19:00', endDate: '2026-09-08', link: 'https://calendar.google.com/x' })]; };
+
+  try {
+    seed();
+    check('the change shows at once', G.editEvent('heads', { title: 'Heads, moved', start: '19:00', end: '20:00' }) && heads().title === 'Heads, moved' && heads().start === '19:00');
+    G.editEvent('heads', { date: '2026-09-09' });
+    check('...and a second edit joins the first in line', s.state.outbox.length === 1 && s.state.outbox[0].itemId === 'event:heads', JSON.stringify(s.state.outbox));
+    check('nothing has gone out yet', writes().length === 0);
+
+    // a pull that gets in first brings Google's old copy of it
+    answer = () => ({ ok: true, status: 200, json: async () => ({ items: [{ id: 'heads', summary: 'Heads', start: { dateTime: '2026-09-08T18:30:00-04:00' }, end: { dateTime: '2026-09-08T19:00:00-04:00' }, updated: 'x' }], nextSyncToken: 'tok-ev2' }), text: async () => '' });
+    await G.sync();
+    check('a pull that gets in first does not put the old copy back', heads().title === 'Heads, moved' && heads().date === '2026-09-09' && heads().start === '19:00', JSON.stringify(heads()));
+    answer = () => ({ ok: true, status: 200, json: async () => ({ id: 'heads' }), text: async () => '' });
+
+    await tick(450);
+    const patch = writes()[0];
+    check('a run of edits is one PATCH to the event', writes().length === 1 && patch.method === 'PATCH' && /\/events\/heads$/.test(patch.url), JSON.stringify(writes().map((w) => w.method + ' ' + w.url)));
+    check('...with the name and the when', patch.body.summary === 'Heads, moved' && /^2026-09-09T19:00/.test(patch.body.start.dateTime) && /^2026-09-09T20:00/.test(patch.body.end.dateTime), JSON.stringify(patch.body));
+    check('...and nothing else of the event', Object.keys(patch.body).sort().join() === 'end,start,summary', Object.keys(patch.body).join());
+    check('...the line empty after', s.state.outbox.length === 0);
+
+    G.editEvent('heads', { allDay: true });
+    await tick(450);
+    check('all day goes as dates, the end the morning after', writes()[1].body.start.date === '2026-09-09' && writes()[1].body.end.date === '2026-09-10' && heads().start === null, JSON.stringify(writes()[1]?.body));
+
+    G.editEvent('heads', { allDay: false, start: '23:00', end: '00:30' });
+    await tick(450);
+    check('an end before its start is the next morning', /^2026-09-10T00:30/.test(writes()[2].body.end.dateTime), JSON.stringify(writes()[2]?.body));
+
+    // Google no longer has it
+    answer = () => ({ ok: false, status: 404, text: async () => 'gone' });
+    G.editEvent('heads', { title: 'Heads, again' });
+    await tick(450);
+    check('a change to an event Google has dropped drops it here too', !heads() && s.state.outbox.length === 0, JSON.stringify(s.state.events));
+
+    seed();
+    answer = () => ({ ok: true, status: 204, json: async () => null, text: async () => '' });
+    check('a delete takes it off the screen at once', G.removeEvent('heads') && !heads());
+    await tick(450);
+    const del = writes()[writes().length - 1];
+    check('...and off Google with one DELETE', del.method === 'DELETE' && /\/events\/heads$/.test(del.url) && s.state.outbox.length === 0, JSON.stringify(del));
+
+    seed();
+    g.pushPlans = false;
+    const n = writes().length;
+    check('with two-way sync off nothing is touched', !G.canEditEvents() && G.editEvent('heads', { title: 'x' }) === false && heads().title === 'Heads' && !G.removeEvent('heads') && !!heads());
+    await tick(450);
+    check('...and nothing goes out', writes().length === n);
+  } finally {
+    globalThis.fetch = real;
+    G.gcal.token = null;
+    Object.assign(g, had.g);
+    Object.assign(G.pushSettings, had.settings);
+    G.gcal.status = had.status; G.gcal.lastError = had.lastError; G.gcal.backoffUntil = had.backoffUntil;
+    s.state.calendar.start = cal0;
+    s.state.outbox.length = 0;
+    s.state.events = [];
+  }
+});
 </script>
 </body>
 </html>

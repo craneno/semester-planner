@@ -9,7 +9,9 @@ import {
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
-import { pushItem } from '../gcal.js';
+import { pushItem, editEvent, canEditEvents } from '../gcal.js';
+import { openEvent } from '../eventedit.js';
+import { openAreaEditor } from './areas.js';
 import { moveItem } from '../actions.js';
 
 let anchor = today();          // any date inside the shown week
@@ -130,7 +132,10 @@ export function renderWeek(root, { navigate } = {}) {
     }
     if (showExternal) {
       for (const e of eventsOn(d).filter((e) => e.allDay)) {
-        cell.append(h('div', { class: 'due-flag', style: { '--c': 'var(--ink-3)' }, title: e.title }, e.title));
+        cell.append(h('div', {
+          class: 'due-flag', style: { '--c': 'var(--ink-3)' }, title: `${e.title} (Google Calendar)`,
+          onclick: () => openEvent(e.id, { after: navigate })
+        }, e.title));
       }
     }
     // planned but untimed — the selector, so a repeating one is here too
@@ -183,7 +188,9 @@ export function renderWeek(root, { navigate } = {}) {
           top: top(s) + 'px', height: hgt + 'px',
           '--c': c.color, '--bg': hexAlpha(c.color, 0.18)
         },
-        title: `${c.title} · ${fmtTime(c.start, hour12)}–${fmtTime(c.end, hour12)}${c.location ? ' · ' + c.location : ''}`
+        title: `${c.title} · ${fmtTime(c.start, hour12)}–${fmtTime(c.end, hour12)}${c.location ? ' · ' + c.location : ''}`,
+        // a class is the area's schedule: the click opens that, on the times
+        onclick: () => openAreaEditor(c.areaId, navigate, { focus: 'meetings' })
       },
       h('div', { class: 't' }, fmtTime(c.start, hour12)),
       h('div', { class: 'n' }, c.title)));
@@ -194,14 +201,18 @@ export function renderWeek(root, { navigate } = {}) {
       for (const e of eventsOn(d).filter((x) => !x.allDay && x.start)) {
         const s = toMin(e.start), en = toMin(e.end) || s + 60;
         const hgt = Math.max(18, (until(s, en) / 60) * hourH - 2);
-        lay(s, en - s, h('div', {
+        const el = h('div', {
           class: 'blk ext' + (hgt < COMPACT_H ? ' compact' : ''),
           style: { top: top(s) + 'px', height: hgt + 'px' },
-          title: `${e.title}${e.location ? ' · ' + e.location : ''} (Google Calendar)`,
-          onclick: () => e.link && window.open(e.link, '_blank', 'noopener')
+          title: `${e.title}${e.location ? ' · ' + e.location : ''} (Google Calendar)`
         },
         h('div', { class: 't' }, fmtTime(e.start, hour12)),
-        h('div', { class: 'n' }, e.title)));
+        h('div', { class: 'n' }, e.title));
+        // Google's own event: moved like a block when two-way sync is on, a
+        // click opening the small editor either way
+        if (canEditEvents()) wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate);
+        else el.addEventListener('click', () => openEvent(e.id, { after: navigate }));
+        lay(s, en - s, el);
       }
     }
 
@@ -362,6 +373,26 @@ function wireBlock(el, item, body, days, dayStart, dayEnd, hourH, navigate) {
     edge: (ev) => edgeScroll(ev, body),
     onDrop: (plan) => moveItem(item.id, plan, { after: navigate }),
     onClick: () => openItem(item.id)
+  });
+}
+
+/* A Google event moves like a block, and the move goes to Google — with
+   an Undo, since `events` is not the store's to remember. */
+function wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate) {
+  const s = toMin(e.start), en = toMin(e.end) || s + 60;
+  dragBlock(el, { date: e.date, start: e.start, mins: en - s }, {
+    hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
+    hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
+    edge: (ev) => edgeScroll(ev, body),
+    onDrop: (plan) => {
+      const before = { date: e.date, start: e.start, end: e.end, allDay: false };
+      editEvent(e.id, { date: plan.date, start: plan.start, end: fromMin(toMin(plan.start) + plan.mins), allDay: false });
+      navigate();
+      toast(`Moved to ${fmtDate(plan.date)} ${fmtTime(plan.start, state.settings.hour12)}, on Google too`, {
+        action: 'Undo', onAction: () => { editEvent(e.id, before); navigate(); }
+      });
+    },
+    onClick: () => openEvent(e.id, { after: navigate })
   });
 }
 

@@ -424,7 +424,13 @@ function fullRow(t, rerender) {
 
 /* ---------------- create / edit ---------------- */
 
-function editArea(area, categoryId, navigate) {
+/** The edit dialog for an area from anywhere — a class block on the week, say. */
+export function openAreaEditor(areaId, navigate, { focus } = {}) {
+  const a = areaById(areaId);
+  if (a) editArea(a, a.category, navigate, { focus });
+}
+
+function editArea(area, categoryId, navigate, { focus } = {}) {
   const draft = area
     ? JSON.parse(JSON.stringify(area))
     : {
@@ -495,7 +501,7 @@ function editArea(area, categoryId, navigate) {
     oninput: (e) => { draft.location = e.target.value; }
   });
 
-  modal({
+  const el = modal({
     title: area ? 'Edit area' : `New ${categoryById(draft.category).singular}`,
     body: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
       h('div', { class: 'field' },
@@ -575,6 +581,12 @@ function editArea(area, categoryId, navigate) {
       }, area ? 'Save changes' : 'Create')
     ]
   });
+  // opened from a class block: the times are what was clicked on
+  if (focus === 'meetings') setTimeout(() => {
+    if (!el.isConnected) return;
+    (meetingsHost.querySelector('input[type=time]') || meetingsHost.querySelector('input, button') || el.querySelector('.modal-b input'))?.focus();
+    meetingsHost.scrollIntoView?.({ block: 'nearest' });
+  }, 40);
 }
 
 

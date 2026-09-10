@@ -416,8 +416,9 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
    carry its time or its name across that, and the name is the one the grid
    cannot already tell you. */
 .blk.narrow.compact .t { display: none; }
-.blk.class { border-left-style: solid; }
-.blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); }
+.blk.class { border-left-style: solid; cursor: pointer; }
+.blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); cursor: grab; }
+.blk.ext.dragging { cursor: grabbing; }
 .blk.plan.done { opacity: .5; }
 .blk.dragging { opacity: .85; box-shadow: var(--shadow-2); transform: scale(1.015); z-index: 20; }
 /* Picked up by a finger, which has no cursor to change: the block has to say
