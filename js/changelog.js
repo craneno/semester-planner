@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v57', date: '2026-09-11',
+    title: 'Empty said once',
+    notes: [
+      'An empty week on Overview says so once: no score of zero under the headline, one line where Open work had three dashes, and a quiet fortnight is "nothing due in the next two weeks" rather than a nudge to add your first task.',
+      'A category with nothing under it has no fold arrow in the sidebar.'
+    ]
+  },
+  {
     version: 'v56', date: '2026-09-10',
     title: 'This day, or every time',
     notes: [

@@ -158,10 +158,11 @@ function paintChrome() {
     // the caret goes after the label, not before it: a category is a top-level
     // row like Overview or Week and has to start at the same left edge, so
     // nothing may sit in front of its glyph. Only its areas are indented.
-    row.append(caret);
-    rail.append(row);
+    // An empty category gets none: there is nothing under it to fold.
     const areas = areasInCategory(cat.id);
     const pins = CATEGORY_PINS[cat.id] || [];
+    if (areas.length || pins.length) row.append(caret);
+    rail.append(row);
     if (!areas.length && !pins.length) continue;
 
     const closed = !!state.settings.railClosed?.[cat.id];

@@ -42,12 +42,15 @@ export function renderOverview(root, { navigate, go }) {
     : load.count <= 4 ? 'A light week ahead.'
       : load.count <= 9 ? 'A steady week ahead.' : 'A busy week ahead.';
 
+  // the headline has already said "nothing", so an empty week gets no score under it
+  const score = load.count
+    ? `${load.count} ${load.count === 1 ? 'task' : 'tasks'} · about ${fmtHours(load.mins)} of work`
+      + (late.length ? ` · ${late.length} past due` : '')
+    : late.length ? `${late.length} past due` : '';
   pad.append(h('section', { style: { marginBottom: '22px' } },
     h('div', { class: 'eyebrow' }, state.semester.name),
     h('h1', { style: { margin: '6px 0 8px' } }, headline),
-    h('p', { style: { margin: 0, color: 'var(--ink-2)' } },
-      `${load.count} ${load.count === 1 ? 'task' : 'tasks'} · about ${fmtHours(load.mins)} of work`
-      + (late.length ? ` · ${late.length} past due` : ''))));
+    score ? h('p', { style: { margin: 0, color: 'var(--ink-2)' } }, score) : null));
 
   pad.append(captureStrip(navigate));
   pad.append(unfiledQueue(navigate, go));
@@ -297,7 +300,9 @@ function decisionColumn(day, { navigate, go, soon }) {
   const byCat = h('div', { class: 'card-b' });
   const loads = categoryLoad();
   const busiest = Math.max(1, ...loads.map((c) => c.open));
-  for (const c of loads) {
+  const any = loads.some((c) => c.open);
+  if (!any) byCat.append(h('p', { style: { margin: 0, color: 'var(--ink-3)', fontSize: '13px' } }, 'Nothing open.'));
+  for (const c of any ? loads : []) {
     byCat.append(h('button', {
       class: 'cat-load', onclick: () => go(c.id),
       title: `${c.open} open · ${fmtHours(c.mins)}`
@@ -353,11 +358,14 @@ function deadlines(soon, late, { navigate, go }) {
     // a past block with no deadline is here too: its day was the only when it had
     for (const t of late.slice(0, 6)) list.append(row(t, navigate));
   }
+  // "your first task" only while there is none; a quiet fortnight is just quiet
   if (!soon.length && !late.length) {
-    list.append(h('div', { class: 'empty', style: { marginTop: '14px' } },
-      h('h3', {}, 'Nothing due yet'),
-      h('p', { style: { margin: '4px 0 12px', color: 'var(--ink-2)' } }, 'Import a syllabus or add your first task.'),
-      h('button', { class: 'btn primary', onclick: () => go('semester') }, 'Go to Semester')));
+    list.append(state.items.length
+      ? h('p', { style: { margin: '14px 4px 0', color: 'var(--ink-3)', fontSize: '13px' } }, 'Nothing due in the next two weeks.')
+      : h('div', { class: 'empty', style: { marginTop: '14px' } },
+        h('h3', {}, 'Nothing due yet'),
+        h('p', { style: { margin: '4px 0 12px', color: 'var(--ink-2)' } }, 'Import a syllabus or add your first task.'),
+        h('button', { class: 'btn primary', onclick: () => go('semester') }, 'Go to Semester')));
   }
   for (const t of soon) list.append(row(t, navigate));
   return list;
