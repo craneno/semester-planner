@@ -10,6 +10,7 @@ import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, inlineCreate, packBlocks, applyLanes } from '../timegrid.js';
 import { acceptIcsDrop } from '../icsimport.js';
+import * as MM from '../minimonth.js';
 import { pushItem, editEvent, canEditEvents } from '../gcal.js';
 import { openEvent, openClass } from '../eventedit.js';
 import { moveItem } from '../actions.js';
@@ -23,6 +24,8 @@ let follows = true;
 
 /** Show the week a date falls in, next time the view draws. */
 export function showWeekOf(date) { anchor = date || today(); follows = !date || date === today(); }
+/** A day in the week on screen. */
+export const weekAnchor = () => (follows ? today() : anchor);
 
 /* The now line. One timer for the page, reset on every draw, so a week left
    open overnight keeps the line where the clock is. */
@@ -384,6 +387,8 @@ function pageTurner({ body, days, title, head, rail, headFor, cellFor, dress, fi
     if (over) return Number(over.dataset.turn);
     const r = body.closest('.week-scroll')?.getBoundingClientRect();
     if (!r || ev.clientY < r.top || ev.clientY > r.bottom) return 0;
+    // well past the edge is somewhere else — the month in the sidebar — not a hand held at it
+    if (ev.clientX < r.left - TURN_ZONE || ev.clientX > r.right + TURN_ZONE) return 0;
     return ev.clientX < r.left + TURN_ZONE ? -1 : ev.clientX > r.right - TURN_ZONE ? 1 : 0;
   };
   const stop = () => { clearTimeout(timer); timer = null; dir = 0; hot(0); };
@@ -464,9 +469,11 @@ function wireBlock(el, item, body, days, dayStart, dayEnd, hourH, navigate, turn
   dragBlock(el, { date: item.plan.date, start: item.plan.start, mins }, {
     hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
     hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
-    edge: (ev) => { edgeScroll(ev, body); turner.at(ev); },
+    edge: (ev) => { edgeScroll(ev, body); turner.at(ev); MM.dragOver(ev); },
+    // let go on a day of the month in the sidebar: that day, the same time
+    over: () => { const day = MM.dragDay(); return day ? { date: day, start: item.plan.start, mins } : null; },
     onDrop: (plan) => moveItem(item.id, plan, { after: navigate }),
-    onEnd: (dropped) => { if (turner.end(dropped)) navigate(); },
+    onEnd: (dropped) => { MM.dragEnd(); if (turner.end(dropped)) navigate(); },
     onClick: () => openItem(item.id)
   });
 }
@@ -478,8 +485,9 @@ function wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate, turner)
   dragBlock(el, { date: e.date, start: e.start, mins: en - s }, {
     hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
     hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
-    edge: (ev) => { edgeScroll(ev, body); turner.at(ev); },
-    onEnd: (dropped) => { if (turner.end(dropped)) navigate(); },
+    edge: (ev) => { edgeScroll(ev, body); turner.at(ev); MM.dragOver(ev); },
+    over: () => { const day = MM.dragDay(); return day ? { date: day, start: e.start, mins: en - s } : null; },
+    onEnd: (dropped) => { MM.dragEnd(); if (turner.end(dropped)) navigate(); },
     onDrop: (plan) => {
       const before = { date: e.date, start: e.start, end: e.end, allDay: false };
       editEvent(e.id, { date: plan.date, start: plan.start, end: fromMin(toMin(plan.start) + plan.mins), allDay: false });
@@ -505,6 +513,10 @@ function wireTray(chip, item, body, days, dayStart, hourH, navigate, turner) {
     onMove: (ev) => {
       edgeScroll(ev, body);
       turner.at(ev);
+      MM.dragOver(ev);
+      // over a day of the month in the sidebar: planned for that day, no time yet
+      const day = MM.dragDay();
+      if (day) { drop(); pend = { date: day, start: null }; return; }
       const { date, mins, col, inside } = hit(ev, body, days, dayStart, hourH);
       if (!inside) { drop(); return; }
       if (!ghost) ghost = h('div', { class: 'drop-ghost' });
@@ -513,18 +525,21 @@ function wireTray(chip, item, body, days, dayStart, hourH, navigate, turner) {
       col.append(ghost);
       pend = { date, start: fromMin(mins) };
     },
-    onCancel: () => { chip.classList.remove('dragging'); drop(); turner.end(false); },
+    onCancel: () => { chip.classList.remove('dragging'); drop(); MM.dragEnd(); turner.end(false); },
     onEnd: () => {
       chip.classList.remove('dragging');
       ghost?.remove(); ghost = null;
+      MM.dragEnd();
       turner.end(!!pend);      // the redraw below draws whichever week that left us in
       if (pend) {
         commit(() => {
-          item.plan = { date: pend.date, start: pend.start, mins: item.estMins || 60 };
+          item.plan = pend.start
+            ? { date: pend.date, start: pend.start, mins: item.estMins || 60 }
+            : { date: pend.date, start: null, mins: 0 };
           item.updatedAt = new Date().toISOString();
         });
         pushItem(item.id).catch(() => {});
-        toast(`Planned for ${fmtDate(pend.date, { weekday: true })} ${fmtTime(pend.start, state.settings.hour12)}`);
+        toast(`Planned for ${fmtDate(pend.date, { weekday: true })}${pend.start ? ' ' + fmtTime(pend.start, state.settings.hour12) : ''}`);
         pend = null;
       }
       navigate();

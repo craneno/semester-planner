@@ -195,6 +195,11 @@ export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) 
  * hit(ev)   -> { date, mins, col }, the same hit test `dragCreate` uses. A
  *           move follows it wherever it goes, so a grid whose `hit` can name
  *           another day lets a block cross to it and one that cannot, will not
+ * over()                          — a landing somewhere off the grid, as
+ *                                   { date, start, mins }, or null; asked on
+ *                                   each move, after `edge`, and while it
+ *                                   answers the ghost is hidden and the
+ *                                   drop is what it says
  * onDrop({ date, start, mins })   — only when something actually changed
  * onClick() — a press that never moved is a click, and must open the thing
  *
@@ -207,7 +212,7 @@ export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) 
  * scroller, and any real movement hands it back — you cannot pick up a block
  * you were only scrolling past.
  */
-export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onEnd, onClick, dayEnd = DAY }) {
+export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, over, onDrop, onEnd, onClick, dayEnd = DAY }) {
   const startMin = toMin(plan.start);
 
   /* The click is the block's, not the browser's. One is fired after every
@@ -241,6 +246,10 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onEn
     let ghost = null, started = false, pend = null, at = ev, hold = null;
 
     const paint = (e) => {
+      // somewhere else has it — the month in the sidebar — so no ghost here
+      const alt = over?.();
+      if (alt) { pend = alt; if (ghost) ghost.hidden = true; return; }
+      if (ghost) ghost.hidden = false;
       const now = hit(e) || anchor;
       let range, col, date;
       if (mode === 'move') {

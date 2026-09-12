@@ -148,6 +148,33 @@ a { color: var(--accent); }
 .area-chip .count { margin-left: auto; }
 .nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* the month, small, under the views */
+.mini-month { padding: 8px 12px 8px; border-top: 1px solid var(--rule); user-select: none; -webkit-user-select: none; }
+.mm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.mm-title { font-family: var(--font-heading); font-weight: 600; font-size: 12px; color: var(--ink); }
+.mm-turn {
+  border: 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  padding: 1px 7px; border-radius: var(--r); font-size: 14px; line-height: 1.2;
+}
+.mm-turn:hover { background: var(--rule-soft); color: var(--ink); }
+.mm-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.mm-dow { text-align: center; color: var(--ink-3); font-family: var(--font-mono); font-size: 9px; padding-bottom: 2px; }
+.mm-day {
+  position: relative; height: 22px; padding: 0 0 3px; border: 0; background: transparent; border-radius: 4px;
+  color: var(--ink-2); font-family: var(--font-mono); font-size: 10.5px; cursor: pointer; line-height: 1;
+}
+.mm-day:hover { background: var(--rule-soft); color: var(--ink); }
+.mm-day.is-out { color: var(--ink-3); opacity: .5; }
+.mm-day.is-shown { background: var(--accent-soft); color: var(--ink); }
+.mm-day.is-today { font-weight: 700; color: var(--accent); }
+.mm-day.is-busy::after {
+  content: ''; position: absolute; left: 50%; bottom: 2px; width: 3px; height: 3px; margin-left: -1.5px;
+  border-radius: 50%; background: currentColor; opacity: .7;
+}
+/* a drag from the week is welcome here */
+body.is-moving .mini-month { background: var(--surface); }
+.mm-day.is-over { background: var(--accent); color: #fff; }
+
 .sync-stack { display: flex; flex-direction: column; gap: 5px; padding-bottom: 4px; }
 .sync-strip {
   margin: 0 8px; padding: 8px 9px; border: 1px solid var(--rule); border-radius: var(--r);

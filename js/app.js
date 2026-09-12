@@ -12,7 +12,8 @@ import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
 import { renderOverview } from './views/overview.js';
 import { renderSemester } from './views/semester.js';
-import { renderWeek, showWeekOf } from './views/week.js';
+import { renderWeek, showWeekOf, weekAnchor } from './views/week.js';
+import { renderMiniMonth } from './minimonth.js';
 import { openSearch } from './search.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderHabits } from './views/habits.js';
@@ -217,6 +218,12 @@ function paintChrome() {
     glyph: '⚙', label: 'Settings',
     current: isCurrent('view', 'settings'), onclick: () => go('settings')
   })));
+
+  // the month, small, under the views: a day opens its week
+  renderMiniMonth($('#mini-month'), {
+    shown: isCurrent('view', 'week') ? weekAnchor() : null,
+    onPick: (day) => { showWeekOf(day); go('week'); closeSidebar(); }
+  });
 
   paintNextUp();
 

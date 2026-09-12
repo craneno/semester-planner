@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mini month tests</title>
+<link rel="stylesheet" href="./tests.css">
+<style>
+  /* enough geometry for elementFromPoint to find a day */
+  #stage { position: absolute; left: 0; top: 0; width: 220px; }
+  #stage .mm-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+  #stage .mm-day { height: 20px; }
+</style>
+</head>
+<body>
+<div id="toasts" hidden></div>
+<script type="module">
+/* The month in the sidebar. What has to hold: a page is six weeks from the
+   week the 1st is in, on the week start the settings say; the shown week
+   and today are marked, a day with something on it has a dot; a click opens
+   that week; the arrows page and a moved week takes the page back; and a
+   drag over a day names it, until the drag ends. */
+import { suite, sharedStoreWith } from './harness.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+  items: [{ id: 'a', title: 'A', areaId: 'gen', plan: { date: '2026-09-17', start: '10:00', mins: 60 }, due: null }],
+  cards: [], notes: {}
+});
+
+suite('Mini month — the page', async ({ check }) => {
+  const M = await import('../js/minimonth.js');
+  const g = M.monthGrid('2026-09', 1);
+  check('six weeks of seven', g.length === 6 && g.every((w) => w.length === 7));
+  check('from the Monday the 1st is in', g[0][0] === '2026-08-31', g[0][0]);
+  check('...to the end of the sixth', g[5][6] === '2026-10-11', g[5][6]);
+  check('on a Sunday start, from the Sunday', M.monthGrid('2026-09', 0)[0][0] === '2026-08-30');
+  check('the next month', M.shiftMonth('2026-12', 1) === '2027-01' && M.shiftMonth('2026-01', -1) === '2025-12');
+  check('a day with a block is busy', M.busyOn('2026-09-17') && !M.busyOn('2026-09-18'));
+});
+
+suite('Mini month — drawn, picked, paged', async ({ check }) => {
+  const M = await import('../js/minimonth.js');
+  const stage = document.createElement('div');
+  stage.id = 'stage';
+  document.body.append(stage);
+  try {
+    s.state.settings.weekStart = 1;
+    let picked = null;
+    const draw = () => M.renderMiniMonth(stage, { shown: '2026-09-16', onPick: (d) => { picked = d; } });
+    draw();
+    const day = (d) => stage.querySelector(`.mm-day[data-day="${d}"]`);
+    check('the shown week\u2019s month', stage.querySelector('.mm-title').textContent === 'September 2026');
+    check('42 days', stage.querySelectorAll('.mm-day').length === 42);
+    check('the shown week is marked, Monday to Sunday',
+      day('2026-09-14').classList.contains('is-shown') && day('2026-09-20').classList.contains('is-shown')
+      && !day('2026-09-13').classList.contains('is-shown') && !day('2026-09-21').classList.contains('is-shown'));
+    check('a day of another month is dimmed', day('2026-08-31').classList.contains('is-out') && !day('2026-09-01').classList.contains('is-out'));
+    check('a busy day has its dot', day('2026-09-17').classList.contains('is-busy') && !day('2026-09-18').classList.contains('is-busy'));
+    day('2026-09-25').click();
+    check('a click picks the day', picked === '2026-09-25');
+    stage.querySelector('[aria-label="Next month"]').click();
+    check('the arrow pages on', stage.querySelector('.mm-title').textContent === 'October 2026');
+    draw();
+    check('...and a redraw of the same week keeps the page', stage.querySelector('.mm-title').textContent === 'October 2026');
+    M.renderMiniMonth(stage, { shown: '2026-11-04', onPick: () => {} });
+    check('a week moved to another month takes the page there', stage.querySelector('.mm-title').textContent === 'November 2026');
+    M.renderMiniMonth(stage, { shown: null, onPick: () => {} });
+    check('no week shown: today\u2019s month, nothing marked as shown',
+      stage.querySelector('.mm-title').textContent === new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })
+      && !stage.querySelector('.mm-day.is-shown') && !!stage.querySelector('.mm-day.is-today'));
+  } finally {
+    stage.remove();
+  }
+});
+
+suite('Mini month — a drag over it', async ({ check }) => {
+  const M = await import('../js/minimonth.js');
+  const stage = document.createElement('div');
+  stage.id = 'stage';
+  document.body.append(stage);
+  try {
+    M.renderMiniMonth(stage, { shown: '2026-09-16', onPick: () => {} });
+    const el = stage.querySelector('.mm-day[data-day="2026-09-22"]');
+    const r = el.getBoundingClientRect();
+    M.dragOver({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    check('over a day, that day', M.dragDay() === '2026-09-22');
+    check('...lit', el.classList.contains('is-over'));
+    M.dragOver({ clientX: -50, clientY: -50 });
+    check('off it, none', M.dragDay() === null && !el.classList.contains('is-over'));
+    M.dragOver({ clientX: r.left + 2, clientY: r.top + 2 });
+    M.dragEnd();
+    check('the end puts the light out', M.dragDay() === null && !stage.querySelector('.is-over'));
+  } finally {
+    stage.remove();
+  }
+});
+</script>
+</body>
+</html>

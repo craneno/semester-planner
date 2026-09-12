@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v64', date: '2026-09-12',
+    title: 'The month, small',
+    notes: [
+      'A month sits under the views in the sidebar. A day opens its week; \u2039 \u203a page it, and it follows the week on screen again once that moves. A dot marks a day with something on it.',
+      'A block dragged onto one of its days lands there at the same time; a chip from the unscheduled tray lands there as an all-day plan.'
+    ]
+  },
+  {
     version: 'v63', date: '2026-09-12',
     title: 'The blocks',
     notes: [

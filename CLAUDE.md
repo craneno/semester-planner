@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v63**.
+Schema **20**, service worker **planner-v64**.
 
 ## Working with me
 
@@ -204,6 +204,10 @@ the sidebar, the breakdown and the editor's select. Habits and the wishlist sit
 under Personal but are **not** areas: `CATEGORY_PINS` hangs them off the group,
 outside the `reorderable()` host.
 
+**The month in the sidebar** (`js/minimonth.js`) is drawn by `paintChrome()`,
+marks the week on screen (`weekAnchor()`), and is a drop target: `dragBlock`'s
+`over()` names a landing off the grid, and the page turner ignores a pointer
+well past the grid's edge, or the sidebar would turn the week.
 **Week follows the day** (`follows`) until prev/next let go of it. It draws
 all 24 hours, opened at the settings' `dayStart` (or a little before now);
 a block past midnight is drawn to midnight. A click or tap on the empty
@@ -281,7 +285,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1411 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1431 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
