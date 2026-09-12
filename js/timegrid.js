@@ -53,6 +53,13 @@ export function spanBetween(start, end) {
  *  phone worth tapping. */
 export const LAP = 0.25;
 
+/** A later block over an earlier one is set in by this much of the column,
+ *  so the earlier one's left edge, and the title at its top, stay in view. */
+export const CASCADE = 0.12;
+/** Two blocks that begin within this many minutes of each other are side by
+ *  side: one over the other would hide the title of whichever was under. */
+export const SAME_START = 30;
+
 /**
  * Side-by-side geometry for blocks that overlap, as fractions of the column.
  *
@@ -64,7 +71,10 @@ export const LAP = 0.25;
  * @param {Array<{start:number, mins:number}>} blocks minutes from midnight
  * @returns {Array<{x:number, w:number, z:number}>} one per block, in the order
  *   given: `x` the left edge and `w` the width, both 0..1 of the column, and
- *   `z` the stacking order — later columns draw over the tail of earlier ones.
+ *   `z` the stacking order. A cluster whose blocks begin together shares the
+ *   width, side by side; one whose blocks begin apart cascades, each later
+ *   block set in by CASCADE and drawn over the one before, the way a
+ *   calendar shows a meeting that starts during another.
  */
 export function packBlocks(blocks) {
   const out = blocks.map(() => ({ x: 0, w: 1, z: 0 }));
@@ -76,17 +86,18 @@ export function packBlocks(blocks) {
   // that spans the cluster belongs in the left column, not squeezed at the end
   spans.sort((a, b) => a.start - b.start || b.end - a.end || a.i - b.i);
 
+  const startOf = new Map(spans.map((sp) => [sp.i, sp.start]));
   let cluster = [];          // the blocks currently overlapping
   let ends = [];             // where each column is free again
   const flush = () => {
     const cols = ends.length;
+    const together = cluster.some((a) => cluster.some((b) =>
+      a.col < b.col && Math.abs(startOf.get(a.i) - startOf.get(b.i)) < SAME_START));
     for (const { i, col } of cluster) {
-      out[i] = {
-        x: col / cols,
+      out[i] = together
         // all but the last column run on under their neighbour
-        w: (1 / cols) * (col === cols - 1 ? 1 : 1 + LAP),
-        z: col
-      };
+        ? { x: col / cols, w: (1 / cols) * (col === cols - 1 ? 1 : 1 + LAP), z: col }
+        : { x: col * CASCADE, w: 1 - col * CASCADE, z: col };
     }
     cluster = []; ends = [];
   };

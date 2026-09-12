@@ -19,7 +19,7 @@ import {
 } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, ITEM_TYPES, progress, chartAreas,
-  areasInCategory, areaColor, AREA_CATEGORIES, sprintsForArea, sprintProgress, repeatLabel
+  areasInCategory, areaColor, AREA_CATEGORIES, sprintsForArea, sprintProgress, repeatLabel, itemColor
 } from '../store.js';
 import { isRepeat, repeatDates } from '../repeat.js';
 import { areaTag, dueChip, priorityTag, meta } from '../ui.js';
@@ -113,7 +113,7 @@ export function itemSpan(t, range) {
   const due = t.due || null;
   if (!plan && !due) return null;
   let from = plan || due;
-  let to = due || plan;
+  let to = due || t.plan?.end || plan;      // a stretch of days runs to its last
 
   /* A repeating item is drawn as its run — the first occurrence in the term to
      the last — rather than as one bar at the day it happens to count from. On
@@ -434,7 +434,7 @@ function areaLane(area, packed, { go, navigate }, range, dayW) {
       style: {
         [s.flip ? 'right' : 'left']: `calc(var(--day-w) * ${s.flip ? range.days - 1 - s.to : s.from})`,
         top: `${4 + offset + s.lane * LANE_H}px`,
-        '--c': areaColor(t.areaId)
+        '--c': itemColor(t)
       },
       title: describeSpan(t, s),
       onclick: () => openItem(t.id)

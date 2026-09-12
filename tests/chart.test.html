@@ -66,6 +66,8 @@ suite('Semester chart — days, lanes and months', async ({ check }) => {
       })());
     check('planned with no deadline is one day of work',
       (() => { const x = span({ plan: { date: '2026-09-08' } }); return x.days === 1 && !x.milestone; })());
+    check('a stretch of days runs to its last',
+      (() => { const x = span({ plan: { date: '2026-09-08', end: '2026-09-10' } }); return x.from === 7 && x.to === 9 && x.days === 3; })());
     check('a deadline before the work is drawn the right way round',
       (() => {
         const x = span({ plan: { date: '2026-09-15' }, due: '2026-09-08' });

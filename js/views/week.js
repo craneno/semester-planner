@@ -4,7 +4,7 @@ import {
   h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx
 } from '../util.js';
 import {
-  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor, scheduleDrift
+  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor, scheduleDrift, itemColor
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -104,7 +104,7 @@ export function renderWeek(root, { navigate } = {}) {
     for (const t of itemsDueOn(d)) {
       cell.append(h('div', {
         class: 'due-flag' + (t.done ? ' done' : ''),
-        style: { '--c': areaColor(t.areaId) },
+        style: { '--c': itemColor(t) },
         title: `Due: ${t.title}`,
         onclick: () => openItem(t.id)
       }, t.title));
@@ -117,13 +117,15 @@ export function renderWeek(root, { navigate } = {}) {
         }, e.title));
       }
     }
-    // planned but untimed — the selector, so a repeating one is here too
+    // planned but untimed — the selector, so a repeating one is here too, and
+    // a stretch of days on each of its days, the later ones running on
     for (const t of itemsPlannedOn(d).filter((x) => !x.plan.start)) {
+      const cont = !!t.plan.end && t.plan.date !== d;
       cell.append(h('div', {
-        class: 'due-flag', style: { '--c': areaColor(t.areaId), opacity: .8 },
-        title: 'Planned (no time set) — drag into the grid to give it a time',
+        class: 'due-flag' + (cont ? ' is-cont' : ''), style: { '--c': itemColor(t), opacity: .8 },
+        title: t.plan.end ? `${t.title} · ${fmtDate(t.plan.date)} – ${fmtDate(t.plan.end)}` : 'Planned (no time set) — drag into the grid to give it a time',
         onclick: () => openItem(t.id)
-      }, '◷ ' + t.title));
+      }, (cont ? '' : '◷ ') + t.title));
     }
     return cell;
   };
@@ -186,7 +188,9 @@ export function renderWeek(root, { navigate } = {}) {
     if (showExternal) {
       for (const e of eventsOn(d).filter((x) => !x.allDay && x.start)) {
         if (held?.dataset.eid === e.id) continue;
-        const s = toMin(e.start), en = toMin(e.end) || s + 60;
+        const s = toMin(e.start);
+        let en = toMin(e.end) || s + 60;
+        if (en <= s) en += 24 * 60;      // past midnight: drawn to it, the rest on the next day
         const hgt = Math.max(18, (until(s, en) / 60) * hourH - 2);
         const el = h('div', {
           class: 'blk ext' + (hgt < COMPACT_H ? ' compact' : ''),
@@ -208,7 +212,7 @@ export function renderWeek(root, { navigate } = {}) {
     for (const t of itemsPlannedOn(d).filter((x) => x.plan.start)) {
       if (held?.dataset.id === t.id) continue;
       const s = toMin(t.plan.start), mins = t.plan.mins || t.estMins || 60;
-      const color = areaColor(t.areaId);
+      const color = itemColor(t);
       const hgt = Math.max(20, (until(s, s + mins) / 60) * hourH - 2);
       const el = h('div', {
         class: 'blk plan' + (t.done ? ' done' : '') + (hgt < COMPACT_H ? ' compact' : ''),
@@ -219,10 +223,39 @@ export function renderWeek(root, { navigate } = {}) {
         },
         title: `${t.title} · ${fmtDuration(mins)}${t.due ? ` · due ${fmtDate(t.due)}` : ''}`
       },
-      h('div', { class: 't' }, fmtTime(t.plan.start, hour12) + ' · ' + fmtDuration(mins)),
+      // a short block has one line: the time, then as much of the name as fits
+      h('div', { class: 't' }, fmtTime(t.plan.start, hour12) + (hgt < COMPACT_H ? '' : ' · ' + fmtDuration(mins))),
       h('div', { class: 'n' }, t.title));
       wireBlock(el, t, body, days, dayStart, dayEnd, hourH, navigate, turner);
       lay(s, mins, el);
+    }
+
+    /* What ran past midnight the day before: its tail, from the top of this
+       day to where it ended. It opens the thing itself; it cannot be dragged,
+       the block on the day before being the one to move. */
+    const prev = addDays(d, -1);
+    const tail = (over, cls, color, title, said, open) => {
+      const hgt = Math.max(20, (over / 60) * hourH - 2);
+      const el = h('div', {
+        class: 'blk is-tail ' + cls + (hgt < COMPACT_H ? ' compact' : ''),
+        style: { top: '0px', height: hgt + 'px', ...(color ? { '--c': color, '--bg': hexAlpha(color === 'var(--muted)' ? '#8B9099' : color, 0.2) } : {}) },
+        title: said, onclick: open
+      },
+      h('div', { class: 't' }, `… ${fmtTime(fromMin(Math.min(over, 24 * 60 - 1)), hour12)}`),
+      h('div', { class: 'n' }, title));
+      return lay(0, over, el);
+    };
+    for (const t of itemsPlannedOn(prev).filter((x) => x.plan.start)) {
+      const s = toMin(t.plan.start), mins = t.plan.mins || t.estMins || 60;
+      if (s + mins <= 24 * 60) continue;
+      const el = tail(Math.min(s + mins - 24 * 60, 24 * 60), 'plan' + (t.done ? ' done' : ''), itemColor(t), t.title,
+        `${t.title} · from ${fmtTime(t.plan.start, hour12)} the day before`, () => openItem(t.id));
+      el.dataset.tail = t.id;
+    }
+    if (showExternal) {
+      for (const e of eventsOn(prev).filter((x) => !x.allDay && x.start && x.end && toMin(x.end) <= toMin(x.start))) {
+        tail(toMin(e.end), 'ext', null, e.title, `${e.title} · from ${fmtTime(e.start, hour12)} the day before (Google Calendar)`, () => openEvent(e.id, { after: navigate }));
+      }
     }
 
     // and now the widths, which only the whole day knows
@@ -284,7 +317,7 @@ export function renderWeek(root, { navigate } = {}) {
   for (const t of loose) {
     const chip = h('div', {
       class: 'tray-item', dataset: { id: t.id },
-      style: { '--c': areaColor(t.areaId) }
+      style: { '--c': itemColor(t) }
     }, t.title, t.due ? h('span', { class: 'eyebrow', style: { marginLeft: '7px' } }, fmtDate(t.due)) : null);
     wireTray(chip, t, body, days, dayStart, hourH, navigate, turner);
     items.append(chip);

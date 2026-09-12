@@ -284,6 +284,8 @@ export function migrate(raw) {
       // Only when there: a key on every row would make each look edited to sync
       ...(t.canvasCourse ? { canvasCourse: t.canvasCourse } : {}),
       ...('canvasArea' in t ? { canvasArea: t.canvasArea || null } : {}),
+      ...(t.icsUid ? { icsUid: t.icsUid } : {}),      // the calendar-file event it came from
+      ...(t.color ? { color: t.color } : {}),          // a colour of its own, else the area's
       gcalId: t.gcalId || null,
       // one Google event per occurrence, so a series needs one id per day it
       // lands on rather than the single `gcalId` a one-off carries

@@ -95,6 +95,8 @@ suite('Calendar — recurring series detection', async ({ check }) => {
     check('...with no time in it', !allDay.start.dateTime && !allDay.end.dateTime);
     check('...ending the morning after', allDay.end.date === '2026-09-13',
       'Google reads end.date as exclusive; the same date twice is a zero-length event');
+    const stretch = G.eventBodyFor(item({ date: '2026-09-12', end: '2026-09-14' }));
+    check('a stretch of days ends the morning after its last', stretch.start.date === '2026-09-12' && stretch.end.date === '2026-09-15', JSON.stringify(stretch.end));
 
     const timed = G.eventBodyFor(item({ date: '2026-09-12', start: '09:00', mins: 90 }));
     check('a timed block still goes up as times',

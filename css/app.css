@@ -356,6 +356,8 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
 }
 .due-flag.done { opacity: .45; text-decoration: line-through; }
+/* a later day of a stretch: the bar runs on, the name said once */
+.due-flag.is-cont { border-left-color: transparent; border-radius: 0; color: var(--ink-3); }
 
 .week-body {
   display: grid; grid-template-columns: var(--gutter-w) repeat(7, minmax(0, 1fr));
@@ -421,6 +423,8 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); cursor: grab; }
 .blk.ext.dragging { cursor: grabbing; }
 .blk.plan.done { opacity: .5; }
+/* what ran past midnight the day before: squared off at the top, where it came in */
+.blk.is-tail { border-top-left-radius: 0; border-top-right-radius: 0; border-top-style: dashed; }
 /* a block being named where it will sit */
 .blk.is-new { border-style: dashed; border-left-style: solid; background: var(--accent-soft); cursor: text; z-index: 14; }
 .blk.is-new input {
@@ -969,6 +973,16 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 
 
 /* ---------- scheduled / deadline toggle ---------- */
+
+/* a colour of its own: the area's, or one of the ten */
+.swatches { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.swatch {
+  width: 20px; height: 20px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 2px solid transparent; background: var(--c); color: #fff;
+  font: 600 10px/1 var(--font-mono);
+}
+.swatch.on { border-color: var(--ink); }
+.swatch:hover { transform: scale(1.12); }
 
 .mode-toggle {
   display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r); overflow: hidden;

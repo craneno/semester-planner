@@ -3,7 +3,7 @@
 import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
 import {
   state, commit, itemById, upsertItem, deleteItem, ITEM_TYPES, progress,
-  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved
+  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved, areaColor, AREA_COLORS
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
 import { pushItem, forgetItem } from './gcal.js';
@@ -212,10 +212,17 @@ function render(item) {
       modeBtn('deadline', 'Deadline'))));
 
   if (mode === 'allday') {
+    // a stretch of days keeps its `end` only while it is after the first day
+    const stretch = (date, end) => ({ date, start: null, mins: 0, ...(end && end > date ? { end } : {}) });
     props.append(prop('Date',
       h('input', {
         type: 'date', value: plan.date || '',
-        onchange: (e) => { set({ plan: { ...plan, date: e.target.value || today(), start: null, mins: 0 } }, { resync: true }); rerender(); }
+        onchange: (e) => { set({ plan: stretch(e.target.value || today(), plan.end) }, { resync: true }); rerender(); }
+      })));
+    props.append(prop('Until',
+      h('input', {
+        type: 'date', value: plan.end || '', min: plan.date || '', title: 'The last day, for a stretch of days',
+        onchange: (e) => { set({ plan: stretch(plan.date, e.target.value) }, { resync: true }); rerender(); }
       })));
   } else if (scheduled) {
     // wrapped: a block that runs past midnight ends the next morning
@@ -268,6 +275,16 @@ function render(item) {
   props.append(prop('Priority',
     h('select', { onchange: (e) => set({ priority: e.target.value }) },
       ...['low', 'normal', 'high'].map((p) => h('option', { value: p, selected: p === item.priority }, p[0].toUpperCase() + p.slice(1))))));
+
+  // the area's colour unless one is picked for this alone
+  const own = item.color || null;
+  const swatch = (col, label) => h('button', {
+    type: 'button', class: 'swatch' + (col === own ? ' on' : ''), title: label, 'aria-label': label,
+    'aria-pressed': String(col === own), style: { '--c': col || areaColor(item.areaId) },
+    onclick: () => { set({ color: col }); rerender(); }
+  }, col ? '' : 'A');
+  props.append(prop('Colour', h('div', { class: 'swatches' },
+    swatch(null, "The area's colour"), ...AREA_COLORS.map((col) => swatch(col, col)))));
 
   body.append(props);
 

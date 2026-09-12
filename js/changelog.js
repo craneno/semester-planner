@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v63', date: '2026-09-12',
+    title: 'The blocks',
+    notes: [
+      'A block that runs past midnight shows its tail at the top of the next day. So does a Google event.',
+      'An all-day plan can be a stretch of days: Until, on the task page. It runs along the all-day rail, sits on the chart as its whole run, and goes to Google as the whole run.',
+      'Blocks that begin together still share the width; a block that begins during another now sits over it, set in from the left, so both names stay in view.',
+      'A task can have a colour of its own, on the task page, in place of its area\u2019s.'
+    ]
+  },
+  {
     version: 'v62', date: '2026-09-12',
     title: 'Getting things in',
     notes: [

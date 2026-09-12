@@ -11,7 +11,7 @@ import {
 import {
   state, commit, upsertItem, toggleItem, upcoming, overdue, workloadFor,
   categoryLoad, note, touchNote, carryForward, pendingTomorrow, areaColor,
-  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById
+  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -117,7 +117,7 @@ function todayColumn(day, { navigate, go }) {
     ...eventsOn(day).filter((e) => e.allDay)
       .map((e) => ({ label: e.title, color: null, link: e.link })),
     ...itemsPlannedOn(day).filter((t) => !t.plan.start)
-      .map((t) => ({ label: t.title, color: areaColor(t.areaId), id: t.id }))
+      .map((t) => ({ label: t.title, color: itemColor(t), id: t.id }))
   ];
   if (untimed.length) {
     const strip = h('div', { class: 'day-allday' });
@@ -182,7 +182,7 @@ function todayColumn(day, { navigate, go }) {
   for (const t of itemsPlannedOn(day).filter((x) => x.plan.start)) {
     const mins = t.plan.mins || t.estMins || 60;
     const el = block({
-      start: toMin(t.plan.start), mins, cls: 'plan', color: areaColor(t.areaId),
+      start: toMin(t.plan.start), mins, cls: 'plan', color: itemColor(t),
       title: t.title, sub: `${areaName(t.areaId)} · ${fmtDuration(mins)}`,
       done: t.done
     });

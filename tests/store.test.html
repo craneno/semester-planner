@@ -904,6 +904,34 @@ suite('Series — this and after, and a copy', async ({ check }) => {
     check('...and the series itself carries the edit', s.itemById('cnt').title === 'Five, renamed', s.itemById('cnt').title);
   }
 });
+
+/* A stretch of days, and a colour of one's own. What has to hold: an
+   all-day plan with an end is on every day from its first to its last, and
+   on none outside; a scheduled block is on its day only, whatever its
+   length; a task's colour is its own when it has one, else its area's. */
+suite('Blocks — a stretch of days, and a colour of its own', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
+    items: [{ id: 'kept', title: 'Kept', areaId: 'gen', color: '#3C6E8F', icsUid: 'abc@ics', plan: null, due: null }],
+    cards: [], notes: {}
+  });
+  check('a colour and a calendar-file uid survive a load', s.itemById('kept').color === '#3C6E8F' && s.itemById('kept').icsUid === 'abc@ics');
+  const bare = s.upsertItem({ title: 'Bare', areaId: 'gen' });
+  check('...and a task without them gets no empty key', !('color' in bare) && !('icsUid' in bare));
+  s.upsertItem({ id: 'trip', title: 'Trip', areaId: 'gen', plan: { date: '2026-09-07', end: '2026-09-09' } });
+  s.upsertItem({ id: 'late', title: 'Late', areaId: 'gen', plan: { date: '2026-09-08', start: '23:00', mins: 120 } });
+  s.upsertItem({ id: 'red', title: 'Red', areaId: 'gen', color: '#9E4A5C' });
+  const on = (d) => s.itemsPlannedOn(d).map((t) => t.id).sort().join();
+  check('a stretch is on its first day', on('2026-09-07') === 'trip');
+  check('...its middle', on('2026-09-08') === 'late,trip', on('2026-09-08'));
+  check('...and its last', on('2026-09-09') === 'trip');
+  check('...and not the day after', on('2026-09-10') === '');
+  check('a block past midnight is on its own day only', !on('2026-09-09').includes('late'));
+  check('a colour of its own is its own', s.itemColor(s.itemById('red')) === '#9E4A5C');
+  check('...and without one, the area\u2019s', s.itemColor(s.itemById('trip')) === '#3C6E8F');
+});
 </script>
 </body>
 </html>

@@ -7,6 +7,8 @@ import { CATEGORY_IDS } from './constants.js';
 
 export const areaById = (s, id) => s.areas.find((a) => a.id === id) || null;
 export const areaColor = (s, id) => (areaById(s, id) || {}).color || 'var(--muted)';
+/** A task's colour: its own, when it has one, else its area's. */
+export const itemColor = (s, t) => t?.color || areaColor(s, t?.areaId);
 export const areaName = (s, id) => (areaById(s, id) || {}).name || 'Unassigned';
 
 /** Areas filed under one category, active first unless archived is asked for. */

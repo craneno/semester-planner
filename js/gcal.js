@@ -534,7 +534,7 @@ export function eventBodyFor(item) {
     }
     : {
       start: { date: item.plan.date },
-      end: { date: addDays(item.plan.date, 1) }
+      end: { date: addDays(item.plan.end || item.plan.date, 1) }
     };
   return {
     ...when,

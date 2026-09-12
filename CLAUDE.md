@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v62**.
+Schema **20**, service worker **planner-v63**.
 
 ## Working with me
 
@@ -119,7 +119,7 @@ up here, its hash recorded, or it would be pushed again for ever.
 
 | | |
 |---|---|
-| `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`), **all day** (`plan.date`, no `start`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series |
+| `state.items` | tasks. **Scheduled** (`plan {date,start,mins}`, drawn to midnight and its tail at the top of the next day), **all day** (`plan.date`, no `start`; `plan.end` makes it a stretch of days, on each of them in `itemsPlannedOn`), or a **deadline** (`due`, `dueTime`, `estMins`) — never two at once, and all three read off the data. `repeat` makes it a series; `color` is its own, else the area's (`itemColor`) |
 | `state.areas` | courses/projects/etc. One `category`, plus `order`, `onChart`, `journal`, `freewrite`, and a `schedule` of meetings, each stamped with the `tz` it is written in, with `ex[date]` for one day of it (`null` cancelled, `{start,end,location}` moved — `setClassDay`); `from`/`until` (keys only when set) are the days it meets, else the term's (`termOf`) |
 | `state.semester` · `state.calendar` | the term (`name`, `start`, `end`) is for **courses only**: when classes meet, the chart, the Canvas import · `calendar.start` is the day the planner began (worked out once, from the earliest row): Google is read from it, the Week tray drops work due before it. Both in the `meta` row |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
@@ -270,17 +270,18 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
   `shiftSchedules()` rewrites the times, carrying the weekday across midnight.
   `state.events` holds wall clock worked out at fetch time, so a move
   (`settings.tzSeen`, device-only) drops the sync token.
-- **Blocks that overlap share the width**, or the later one is drawn flat over
-  the earlier. `packBlocks()` is plain maths — clumps of things that touch, a
-  column each, `LAP` running all but the last under its neighbour; `applyLanes()`
-  writes it as `--lane-x/w/z`.
+- **Blocks that overlap**: `packBlocks()` is plain maths — clumps of things
+  that touch, a column each. Begun together (`SAME_START`) they share the
+  width, `LAP` running all but the last under its neighbour; begun apart the
+  later sits over the earlier, set in by `CASCADE`, so both titles show.
+  `applyLanes()` writes it as `--lane-x/w/z`.
 - Capture's **Enter must stay the shortest way out** — an unfiled note, never a
   question. There is no Notes page: `unfiledQueue()` on Overview, `noteCard()`
   on the area's page; delete either and captures have nowhere to show.
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1394 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1411 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

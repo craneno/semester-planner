@@ -32,6 +32,7 @@ export { CARRIERS, detectTracking, trackingUrl, applyTracking, failTracking } fr
 const bind = (fn) => (...a) => fn(state, ...a);
 export const areaById = bind(A.areaById);
 export const areaColor = bind(A.areaColor);
+export const itemColor = bind(A.itemColor);
 export const areaName = bind(A.areaName);
 export const areasInCategory = bind(A.areasInCategory);
 export const chartAreas = bind(A.chartAreas);
@@ -409,8 +410,10 @@ export function itemsDueOn(date) {
 }
 
 export function itemsPlannedOn(date) {
+  // an all-day plan with an `end` is a stretch of days, and is on each of them
+  const on = (t) => t.plan.date === date || (!!t.plan.end && !t.plan.start && t.plan.date <= date && date <= t.plan.end);
   return [
-    ...state.items.filter((t) => !repeats(t) && t.plan && t.plan.date === date),
+    ...state.items.filter((t) => !repeats(t) && t.plan && on(t)),
     ...state.items.filter((t) => repeats(t))
       .flatMap((t) => occurrencesOn(t, date))
       .filter((o) => o.plan && o.plan.date === date)

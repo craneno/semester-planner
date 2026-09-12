@@ -345,7 +345,7 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
    is the arithmetic that is easy to get subtly wrong: which blocks belong to
    the same cluster, and how many columns that cluster is worth. */
 suite('Time grid — two things at once', async ({ check }) => {
-  const { packBlocks, LAP } = await import('../js/timegrid.js');
+  const { packBlocks, LAP, CASCADE } = await import('../js/timegrid.js');
   const at = (h, mins) => ({ start: h * 60, mins });
   const round = (n) => Math.round(n * 1000) / 1000;
 
@@ -364,13 +364,18 @@ suite('Time grid — two things at once', async ({ check }) => {
 
   {
     // 8:45–10:15 and 9:30–10:00 — the pair from the screenshot
+    // begun apart: the later one sits over the earlier, set in from the left
     const pair = packBlocks([{ start: 525, mins: 90 }, { start: 570, mins: 30 }]);
-    check('two that overlap take half the column each',
-      pair[0].x === 0 && pair[1].x === 0.5, JSON.stringify(pair));
+    check('a block that begins during another sits over it, set in',
+      pair[0].x === 0 && pair[0].w === 1 && round(pair[1].x) === CASCADE && round(pair[1].w) === round(1 - CASCADE),
+      JSON.stringify(pair));
+    check('...and on top', pair[1].z > pair[0].z);
+    // begun together: side by side
+    const twin = packBlocks([{ start: 540, mins: 60 }, { start: 555, mins: 60 }]);
+    check('two that begin together take half the column each',
+      twin[0].x === 0 && twin[1].x === 0.5, JSON.stringify(twin));
     check('the earlier one runs on under the later',
-      round(pair[0].w) === round(0.5 * (1 + LAP)), String(pair[0].w));
-    check('...and the last column stops at the edge', pair[1].w === 0.5);
-    check('later columns draw on top', pair[1].z > pair[0].z);
+      round(twin[0].w) === round(0.5 * (1 + LAP)) && twin[1].w === 0.5, JSON.stringify(twin));
   }
 
   {

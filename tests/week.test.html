@@ -165,6 +165,44 @@ suite('Week — a click names a block in place', async ({ check }) => {
     for (const t of mine()) s.deleteItem(t.id);
   }
 });
+
+/* What the grid makes of the blocks. What has to hold: a block that runs
+   past midnight shows its tail at the top of the next day, as tall as what
+   ran over, opening the same task; a stretch of days is a flag on each of
+   its days on the rail, the later ones running on; and a task with a colour
+   of its own is drawn in it. */
+suite('Week — tails, stretches and colours', async ({ check }) => {
+  const W = await import('../js/views/week.js');
+  const stage = document.createElement('div');
+  stage.id = 'stage';
+  document.body.append(stage);
+  const navigate = () => W.renderWeek(stage, { navigate });
+  const hadWeekStart = s.state.settings.weekStart;
+  try {
+    s.state.settings.weekStart = 0;
+    s.upsertItem({ id: 'late', title: 'Late show', areaId: 'gen', plan: { date: '2026-09-08', start: '23:00', mins: 120 } });
+    s.upsertItem({ id: 'trip', title: 'Trip', areaId: 'gen', plan: { date: '2026-09-07', end: '2026-09-09' } });
+    s.upsertItem({ id: 'red', title: 'Red', areaId: 'gen', color: '#9E4A5C', plan: { date: '2026-09-10', start: '10:00', mins: 60 } });
+    W.showWeekOf('2026-09-09');
+    W.renderWeek(stage, { navigate });
+    const cols = [...stage.querySelectorAll('.daycol')];
+    const tail = cols[3].querySelector('.blk.is-tail[data-tail="late"]');
+    check('a block past midnight has its tail at the top of the next day', !!tail && tail.style.top === '0px', tail?.style.top);
+    check('...as tall as what ran over: an hour', Math.round(parseFloat(tail.style.height)) === 50, tail.style.height);
+    check('...and the block itself on its own day, to midnight', cols[2].querySelector('.blk.plan[data-id="late"]') && !cols[3].querySelector('.blk.plan[data-id="late"]'));
+    const cells = [...stage.querySelectorAll('.allday-rail .cell')];
+    const flags = cells.map((c) => [...c.querySelectorAll('.due-flag')].filter((f) => f.textContent.includes('Trip')));
+    check('a stretch of days is on the rail on each of its days', flags[1].length === 1 && flags[2].length === 1 && flags[3].length === 1 && flags[0].length === 0 && flags[4].length === 0, flags.map((f) => f.length).join());
+    check('...running on after the first', !flags[1][0].classList.contains('is-cont') && flags[2][0].classList.contains('is-cont') && flags[3][0].classList.contains('is-cont'));
+    const red = stage.querySelector('.blk.plan[data-id="red"]');
+    check('a colour of its own is drawn in it', red?.style.getPropertyValue('--c') === '#9E4A5C', red?.style.getPropertyValue('--c'));
+  } finally {
+    stage.remove();
+    W.showWeekOf();
+    s.state.settings.weekStart = hadWeekStart;
+    for (const id of ['late', 'trip', 'red']) if (s.itemById(id)) s.deleteItem(id);
+  }
+});
 </script>
 </body>
 </html>
