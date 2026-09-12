@@ -20,6 +20,7 @@ import { renderHabits } from './views/habits.js';
 import { renderWishlist } from './views/wishlist.js';
 import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
+import * as R from './remind.js';
 import * as C from './cloud.js';
 import { refreshIfDue } from './canvas.js';
 import { refreshTrackingIfDue } from './tracking.js';
@@ -629,6 +630,7 @@ function boot() {
   });
 
   navigate();
+  R.start();       // a heads-up before things begin, when asked for
 
   // Google Calendar and Supabase, each only if the user has set it up
   G.start().catch((e) => console.warn('gcal', e));

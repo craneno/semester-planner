@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reminder tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* A heads-up before a thing begins. What has to hold: within the lead and
+   still ahead is due, what has begun is not, what is further off is not,
+   and what was said once is not said again; with no lead, or without the
+   permission, a tick says nothing. */
+import { suite, sharedStoreWith } from './harness.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+  items: [{ id: 'a', title: 'Lab', areaId: 'gen', plan: { date: '2026-09-14', start: '10:00', mins: 60 }, due: null }],
+  cards: [], notes: {}
+});
+
+suite('Reminders — which are due', async ({ check }) => {
+  const R = await import('../js/remind.js');
+  const list = [
+    { kind: 'class', title: 'Thermo', start: '09:00', end: '10:00' },
+    { kind: 'plan', title: 'Lab', id: 'a', start: '10:00', end: '11:00' },
+    { kind: 'event', title: 'Lunch', start: '12:30', end: '13:00' }
+  ];
+  const at = (h, m) => h * 60 + m;
+  check('within the lead and still ahead', R.dueReminders(list, at(9, 50), 15).map((e) => e.title).join() === 'Lab');
+  check('what has begun is not', R.dueReminders(list, at(10, 0), 15).length === 0);
+  check('what is further off is not', R.dueReminders(list, at(8, 0), 15).length === 0);
+  check('right at the lead is', R.dueReminders(list, at(9, 45), 15).map((e) => e.title).join() === 'Lab');
+  check('two at once, both', R.dueReminders(list, at(8, 50), 80).length === 2);
+  check('said once, not again', R.dueReminders(list, at(9, 50), 15, new Set([R.keyOf(list[1])])).length === 0);
+  check('no lead, nothing', R.dueReminders(list, at(9, 50), 0).length === 0);
+  check('the key tells one from another', R.keyOf(list[0]) !== R.keyOf(list[1]));
+});
+
+suite('Reminders — a tick', async ({ check }) => {
+  const R = await import('../js/remind.js');
+  s.state.settings.remindLead = 0;
+  check('off by default', R.lead() === 0);
+  check('with no lead a tick says nothing', R.tick(9 * 60 + 50, '2026-09-14').length === 0);
+  s.state.settings.remindLead = 15;
+  check('the lead reads off the settings', R.lead() === 15);
+  check('the permission is known', ['default', 'granted', 'denied', 'unsupported'].includes(R.permission()));
+  // without the permission a tick says nothing; with it, the one due
+  const said = R.tick(9 * 60 + 50, '2026-09-14');
+  check('a tick says only what the browser allows', R.permission() === 'granted' ? said.length === 1 : said.length === 0);
+  check('...and nothing twice', R.permission() !== 'granted' || R.tick(9 * 60 + 50, '2026-09-14').length === 0);
+  s.state.settings.remindLead = 0;
+  localStorage.removeItem('semesterPlanner.reminded');
+});
+</script>
+</body>
+</html>

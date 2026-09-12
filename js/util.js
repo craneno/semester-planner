@@ -149,6 +149,13 @@ export function fmtHours(mins) {
   return (mins / 60).toFixed(1).replace(/\.0$/, '') + 'h';
 }
 
+/** Hand the browser a file to save. */
+export function saveFile(blob, name) {
+  const a = h('a', { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 /* Local Date <-> RFC3339 with offset, for Google Calendar */
 export function toRfc3339(dateStr, hhmm) {
   const d = parseYmd(dateStr);

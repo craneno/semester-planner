@@ -11,6 +11,7 @@ import { openItem } from '../editor.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, inlineCreate, packBlocks, applyLanes } from '../timegrid.js';
 import { acceptIcsDrop } from '../icsimport.js';
 import * as MM from '../minimonth.js';
+import { shareWeek } from '../share.js';
 import { pushItem, editEvent, canEditEvents } from '../gcal.js';
 import { openEvent, openClass } from '../eventedit.js';
 import { moveItem } from '../actions.js';
@@ -81,7 +82,11 @@ export function renderWeek(root, { navigate } = {}) {
       class: 'btn ghost sm desktop-only',
       'aria-pressed': String(showExternal),
       onclick: () => { showExternal = !showExternal; navigate(); }
-    }, showExternal ? 'Calendar on' : 'Calendar off')));
+    }, showExternal ? 'Calendar on' : 'Calendar off'),
+    h('button', {
+      class: 'btn ghost sm', title: 'This week as a picture',
+      onclick: () => shareWeek(days, { title: `${spanFor(days)} · ${state.semester.name}` }).catch((e) => toast(e.message))
+    }, 'Share')));
 
   /* ---- header + all-day rail ---- */
   const head = h('div', { class: 'week-head' }, h('div', {}));

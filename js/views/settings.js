@@ -1,6 +1,6 @@
 // views/settings.js — semester, Google Calendar, appearance, data.
 
-import { h, clear, debounce, fmtTime, fromMin, DAY_RESET_HOUR, tz, zoneLabel, zoneShift, fmtDuration } from '../util.js';
+import { h, clear, debounce, fmtTime, fromMin, DAY_RESET_HOUR, tz, zoneLabel, zoneShift, fmtDuration, saveFile, fmtDate } from '../util.js';
 import { state, commit, exportJson, importJson, scheduleZones, shiftSchedules, stampSchedules, listBackups, readBackup } from '../store.js';
 import { toast, confirmDialog } from '../ui.js';
 import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
@@ -8,6 +8,8 @@ import { CHANGELOG, APP_VERSION } from '../changelog.js';
 import * as G from '../gcal.js';
 import * as C from '../cloud.js';
 import { openIcsImport } from '../icsimport.js';
+import { eventsBetween, icsFor } from '../icsexport.js';
+import * as R from '../remind.js';
 import { importCanvas, refreshFeed, isFeedUrl } from '../canvas.js';
 
 /* One listener each, for the life of the page, that calls whichever painter
@@ -514,11 +516,55 @@ export function renderSettings(root, { navigate }) {
       e.target.value = '';
     }
   });
+  /* ---------- Reminders ----------
+     A lead on this device only: the permission is the browser's, per site,
+     and a phone and a laptop each get their own. */
+  const remindSel = h('select', {
+    onchange: async (e) => {
+      const v = +e.target.value;
+      if (v) {
+        const perm = await R.ask();
+        if (perm !== 'granted') {
+          toast(perm === 'denied' ? 'Notifications are blocked for this site — allow them in the browser first.' : 'Notifications are not available here.');
+          e.target.value = String(R.lead());
+          return;
+        }
+      }
+      commit(() => { s.remindLead = v; });
+      R.tick();
+      toast(v ? `A heads-up ${v} minutes before.` : 'Reminders off.');
+      navigate?.();
+    }
+  }, ...R.LEADS.map((m) => h('option', { value: m, selected: R.lead() === m }, m ? `${m} minutes before` : 'Off')));
+  p.append(section('Reminders', [
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
+      'A notification before a class, a calendar event or a planned block begins — on this device, since that is where it shows. The app has to be open somewhere: a tab, or installed on the home screen.'),
+    field('Heads-up', remindSel),
+    R.permission() === 'denied'
+      ? h('p', { style: { fontSize: '12.5px', color: 'var(--danger)', margin: 0 } }, 'Blocked in the browser. Allow notifications for this site in its settings, then pick a lead.')
+      : null
+  ]));
+
+  const exFrom = h('input', { type: 'date', value: state.semester.start, 'aria-label': 'From' });
+  const exTo = h('input', { type: 'date', value: state.semester.end, 'aria-label': 'To' });
+  const exportIcs = () => {
+    const from = exFrom.value, to = exTo.value;
+    if (!from || !to || to < from) { toast('Pick a first day and a last day.'); return; }
+    const events = eventsBetween(from, to);
+    if (!events.length) { toast('Nothing planned or due between those days.'); return; }
+    saveFile(new Blob([icsFor(events, { name: state.semester.name })], { type: 'text/calendar' }), `planner-${from}-${to}.ics`);
+    toast(`${events.length} ${events.length === 1 ? 'event' : 'events'} saved, ${fmtDate(from)} – ${fmtDate(to)}.`);
+  };
   p.append(section('Calendar file', [
     h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
       'Any calendar saved as an .ics file — Google\u2019s export, a club\u2019s schedule — becomes blocks in one area. Weekly rules repeat; an event brought in before is brought up to date, not made twice. Or drop the file on the Week.'),
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-      h('button', { class: 'btn', onclick: () => calIn.click() }, 'Import a calendar file'), calIn)
+      h('button', { class: 'btn', onclick: () => calIn.click() }, 'Import a calendar file'), calIn),
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '8px 0 0' } },
+      'And the other way: the blocks, all-day plans and due dates between two days as an .ics file any calendar can read.'),
+    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+      exFrom, h('span', { class: 'eyebrow' }, 'to'), exTo,
+      h('button', { class: 'btn', onclick: exportIcs }, 'Export as a calendar file'))
   ]));
 
   p.append(section('Canvas', [

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Share tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* A week as a picture. What has to hold: the layout opens at 7am and
+   closes at 10pm unless something is outside, a block sits at its hour and
+   is as tall as its length, two at once share the column, and the paint
+   puts colour where a block is and paper where there is none. */
+import { suite, sharedStoreWith } from './harness.js';
+
+// share.js reads the one live store, so the seed and the edits go through it
+const s = await sharedStoreWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
+    items: [
+      { id: 'a', title: 'Lab', areaId: 'gen', plan: { date: '2026-09-14', start: '09:00', mins: 60 }, due: null },
+      { id: 'b', title: 'Read', areaId: 'gen', plan: { date: '2026-09-14', start: '09:00', mins: 60 }, due: null },
+      { id: 'c', title: 'Trip', areaId: 'gen', plan: { date: '2026-09-15' }, due: null }
+    ],
+    cards: [], notes: {}
+});
+
+suite('Share — where things go', async ({ check }) => {
+  const S = await import('../js/share.js');
+  const days = ['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20'];
+  const lay = S.layoutWeek(days, { hourH: 40 });
+  check('7am to 10pm', lay.first === 7 * 60 && lay.last === 22 * 60);
+  check('a block sits at its hour', lay.boxes.every((b) => b.y === lay.top + 2 * 40), lay.boxes.map((b) => b.y).join());
+  check('...as tall as its length', lay.boxes.every((b) => b.h === 40 - 2));
+  check('two at once share the column', lay.boxes.length === 2 && lay.boxes[0].x !== lay.boxes[1].x && lay.boxes.every((b) => b.w < lay.colW));
+  check('the all-day plan is on its day\u2019s rail', lay.cols[1].allDay.join() === 'Trip' && lay.railH > 0);
+  check('the picture is as tall as the hours', lay.height === Math.round(lay.top + 15 * 40 + lay.pad));
+
+  s.upsertItem({ id: 'd', title: 'Early', areaId: 'gen', plan: { date: '2026-09-16', start: '05:30', mins: 60 } });
+  s.upsertItem({ id: 'e', title: 'Late', areaId: 'gen', plan: { date: '2026-09-16', start: '23:00', mins: 60 } });
+  const wide = S.layoutWeek(days, { hourH: 40 });
+  check('something early opens the morning', wide.first === 5 * 60);
+  check('something late runs to midnight', wide.last === 24 * 60);
+
+  const canvas = S.paintWeek(document.createElement('canvas'), lay, { title: 'Test', scale: 1 });
+  check('the picture is the layout\u2019s size', canvas.width === lay.width && canvas.height === lay.height);
+  const g = canvas.getContext('2d');
+  const px = (x, y) => [...g.getImageData(Math.round(x), Math.round(y), 1, 1).data].slice(0, 3).join();
+  const b = lay.boxes[0];
+  check('paper where nothing is', px(lay.pad + lay.gutter + 3 * lay.colW + 10, lay.top + 10 * 40 + 10) === '251,251,249');
+  check('colour where a block is', px(b.x + 1, b.y + b.h / 2) !== '251,251,249');
+});
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@
 // everything it serves came from the same deploy. Anything not in the shell
 // (Google APIs, PDF.js) goes straight to the network.
 
-const VERSION = 'planner-v64';
+const VERSION = 'planner-v65';
 const SHELL = [
   './',
   './index.html',
@@ -40,6 +40,9 @@ const SHELL = [
   './js/canvas.js',
   './js/icsimport.js',
   './js/minimonth.js',
+  './js/remind.js',
+  './js/icsexport.js',
+  './js/share.js',
   './js/tracking.js',
   './js/search.js',
   './js/changelog.js',
@@ -95,4 +98,13 @@ self.addEventListener('fetch', (e) => {
     const net = await fetch(e.request).catch(() => null);
     return net || cache.match('./index.html');
   })());
+});
+
+// a reminder tapped: the app, in the tab that is open, else a new one
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+    const c = cs.find((x) => 'focus' in x);
+    return c ? c.focus() : self.clients.openWindow('./index.html#/overview');
+  }));
 });

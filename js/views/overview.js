@@ -6,15 +6,16 @@
 
 import {
   h, clear, today, startOfWeek, weekDays, fmtDate, fmtTime, fmtHours, fmtDuration,
-  toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce
+  toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce, addDays
 } from '../util.js';
 import {
   state, commit, upsertItem, toggleItem, upcoming, overdue, workloadFor,
   categoryLoad, note, touchNote, carryForward, pendingTomorrow, areaColor,
-  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor
+  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor, dayTimeline
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
+import { showWeekOf } from './week.js';
 import { openEvent, openClass } from '../eventedit.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
@@ -295,6 +296,22 @@ function decisionColumn(day, { navigate, go, soon }) {
   col.append(h('section', { class: 'card' },
     h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Focus')),
     focus));
+
+  /* tomorrow at a glance: the first thing on it and how much, so the
+     evening knows what the morning is. It opens that week. */
+  const tmw = addDays(day, 1);
+  const first = dayTimeline(tmw)[0];
+  const plannedTmw = itemsPlannedOn(tmw).length, dueTmw = itemsDueOn(tmw).length;
+  const bits = [plannedTmw ? `${plannedTmw} planned` : '', dueTmw ? `${dueTmw} due` : ''].filter(Boolean).join(' · ');
+  col.append(h('button', {
+    class: 'card tomorrow-peek', type: 'button', title: 'Open that week',
+    onclick: () => { showWeekOf(tmw); go('week'); }
+  },
+  h('span', { class: 'eyebrow' }, `Tomorrow · ${fmtDate(tmw, { weekday: true })}`),
+  h('span', { class: 'peek-first' }, first
+    ? `${fmtTime(first.start, state.settings.hour12)} ${first.title}`
+    : (plannedTmw || dueTmw ? 'Nothing timed yet' : 'Nothing on it yet')),
+  bits ? h('span', { class: 'eyebrow num' }, bits) : null));
 
   /* open work, split the way the sidebar splits it */
   const byCat = h('div', { class: 'card-b' });

@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v65', date: '2026-09-12',
+    title: 'The heads-up',
+    notes: [
+      'Reminders: a notification before a class, a calendar event or a planned block begins. Pick the lead under Settings \u203a Reminders, on each device you want it on.',
+      'Export: the blocks, all-day plans and due dates between two days as an .ics file, under Settings \u203a Calendar file.',
+      'Share, on the Week: the week as a picture, to the share sheet or saved as a PNG.',
+      'Overview says what tomorrow starts with, and how much is on it. It opens that week.'
+    ]
+  },
+  {
     version: 'v64', date: '2026-09-12',
     title: 'The month, small',
     notes: [

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Calendar export tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* The work as a calendar file. What has to hold: between two days each
+   block and all-day plan is out once — a stretch of days once, not once a
+   day — and each deadline as an all-day "Due"; a timed one has a UTC start
+   and end, a whole-day one a date and the morning after; text is escaped
+   and long lines fold. */
+import { suite, storeWith } from './harness.js';
+
+suite('Calendar export — what goes out', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+    items: [
+      { id: 'blk', title: 'Lab; part 1, again', areaId: 'gen', notes: 'Bring\nthe kit', plan: { date: '2026-09-14', start: '10:00', mins: 90 }, due: null },
+      { id: 'trip', title: 'Trip', areaId: null, plan: { date: '2026-09-15', end: '2026-09-17' }, due: null },
+      { id: 'ps', title: 'Problem set', areaId: 'gen', plan: null, due: '2026-09-16' },
+      { id: 'out', title: 'Later', areaId: 'gen', plan: { date: '2026-09-30', start: '09:00', mins: 60 }, due: null }
+    ],
+    cards: [], notes: {}
+  });
+  const X = await import('../js/icsexport.js');
+  const ev = X.eventsBetween('2026-09-14', '2026-09-20');
+  const by = (uid) => ev.find((e) => e.uid === uid);
+  check('a block, a stretch and a deadline, each once', ev.length === 3, ev.map((e) => e.uid).join());
+  check('the block keeps its start and length', by('blk').start === '10:00' && by('blk').mins === 90);
+  check('the stretch runs to its last day', by('trip').end === '2026-09-17' && !by('trip').start);
+  check('the deadline is a "Due" on its day', by('due:ps').title === 'Due · Problem set' && by('due:ps').date === '2026-09-16');
+  check('outside the days is out', !by('out'));
+
+  const ics = X.icsFor(ev, { name: 'Fall 2026', now: new Date(Date.UTC(2026, 8, 12, 12, 0, 0)) });
+  const lines = ics.split('\r\n');
+  check('a calendar', lines[0] === 'BEGIN:VCALENDAR' && lines[lines.length - 2] === 'END:VCALENDAR' && ics.endsWith('\r\n'));
+  check('three events', (ics.match(/BEGIN:VEVENT/g) || []).length === 3);
+  check('a stamp on each', (ics.match(/DTSTAMP:20260912T120000Z/g) || []).length === 3);
+  const tzOff = new Date(2026, 8, 14, 10).getTimezoneOffset();
+  const utc = (h, m) => { const d = new Date(2026, 8, 14, h, m); return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}T${String(d.getUTCHours()).padStart(2, '0')}${String(d.getUTCMinutes()).padStart(2, '0')}00Z`; };
+  check('a timed one goes out in UTC', ics.includes(`DTSTART:${utc(10, 0)}`) && ics.includes(`DTEND:${utc(11, 30)}`), `offset ${tzOff}`);
+  check('a whole day is a date, ending the morning after', ics.includes('DTSTART;VALUE=DATE:20260915') && ics.includes('DTEND;VALUE=DATE:20260918'));
+  check('the deadline too', ics.includes('DTSTART;VALUE=DATE:20260916') && ics.includes('DTEND;VALUE=DATE:20260917'));
+  check('the area names the summary', ics.includes('SUMMARY:General: Lab\\; part 1\\, again'));
+  check('a note is the description, newline escaped', ics.includes('DESCRIPTION:Bring\\nthe kit'));
+  check('no area, no prefix', ics.includes('SUMMARY:Trip'));
+  check('a uid that stays the same file to file', ics.includes('UID:blk@semester-planner'));
+});
+
+suite('Calendar export — the format\u2019s small rules', async ({ check }) => {
+  const X = await import('../js/icsexport.js');
+  const long = 'SUMMARY:' + 'x'.repeat(100);
+  const f = X.fold(long);
+  check('a long line folds at 75', f.split('\r\n')[0].length === 75 && f.split('\r\n')[1].startsWith(' '));
+  check('...and reads back whole', f.replace(/\r\n /g, '') === long);
+  check('a short line is left alone', X.fold('BEGIN:VEVENT') === 'BEGIN:VEVENT');
+  check('minutes past midnight run into the next day', X.utcStamp('2026-09-14', 25 * 60) === X.utcStamp('2026-09-15', 60));
+});
+</script>
+</body>
+</html>
