@@ -4,7 +4,7 @@ import {
   h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx
 } from '../util.js';
 import {
-  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor
+  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor, scheduleDrift
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -91,7 +91,8 @@ export function renderWeek(root, { navigate } = {}) {
     h('div', { style: { flex: 1 } }),
     h('span', { class: 'eyebrow num', title: 'Planned work this week' },
       `${load.count} tasks · ${fmtHours(load.mins)}`),
-    h('span', { class: 'eyebrow tz-chip', title: `All times shown in ${tz()}` }, tzLabel()),
+    // the zone is news only when this device is not where the schedules were written
+    scheduleDrift() ? h('span', { class: 'eyebrow tz-chip', title: `All times shown in ${tz()}` }, tzLabel()) : null,
     h('button', {
       class: 'btn ghost sm desktop-only',
       'aria-pressed': String(showExternal),
@@ -294,16 +295,14 @@ export function renderWeek(root, { navigate } = {}) {
     .sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : 1)
     .slice(0, 24);
 
-  const tray = h('div', { class: 'tray' },
+  // nothing waiting is one quiet line; the hint and the shelf come with the chips
+  const tray = h('div', { class: 'tray' + (loose.length ? '' : ' is-empty') },
     h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
       h('span', { class: 'eyebrow' }, 'Unscheduled'),
-      h('span', { class: 'eyebrow num' }, String(loose.length)),
-      h('span', { class: 'eyebrow', style: { color: 'var(--ink-3)' } }, 'drag onto a day to plan the work')));
+      h('span', { class: 'eyebrow num' }, loose.length ? String(loose.length) : 'none'),
+      loose.length ? h('span', { class: 'eyebrow', style: { color: 'var(--ink-3)' } }, 'drag onto a day to plan the work') : null));
 
   const items = h('div', { class: 'tray-items' });
-  if (!loose.length) {
-    items.append(h('span', { style: { color: 'var(--ink-3)', fontSize: '13px' } }, 'Everything with a deadline has a slot. '));
-  }
   for (const t of loose) {
     const chip = h('div', {
       class: 'tray-item', dataset: { id: t.id },
@@ -312,7 +311,7 @@ export function renderWeek(root, { navigate } = {}) {
     wireTray(chip, t, body, days, dayStart, hourH, navigate, turner);
     items.append(chip);
   }
-  tray.append(items);
+  if (loose.length) tray.append(items);
   root.append(tray);
 
   // open on a useful hour rather than at midnight — and, where the week is

@@ -335,8 +335,8 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .allday-rail {
   display: grid; grid-template-columns: var(--gutter-w) repeat(7, minmax(0,1fr));
   border-bottom: 1px solid var(--rule); background: var(--surface-2);
-  /* room for three stacked all-day items before it needs to scroll */
-  min-height: 74px; max-height: 148px; overflow-y: auto;
+  /* one row of flags tall, growing with what is there; three high, it scrolls */
+  min-height: 27px; max-height: 148px; overflow-y: auto;
 }
 .allday-rail .cell { border-left: 1px solid var(--rule-soft); padding: 5px 4px; display: flex; flex-direction: column; gap: 3px; cursor: crosshair; }
 .allday-rail .cell:hover { background: var(--surface); }
@@ -475,6 +475,8 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 
 /* unscheduled tray */
 .tray { border-top: 1px solid var(--rule); background: var(--surface-2); padding: 9px 22px 14px; flex: none; max-height: 30vh; overflow-y: auto; }
+/* nothing waiting: one quiet line, not a shelf */
+.tray.is-empty { padding: 6px 22px; }
 .tray-items { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 7px; }
 .tray-item {
   border: 1px solid var(--rule); background: var(--surface); border-radius: var(--r);

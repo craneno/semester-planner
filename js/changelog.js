@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v59', date: '2026-09-11',
+    title: 'A quieter week',
+    notes: [
+      'The all-day rail is one row tall and grows only with what is in it, so the hours start higher up. With nothing unscheduled the tray is one quiet line. The time-zone chip shows only when this device is not where the schedules were written.'
+    ]
+  },
+  {
     version: 'v58', date: '2026-09-11',
     title: 'Signed in for the week, and the week turned in hand',
     notes: [
