@@ -353,9 +353,7 @@ export function renderSettings(root, { navigate }) {
       field('Clock', h('select', { onchange: (e) => { commit(() => { s.hour12 = e.target.value === '12'; }); navigate(); } },
         h('option', { value: '12', selected: s.hour12 }, '12-hour'),
         h('option', { value: '24', selected: !s.hour12 }, '24-hour')))),
-    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
-      field('Day grid starts', hourSelect('dayStart', navigate)),
-      field('Day grid ends', hourSelect('dayEnd', navigate))),
+    field('Week opens at', hourSelect(navigate)),
     /* The one setting here that deletes something, so it says both what and
        when — "at the reset" means nothing without the hour beside it. */
     toggle(
@@ -719,21 +717,11 @@ function setTerm(key, value, navigate) {
   navigate();
 }
 
-/* The week grid is `dayStart` to `dayEnd`; a start at or past the end drew
-   no hours at all. The other end moves out of the way. */
-function hourSelect(key, navigate) {
+/* The week draws all 24 hours; `dayStart` is only where it opens. */
+function hourSelect(navigate) {
   const s = state.settings;
-  const last = key === 'dayStart' ? 23 : 24;
   return h('select', {
-    onchange: (e) => {
-      const v = +e.target.value;
-      commit(() => {
-        s[key] = v;
-        if (key === 'dayStart' && s.dayEnd <= v) s.dayEnd = v + 1;
-        if (key === 'dayEnd' && s.dayStart >= v) s.dayStart = v - 1;
-      });
-      navigate?.();
-    }
+    onchange: (e) => { commit(() => { s.dayStart = +e.target.value; }); navigate?.(); }
   },
-  ...Array.from({ length: last + 1 }, (_, i) => h('option', { value: i, selected: s[key] === i }, String(i).padStart(2, '0') + ':00')));
+  ...Array.from({ length: 24 }, (_, i) => h('option', { value: i, selected: s.dayStart === i }, String(i).padStart(2, '0') + ':00')));
 }

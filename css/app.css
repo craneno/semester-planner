@@ -380,7 +380,6 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
   );
   background-size: 100% var(--hour-h);
 }
-.daycol.weekend { background-color: color-mix(in srgb, var(--ink) 2.5%, transparent); }
 .daycol.today { background-color: color-mix(in srgb, var(--accent) 5%, transparent); }
 
 .blk {

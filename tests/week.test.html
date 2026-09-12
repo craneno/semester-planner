@@ -68,8 +68,10 @@ suite('Week — the page turns under a drag', async ({ check }) => {
     const [bx, by] = mid(blk.getBoundingClientRect());
     pt('pointerdown', bx, by, blk);
     pt('pointermove', bx + 12, by + 12);
+    // the grid is a day tall and the scroller a window on it: the edge is met inside that window
     const sc = stage.querySelector('.week-scroll').getBoundingClientRect();
-    pt('pointermove', sc.right - 4, by);
+    const yIn = sc.top + sc.height / 2;
+    pt('pointermove', sc.right - 4, yIn);
     check('the button for that way lights up', stage.querySelector('[data-turn="1"]').classList.contains('is-hot'));
     check('...and nothing has turned yet', dates()[0] === '2026-09-06');
     await tick(1500);
@@ -81,7 +83,7 @@ suite('Week — the page turns under a drag', async ({ check }) => {
     check('nothing was rebuilt under the pointer', draws === 0, String(draws));
 
     // back over the grid the turn lets go; let go over Wednesday of the new week
-    pt('pointermove', bx, by);
+    pt('pointermove', bx, yIn);
     check('back over the grid, nothing is armed', !stage.querySelector('.is-hot'));
     const wed = stage.querySelectorAll('.daycol')[3].getBoundingClientRect();
     pt('pointermove', wed.left + wed.width / 2, wed.top + 30);
@@ -95,7 +97,7 @@ suite('Week — the page turns under a drag', async ({ check }) => {
     pt('pointerdown', cx, cy, blk2);
     pt('pointermove', cx + 12, cy + 12);
     const sc2 = stage.querySelector('.week-scroll').getBoundingClientRect();
-    pt('pointermove', sc2.left + 4, cy);
+    pt('pointermove', sc2.left + 4, sc2.top + sc2.height / 2);
     await tick(1500);
     check('held at the left edge, the week turns back', dates()[0] === '2026-09-06', dates().join(' '));
     const before = draws;

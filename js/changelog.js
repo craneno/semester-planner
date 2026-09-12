@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v60', date: '2026-09-11',
+    title: 'The whole day',
+    notes: [
+      'The week draws all 24 hours and scrolls through them; the setting is now only where it opens. Weekend columns are no longer shaded (they read as greyed out). "Unscheduled · none" gets its dot.'
+    ]
+  },
+  {
     version: 'v59', date: '2026-09-11',
     title: 'A quieter week',
     notes: [

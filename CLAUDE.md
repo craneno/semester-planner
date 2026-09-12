@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v59**.
+Schema **20**, service worker **planner-v60**.
 
 ## Working with me
 
@@ -204,7 +204,7 @@ under Personal but are **not** areas: `CATEGORY_PINS` hangs them off the group,
 outside the `reorderable()` host.
 
 **Week follows the day** (`follows`) until prev/next let go of it. It draws
-the settings' hours, opened wider for anything on those days (`shownHours`);
+all 24 hours, opened at the settings' `dayStart` (or a little before now);
 a block past midnight is drawn to midnight. A click or tap on the empty
 all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`). **The week
 turns under a drag** (`pageTurner`): held at the grid's edge or over ‹ ›, the

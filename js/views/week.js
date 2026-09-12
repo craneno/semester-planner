@@ -49,33 +49,13 @@ let showExternal = true;
 const COMPACT_H = 42;          // below this a block gets one line, not two
 
 
-/**
- * The hours the grid draws: the settings' range, opened wider when something
- * on these days falls outside it. A block at 23:00 under a grid that ended at
- * 23:00 was drawn below the last line, in nothing.
- */
-function shownHours(days) {
-  const s = state.settings;
-  let lo = clamp(s.dayStart | 0, 0, 23), hi = clamp(s.dayEnd | 0, lo + 1, 24);
-  const span = (a, b) => {
-    if (a == null) return;
-    lo = Math.min(lo, Math.floor(a / 60));
-    hi = Math.max(hi, Math.ceil(Math.min(24 * 60, b) / 60));
-  };
-  for (const d of days) {
-    for (const c of classesOn(d)) span(toMin(c.start), toMin(c.end) || toMin(c.start) + 60);
-    for (const e of eventsOn(d)) if (!e.allDay && e.start) span(toMin(e.start), toMin(e.end) || toMin(e.start) + 60);
-    for (const t of itemsPlannedOn(d)) if (t.plan.start) span(toMin(t.plan.start), toMin(t.plan.start) + (t.plan.mins || t.estMins || 60));
-  }
-  return { dayStart: lo, dayEnd: hi };
-}
-
 export function renderWeek(root, { navigate } = {}) {
   clear(root);
   if (follows) anchor = today();
   const ws = state.settings.weekStart;
   const days = weekDays(startOfWeek(anchor, ws));
-  const { dayStart, dayEnd } = shownHours(days);
+  // the whole day, always: a block at 23:00 has somewhere to be, and so does a scroll to it
+  const dayStart = 0, dayEnd = 24;
   const hours = Array.from({ length: dayEnd - dayStart }, (_, i) => dayStart + i);
   const load = workloadFor(days);
   const hour12 = state.settings.hour12;
@@ -298,8 +278,8 @@ export function renderWeek(root, { navigate } = {}) {
   // nothing waiting is one quiet line; the hint and the shelf come with the chips
   const tray = h('div', { class: 'tray' + (loose.length ? '' : ' is-empty') },
     h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '10px' } },
-      h('span', { class: 'eyebrow' }, 'Unscheduled'),
-      h('span', { class: 'eyebrow num' }, loose.length ? String(loose.length) : 'none'),
+      h('span', { class: 'eyebrow' }, loose.length ? 'Unscheduled' : 'Unscheduled · none'),
+      loose.length ? h('span', { class: 'eyebrow num' }, String(loose.length)) : null,
       loose.length ? h('span', { class: 'eyebrow', style: { color: 'var(--ink-3)' } }, 'drag onto a day to plan the work') : null));
 
   const items = h('div', { class: 'tray-items' });
@@ -318,7 +298,9 @@ export function renderWeek(root, { navigate } = {}) {
   // wider than the screen, on today rather than on Sunday
   requestAnimationFrame(() => {
     const now = new Date();
-    const target = days.includes(today()) ? Math.max(dayStart, now.getHours() - 2) : 8;
+    // opened at the settings' hour, or a little before now on a week with today in it
+    const open = clamp(state.settings.dayStart | 0, 0, 23);
+    const target = days.includes(today()) ? Math.max(open, now.getHours() - 2) : open;
     scroller.scrollTop = Math.max(0, (target - dayStart) * hourH - 20);
     const todayCol = body.querySelector('.daycol.today');
     if (todayCol && scroller.scrollWidth > scroller.clientWidth + 1) {
