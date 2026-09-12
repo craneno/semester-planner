@@ -139,6 +139,29 @@ export async function sharedStoreWith(raw) {
   return import('../js/store.js');
 }
 
+/**
+ * Draw a view on a stage of its own, with the hosts a view or a panel writes
+ * to — toasts, the peek and its scrim, the month in the sidebar — made when
+ * the page lacks them. `ctx` fills in `navigate` (draws again) and `go`
+ * (remembers where it was sent, in `went`). `done()` takes the stage away.
+ */
+export function renderInto(render, ctx = {}) {
+  for (const id of ['toasts', 'peek', 'peek-scrim', 'mini-month', 'nextup']) {
+    if (document.getElementById(id)) continue;
+    const el = document.createElement(id === 'peek' ? 'aside' : 'div');
+    el.id = id;
+    el.hidden = true;
+    document.body.append(el);
+  }
+  const stage = document.createElement('div');
+  stage.className = 'stage';
+  document.body.append(stage);
+  const went = [];
+  const full = { navigate: () => render(stage, full), go: (key) => went.push(key), ...ctx };
+  render(stage, full);
+  return { stage, ctx: full, went, done: () => stage.remove() };
+}
+
 const KEY = 'semesterPlanner.v1';
 
 /** Write a payload for the next store instance to read; returns what it wrote. */

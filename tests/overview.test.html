@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overview tests</title>
+<link rel="stylesheet" href="./tests.css">
+<style>
+  .stage { position: absolute; left: -3000px; top: 0; width: 1100px; }
+</style>
+</head>
+<body>
+<script type="module">
+/* The day on one page. What has to hold: today's blocks are drawn in the
+   day column, a deadline is in the list, the focus box holds the note, the
+   top three has today's work, and tomorrow's peek names what tomorrow
+   starts with and opens the Week when clicked. */
+import { suite, sharedStoreWith, renderInto } from './harness.js';
+import { today, addDays } from '../js/util.js';
+
+const day = today(), tmw = addDays(day, 1);
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
+  items: [
+    { id: 'blk', title: 'Write the lab', areaId: 'gen', plan: { date: day, start: '10:00', mins: 90 }, due: null },
+    { id: 'due', title: 'Problem set 3', areaId: 'gen', plan: null, due: addDays(day, 3) },
+    { id: 'lec', title: 'Lecture', areaId: 'gen', plan: { date: tmw, start: '09:30', mins: 60 }, due: null }
+  ],
+  cards: [], notes: { [day]: { focus: 'Ship it', text: '', tomorrow: '', top3: [] } }
+});
+
+suite('Overview — the day on one page', async ({ check }) => {
+  const { renderOverview } = await import('../js/views/overview.js');
+  const v = renderInto(renderOverview);
+  try {
+    const text = v.stage.textContent;
+    check('a headline', !!v.stage.querySelector('h1') && /week/i.test(v.stage.querySelector('h1').textContent));
+    const blk = [...v.stage.querySelectorAll('.today-col .blk')].find((b) => b.textContent.includes('Write the lab'));
+    check('today\u2019s block is in the day column', !!blk);
+    check('...at its hour, as tall as its length', blk && parseFloat(blk.style.top) > 0 && parseFloat(blk.style.height) > 0);
+    check('the focus box holds the note', v.stage.querySelector('.focus-line')?.value === 'Ship it');
+    check('the top three has today\u2019s work', /Write the lab/.test(v.stage.querySelector('.overview-side')?.textContent || ''));
+    check('the deadline is in the list', text.includes('Problem set 3'));
+    const peek = v.stage.querySelector('.tomorrow-peek');
+    check('tomorrow\u2019s peek names what it starts with', !!peek && /9:30/.test(peek.textContent) && peek.textContent.includes('Lecture'), peek?.textContent);
+    check('...and how much is on it', /1 planned/.test(peek?.textContent || ''));
+    peek.click();
+    check('...and opens the Week', v.went.includes('week'));
+    const W = await import('../js/views/week.js');
+    check('...on that day', W.weekAnchor() === tmw, W.weekAnchor());
+    W.showWeekOf();
+  } finally {
+    v.done();
+  }
+});
+
+suite('Overview — an empty day', async ({ check }) => {
+  const { renderOverview } = await import('../js/views/overview.js');
+  s.state.items = [];
+  const v = renderInto(renderOverview);
+  try {
+    check('says so', v.stage.querySelector('h1').textContent === 'Nothing scheduled this week yet.');
+    check('tomorrow has nothing on it', /Nothing on it yet/.test(v.stage.querySelector('.tomorrow-peek')?.textContent || ''));
+  } finally {
+    v.done();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+// @ts-check
 // store/constants.js — the names every part of the store agrees on.
 // Pure: no state, no DOM, safe to import from anywhere.
 

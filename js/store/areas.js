@@ -1,3 +1,4 @@
+// @ts-check
 // store/areas.js — where an area is found. Selectors only; the edits stay in
 // store.js. Every function takes the state as its first argument and owns
 // none of its own, so store.js can bind them to the one live state and a test
@@ -5,13 +6,20 @@
 
 import { CATEGORY_IDS } from './constants.js';
 
-export const areaById = (s, id) => s.areas.find((a) => a.id === id) || null;
-export const areaColor = (s, id) => (areaById(s, id) || {}).color || 'var(--muted)';
-/** A task's colour: its own, when it has one, else its area's. */
-export const itemColor = (s, t) => t?.color || areaColor(s, t?.areaId);
-export const areaName = (s, id) => (areaById(s, id) || {}).name || 'Unassigned';
+/** @typedef {import('../types.js').State} State */
 
-/** Areas filed under one category, active first unless archived is asked for. */
+/** @param {State} s */
+export const areaById = (s, id) => s.areas.find((a) => a.id === id) || null;
+/** @param {State} s */
+export const areaColor = (s, id) => areaById(s, id)?.color || 'var(--muted)';
+/** A task's colour: its own, when it has one, else its area's.
+ * @param {State} s */
+export const itemColor = (s, t) => t?.color || areaColor(s, t?.areaId);
+/** @param {State} s */
+export const areaName = (s, id) => areaById(s, id)?.name || 'Unassigned';
+
+/** Areas filed under one category, active first unless archived is asked for.
+ * @param {State} s */
 export function areasInCategory(s, categoryId, { includeArchived = false } = {}) {
   return s.areas
     .filter((a) => a.category === categoryId && (includeArchived || !a.archived))
@@ -23,17 +31,20 @@ export function areasInCategory(s, categoryId, { includeArchived = false } = {})
  * category, then by the order they were dragged into. Not every area belongs
  * on a chart — a pile of errands has no shape over fifteen weeks — so an area
  * can sit this one out without being archived.
- */
+
+ * @param {State} s */
 export function chartAreas(s) {
   return CATEGORY_IDS.flatMap((c) => areasInCategory(s, c).filter((a) => a.onChart !== false));
 }
 
 /** Where an item goes when nothing else is said: the Personal area, if there
- *  is one. Falls back to unassigned rather than inventing an area. */
+ *  is one. Falls back to unassigned rather than inventing an area.
+ * @param {State} s */
 export const defaultAreaId = (s) => areasInCategory(s, 'personal')[0]?.id || null;
 
 /** Where a new thing goes with no area named: the area last used or visited
- *  on this device (`settings.lastAreaId`, never synced), else the default. */
+ *  on this device (`settings.lastAreaId`, never synced), else the default.
+ * @param {State} s */
 export const areaForNew = (s) => {
   const last = s.settings?.lastAreaId;
   return last && s.areas.some((a) => a.id === last && !a.archived) ? last : defaultAreaId(s);

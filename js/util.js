@@ -1,3 +1,4 @@
+// @ts-check
 // util.js — dates, DOM, formatting. No dependencies.
 
 export const uid = (p = 'i') =>
@@ -82,7 +83,7 @@ export function addDays(s, n) {
 export function diffDays(a, b) { // b - a in whole days
   const da = parseYmd(a), db = parseYmd(b);
   if (!da || !db) return 0;
-  return Math.round((db - da) / 86400000);
+  return Math.round((db.getTime() - da.getTime()) / 86400000);
 }
 
 export function startOfWeek(s, weekStartsOn = 1) {
@@ -169,7 +170,7 @@ export function toRfc3339(dateStr, hhmm) {
 
 export function fromRfc3339(s) { // -> {date, time, dt}
   const dt = new Date(s);
-  if (isNaN(dt)) return null;
+  if (isNaN(dt.getTime())) return null;
   return { date: ymd(dt), time: `${pad(dt.getHours())}:${pad(dt.getMinutes())}`, dt };
 }
 

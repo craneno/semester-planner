@@ -1,20 +1,27 @@
+// @ts-check
 // store/habits.js — daily habits, ticked per day. Takes the state as its
 // first argument; store.js binds it to the live one.
 
 import { uid, today, addDays } from '../util.js';
 
+/** @typedef {import('../types.js').State} State */
+
 /** Days of an unbroken run before a habit is taken to have stuck. */
 export const HABIT_TARGET = 21;
 
-/** Days still to go, or 0 once the run is long enough. */
+/** Days still to go, or 0 once the run is long enough.
+ * @param {State} s */
 export const habitRemaining = (s, id, ref = today()) =>
   Math.max(0, HABIT_TARGET - habitStreak(s, id, ref));
 
+/** @param {State} s */
 export const activeHabits = (s) =>
   s.habits.filter((x) => !x.archived).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
+/** @param {State} s */
 export const habitDone = (s, date, id) => (s.habitLog[date] || []).includes(id);
 
+/** @param {State} s */
 export function toggleHabit(s, date, id, force) {
   const on = force ?? !habitDone(s, date, id);
   const list = s.habitLog[date] || [];
@@ -30,7 +37,8 @@ export function toggleHabit(s, date, id, force) {
 }
 
 /** Consecutive days ticked, counting back. Today not yet ticked doesn't break
- *  a streak — the day isn't over — but a missed yesterday does. */
+ *  a streak — the day isn't over — but a missed yesterday does.
+ * @param {State} s */
 export function habitStreak(s, id, ref = today()) {
   let day = habitDone(s, ref, id) ? ref : addDays(ref, -1);
   let n = 0;
@@ -38,6 +46,7 @@ export function habitStreak(s, id, ref = today()) {
   return n;
 }
 
+/** @param {State} s */
 export function addHabit(s, name) {
   const habit = {
     id: uid('h'), name: name.trim() || 'Untitled habit',
@@ -48,13 +57,15 @@ export function addHabit(s, name) {
 }
 
 // stamped like every other row, or a rename here loses to any copy elsewhere
+/** @param {State} s */
 export function updateHabit(s, id, patch) {
   const x = s.habits.find((h) => h.id === id);
   if (x) Object.assign(x, patch, { updatedAt: new Date().toISOString() });
   return x;
 }
 
-/** Removes the habit and every tick it ever had — there is nothing else to keep. */
+/** Removes the habit and every tick it ever had — there is nothing else to keep.
+ * @param {State} s */
 export function deleteHabit(s, id) {
   const i = s.habits.findIndex((x) => x.id === id);
   if (i >= 0) s.habits.splice(i, 1);
@@ -67,6 +78,7 @@ export function deleteHabit(s, id) {
   }
 }
 
+/** @param {State} s */
 export function reorderHabits(s, orderedIds) {
   const rest = s.habits.filter((x) => !orderedIds.includes(x.id)).map((x) => x.id);
   const now = new Date().toISOString();

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v65**.
+Schema **20**, service worker **planner-v66**.
 
 ## Working with me
 
@@ -21,7 +21,9 @@ Before you push, click through the app and open **`/tests/`**. The Deploy job
 runs the same page headless (`tests/run.mjs`, Playwright): a red suite is no deploy.
 **Bump `VERSION` in `sw.js` whenever a file in its `SHELL` changes**, add new
 modules to `SHELL`, **and add the release to `js/changelog.js` in the same
-commit**. The newest changelog entry *is* the version; `version.test.html` fails
+commit** — `python scripts/release.py "Title" -n "note"` does the three files
+at once, and the Deploy job stops a push that changed a shell file without
+the bump (`scripts/check_shell.py`). The newest changelog entry *is* the version; `version.test.html` fails
 when it and `sw.js` disagree, or when a module we import is not cached. Install
 fetches with `cache: 'reload'` (Pages' `max-age=600` would fill the new cache
 with the old files) and **the fetch handler never writes to the cache**, so a
@@ -291,7 +293,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1475 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1501 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
@@ -302,10 +304,16 @@ waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `localStorage` once, at import, so `migrate()` needs a fresh instance —
 `storeWith(raw)`, which **checks** its seed. A file that has not reported in
 90s is a **failure**. A fresh instance has its own `state`, so a suite that
-pokes state *and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` —
-once per page, since `import()` caches.
+pokes state *and* calls any other module must use `sharedStoreWith()` —
+once per page, since `import()` caches. A view is drawn with
+`renderInto(render)`: a stage, the hosts a panel writes to, and a `go` that
+remembers where it was sent.
 
 ## House rules
 
 Days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
-(`js/util.js`). DOM by `h()`, never template strings. No framework, JSX or TypeScript.
+(`js/util.js`). DOM by `h()`, never template strings. No framework, JSX or
+TypeScript — but the shapes are JSDoc in `js/types.js`, and a module that
+says `// @ts-check` at its top is read by `tsc` in the Deploy job
+(`jsconfig.json`; the pure ones do, the views not yet). A new field on a task
+goes in the `Item` typedef too.

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Editor tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* The task panel. What has to hold: it opens on the task with its name and
+   its when; a change in a box is written to the task; an end before the
+   start means the morning after; All day drops the time and offers Until,
+   which makes a stretch; a colour swatch gives the task a colour of its
+   own and the first takes it back. */
+import { suite, sharedStoreWith, renderInto } from './harness.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
+  items: [{ id: 'a', title: 'Late show', areaId: 'gen', plan: { date: '2026-09-11', start: '22:00', mins: 60 }, due: null }],
+  cards: [], notes: {}
+});
+
+const change = (el, value) => { el.value = value; el.dispatchEvent(new Event('change', { bubbles: true })); };
+const $ = (sel) => document.querySelector('#peek ' + sel);
+const $$ = (sel) => [...document.querySelectorAll('#peek ' + sel)];
+
+suite('Editor — the panel on a task', async ({ check }) => {
+  const E = await import('../js/editor.js');
+  const U = await import('../js/ui.js');
+  renderInto(() => {}).done();     // the hosts the panel writes to
+  try {
+    E.openItem('a');
+    check('it opens', document.getElementById('peek').classList.contains('open'));
+    check('on the task, by name', $('.peek-title')?.value === 'Late show');
+    const modes = $$('.mode-toggle .mode');
+    check('three ways of being when, Scheduled on', modes.length === 3 && modes[0].classList.contains('on'), modes.map((m) => m.textContent).join());
+    const times = $$('input[type=time]');
+    check('from and to', times.length === 2 && times[0].value === '22:00' && times[1].value === '23:00', times.map((t) => t.value).join());
+
+    change(times[1], '01:00');
+    check('an end before the start is the morning after', s.itemById('a').plan.mins === 180, String(s.itemById('a').plan.mins));
+
+    const swatches = $$('.swatch');
+    check('the area\u2019s colour and ten more', swatches.length === 11 && swatches[0].classList.contains('on'));
+    swatches[3].click();
+    check('a swatch gives it a colour of its own', s.itemById('a').color === swatches[3].title, s.itemById('a').color);
+    check('...shown as on', $$('.swatch')[3].classList.contains('on'));
+    $$('.swatch')[0].click();
+    check('the first takes it back', s.itemById('a').color === null);
+
+    $$('.mode-toggle .mode')[1].click();
+    check('All day drops the time', s.itemById('a').plan.start === null && s.itemById('a').plan.date === '2026-09-11');
+    const dates = $$('input[type=date]');
+    check('...and offers Until', dates.length === 2 && dates[1].value === '');
+    change(dates[1], '2026-09-13');
+    check('Until makes a stretch', s.itemById('a').plan.end === '2026-09-13');
+    change($$('input[type=date]')[1], '2026-09-10');
+    check('an Until before the day is no stretch', !s.itemById('a').plan.end);
+
+    U.closePeek();
+    check('it closes', !document.getElementById('peek').classList.contains('open'));
+  } finally {
+    U.closePeek();
+  }
+});
+</script>
+</body>
+</html>

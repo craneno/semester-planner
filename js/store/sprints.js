@@ -1,3 +1,4 @@
+// @ts-check
 // store/sprints.js — a stretch of the term, swept out on the chart. Both kinds
 // are the same object; `kind` decides whether the deliverables are asked for
 // and drawn. Takes the state as its first argument; store.js binds it to the
@@ -6,8 +7,12 @@
 import { uid, today } from '../util.js';
 import { SPRINT_KINDS } from './constants.js';
 
+/** @typedef {import('../types.js').State} State */
+
+/** @param {State} s */
 export const sprintById = (s, id) => s.sprints.find((p) => p.id === id) || null;
 
+/** @param {State} s */
 export const sprintsForArea = (s, areaId) =>
   s.sprints.filter((p) => p.areaId === areaId)
     .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
@@ -19,6 +24,7 @@ export function sprintProgress(p) {
   return list.filter((d) => d.done).length / list.length;
 }
 
+/** @param {State} s */
 export function upsertSprint(s, patch) {
   const now = new Date().toISOString();
   let p = patch.id ? sprintById(s, patch.id) : null;
@@ -36,11 +42,13 @@ export function upsertSprint(s, patch) {
   return p;
 }
 
+/** @param {State} s */
 export function deleteSprint(s, id) {
   const i = s.sprints.findIndex((p) => p.id === id);
   if (i >= 0) s.sprints.splice(i, 1);
 }
 
+/** @param {State} s */
 export function addDeliverable(s, sprintId, text) {
   const p = sprintById(s, sprintId);
   if (!p || !String(text).trim()) return null;
@@ -50,6 +58,7 @@ export function addDeliverable(s, sprintId, text) {
   return d;
 }
 
+/** @param {State} s */
 export function updateDeliverable(s, sprintId, id, patch) {
   const d = sprintById(s, sprintId)?.deliverables.find((x) => x.id === id);
   if (!d) return null;
@@ -58,6 +67,7 @@ export function updateDeliverable(s, sprintId, id, patch) {
   return d;
 }
 
+/** @param {State} s */
 export function deleteDeliverable(s, sprintId, id) {
   const p = sprintById(s, sprintId);
   if (!p) return;

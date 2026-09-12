@@ -1,3 +1,4 @@
+// @ts-check
 // store/urls.js — a URL made safe, and a name guessed from it. Pure.
 //
 // Titles are derived from the URL and nowhere else. A page's real <title>

@@ -1,3 +1,4 @@
+// @ts-check
 // icsexport.js — the planner's work as a calendar file.
 //
 // Any calendar reads .ics. A stretch of days is between two dates: each

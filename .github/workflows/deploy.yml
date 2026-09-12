@@ -24,6 +24,13 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # A file the worker caches changed, so its VERSION has to have — or a
+      # browser keeps the old files. scripts/check_shell.py says which.
+      - name: A shell change bumps the version
+        run: python3 scripts/check_shell.py
 
       - name: Check every module parses
         run: |
@@ -40,6 +47,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # The modules that say `// @ts-check`, read against js/types.js. No
+      # TypeScript in the repo — JSDoc, and the compiler run over it.
+      - name: Typecheck the modules that ask for it
+        run: npx -y -p typescript@5.6.3 tsc -p jsconfig.json
+
       - name: Run the tests in Chromium
         run: |
           npm i --no-save --no-audit --no-fund playwright@1.47.2

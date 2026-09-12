@@ -1,3 +1,4 @@
+// @ts-check
 // remind.js — a heads-up before a thing begins.
 //
 // A lead of minutes, set on this device: a notification is the device's to

@@ -1,3 +1,4 @@
+// @ts-check
 // repeat.js — a repeating item is a rule, not fifty copies of itself.
 //
 // Everything here is pure date arithmetic on that rule: give it a shape and a

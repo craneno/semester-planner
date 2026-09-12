@@ -1,3 +1,4 @@
+// @ts-check
 // store/wishlist.js — one list, not two. A thing you want and a parcel on its
 // way are the same object at different points in its life, so wanting,
 // ordering and waiting for something never means retyping it — the status
@@ -9,10 +10,13 @@ import { WISH_STATUSES } from './constants.js';
 import { normalizeUrl } from './urls.js';
 import { CARRIERS, detectTracking, trackingUrl, normalizeTracking } from './parcels.js';
 
+/** @typedef {import('../types.js').State} State */
+
 /** Ordered, shipped: bought and not here yet. This is what an ETA is for. */
 export const WISH_IN_FLIGHT = ['ordered', 'shipped'];
 const isInFlight = (w) => WISH_IN_FLIGHT.includes(w.status);
 
+/** @param {State} s */
 export const wishById = (s, id) => s.wishlist.find((w) => w.id === id) || null;
 
 /** Undated last, so a parcel with no ETA never hides one arriving tomorrow. */
@@ -20,8 +24,11 @@ const byEta = (a, b) => (a.eta || '9999-99-99') < (b.eta || '9999-99-99') ? -1
   : (a.eta || '9999-99-99') > (b.eta || '9999-99-99') ? 1
     : a.title.localeCompare(b.title);
 
+/** @param {State} s */
 export const wishesInFlight = (s) => s.wishlist.filter(isInFlight).sort(byEta);
+/** @param {State} s */
 export const wishesWanted = (s) => s.wishlist.filter((w) => w.status === 'wanted');
+/** @param {State} s */
 export const wishesDelivered = (s) => s.wishlist
   .filter((w) => w.status === 'delivered')
   .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -83,6 +90,7 @@ export function parseWishAdd(input) {
   };
 }
 
+/** @param {State} s */
 export function addWish(s, input, { status = 'wanted' } = {}) {
   // Check the raw line, not the parsed title: parseWishAdd falls back to
   // "Untitled" so that "$40" still records something, which would otherwise
@@ -109,6 +117,7 @@ export function addWish(s, input, { status = 'wanted' } = {}) {
   return wish;
 }
 
+/** @param {State} s */
 export function updateWish(s, id, patch) {
   const w = wishById(s, id);
   if (!w) return null;
@@ -133,6 +142,7 @@ export function updateWish(s, id, patch) {
   return w;
 }
 
+/** @param {State} s */
 export function deleteWish(s, id) {
   const i = s.wishlist.findIndex((w) => w.id === id);
   if (i >= 0) s.wishlist.splice(i, 1);

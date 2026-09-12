@@ -1,3 +1,4 @@
+// @ts-check
 // share.js — a week as a picture.
 //
 // Drawn by hand on a canvas: the days across, the hours down, opened wider

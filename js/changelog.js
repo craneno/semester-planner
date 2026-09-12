@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v66', date: '2026-09-12',
+    title: 'Kept honest',
+    notes: [
+      'The shapes of a task, an area, a habit and the rest are written down once, in js/types.js, and the pure modules are checked against them on every deploy.',
+      'Overview and the task panel have tests of their own, drawn on a stage.',
+      'A release is one command, and a push that changes a cached file without a new version is stopped before it deploys.'
+    ]
+  },
+  {
     version: 'v65', date: '2026-09-12',
     title: 'The heads-up',
     notes: [

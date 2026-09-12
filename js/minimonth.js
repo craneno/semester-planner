@@ -1,3 +1,4 @@
+// @ts-check
 // minimonth.js — the month in the sidebar, small.
 //
 // A month at a glance beside the views. A click on a day opens that week;
@@ -34,6 +35,8 @@ let over = null;         // the day a drag is over
  * Draw it into `host`. `shown` is a day in the week on screen — null when
  * Week is not the view, and then today is the mark. `onPick(day)` opens the
  * week that day is in.
+ * @param {HTMLElement|null} host
+ * @param {{ shown?: string|null, onPick?: (day: string) => void }} [opts]
  */
 export function renderMiniMonth(host, { shown = null, onPick } = {}) {
   if (!host) return;
@@ -69,7 +72,7 @@ export function renderMiniMonth(host, { shown = null, onPick } = {}) {
    any; the drop asks which; the end puts the light out. */
 const unlight = () => { for (const e of document.querySelectorAll('.mm-day.is-over')) e.classList.remove('is-over'); };
 export function dragOver(ev) {
-  const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.mm-day');
+  const el = /** @type {HTMLElement|null} */ (document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.mm-day'));
   const day = el?.dataset.day || null;
   if (day === over) return;
   unlight();
