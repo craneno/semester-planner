@@ -3,7 +3,7 @@
 import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
 import {
   state, commit, itemById, upsertItem, deleteItem, ITEM_TYPES, progress,
-  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved, areaColor, AREA_COLORS
+  repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved, areaColor, AREA_COLORS, activeHabits
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
 import { pushItem, forgetItem } from './gcal.js';
@@ -285,6 +285,19 @@ function render(item) {
   }, col ? '' : 'A');
   props.append(prop('Colour', h('div', { class: 'swatches' },
     swatch(null, "The area's colour"), ...AREA_COLORS.map((col) => swatch(col, col)))));
+
+  // a task tied to a habit: ticking the task ticks the habit for that day
+  const habits = activeHabits();
+  if (habits.length || item.habitId) {
+    props.append(prop('Habit',
+      h('select', {
+        'aria-label': 'Habit this counts for',
+        title: 'Ticking this task ticks the habit for that day',
+        onchange: (e) => set({ habitId: e.target.value || null })
+      },
+      h('option', { value: '', selected: !item.habitId }, 'None'),
+      ...habits.map((x) => h('option', { value: x.id, selected: x.id === item.habitId }, x.name)))));
+  }
 
   body.append(props);
 

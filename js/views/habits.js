@@ -67,6 +67,13 @@ export function renderHabits(root, { navigate }) {
             else e.target.value = x.name;
           }
         }),
+        // the tasks tied to it, by name: a tick of one is a tick here
+        (() => {
+          const tied = [...new Set(state.items.filter((t) => t.habitId === x.id).map((t) => t.title))];
+          return tied.length
+            ? h('span', { class: 'habit-tied eyebrow', title: 'Tasks that count for this habit: ticking one ticks the day here' }, 'with ' + tied.join(', '))
+            : null;
+        })(),
         h('button', {
           class: 'btn sm ghost habit-del', 'aria-label': `Delete ${x.name}`,
           onclick: async () => {

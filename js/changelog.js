@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v67', date: '2026-09-12',
+    title: 'The habit and the task',
+    notes: [
+      'A task can count for a habit: pick the habit on the task page. Ticking the task ticks the habit for that day, and unticking unticks it. Make Push day, Leg day and Pull day as all-day tasks that repeat weekly, tied to the workout habit, and the habit ticks itself.',
+      'The Habits page says which tasks count for each habit.'
+    ]
+  },
+  {
     version: 'v66', date: '2026-09-12',
     title: 'Kept honest',
     notes: [

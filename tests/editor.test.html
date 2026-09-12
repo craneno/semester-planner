@@ -19,7 +19,8 @@ const s = await sharedStoreWith({
   semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
   areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
   items: [{ id: 'a', title: 'Late show', areaId: 'gen', plan: { date: '2026-09-11', start: '22:00', mins: 60 }, due: null }],
-  cards: [], notes: {}
+  cards: [], notes: {},
+  habits: [{ id: 'h1', name: 'Workout', order: 0, archived: false }], habitLog: {}, habitLogAt: {}
 });
 
 const change = (el, value) => { el.value = value; el.dispatchEvent(new Event('change', { bubbles: true })); };
@@ -49,6 +50,13 @@ suite('Editor — the panel on a task', async ({ check }) => {
     check('...shown as on', $$('.swatch')[3].classList.contains('on'));
     $$('.swatch')[0].click();
     check('the first takes it back', s.itemById('a').color === null);
+
+    const habitSel = $$('select').find((el) => el.getAttribute('aria-label') === 'Habit this counts for');
+    check('a habit to count for, none by default', !!habitSel && habitSel.value === '' && habitSel.options.length === 2);
+    change(habitSel, 'h1');
+    check('...picked, the task is tied to it', s.itemById('a').habitId === 'h1');
+    change(habitSel, '');
+    check('...and None unties it', s.itemById('a').habitId === null);
 
     $$('.mode-toggle .mode')[1].click();
     check('All day drops the time', s.itemById('a').plan.start === null && s.itemById('a').plan.date === '2026-09-11');

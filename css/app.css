@@ -1079,6 +1079,7 @@ body.rail-hidden .sidebar { display: none; }
   border-bottom: 1px solid var(--rule-soft); padding: 3px 0;
 }
 .habit-head { border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+.habit-tied { font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .habit-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 10px; }
 .habit-title {
   border: 0; background: transparent; padding: 4px 2px; min-width: 0; flex: 1;

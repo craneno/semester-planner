@@ -51,6 +51,7 @@
  * @property {string} notes
  * @property {Repeat|null} repeat
  * @property {string|null} [color]     a colour of its own, else the area's
+ * @property {string|null} [habitId]   the habit a tick of this ticks too
  * @property {string|null} canvasId
  * @property {string} [canvasCourse]
  * @property {string|null} [canvasArea]

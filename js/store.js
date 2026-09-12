@@ -946,6 +946,7 @@ export function toggleItem(id, force) {
       if (!Object.keys(ov).length) delete parent.repeat.ex[cut.on];
     }
     parent.updatedAt = new Date().toISOString();
+    tickHabitFor(parent, cut.on, on);
     return;
   }
   const t = itemById(id);
@@ -953,6 +954,14 @@ export function toggleItem(id, force) {
   t.done = force ?? !t.done;
   t.doneAt = t.done ? new Date().toISOString() : null;
   t.updatedAt = new Date().toISOString();
+  tickHabitFor(t, t.plan?.date || t.due || today(), t.done);
+}
+
+/** A task tied to a habit ticks it for its day, and unticks it with it. */
+function tickHabitFor(t, day, on) {
+  if (!t.habitId || !state.habits.some((x) => x.id === t.habitId && !x.archived)) return;
+  if (day > today()) return;         // a tick ahead of time is the task's; the habit waits for the day
+  if (habitDone(day, t.habitId) !== on) toggleHabit(day, t.habitId, on);
 }
 
 export function upsertArea(patch) {

@@ -65,11 +65,15 @@ export function updateHabit(s, id, patch) {
 }
 
 /** Removes the habit and every tick it ever had — there is nothing else to keep.
+ *  A task tied to it is untied.
  * @param {State} s */
 export function deleteHabit(s, id) {
   const i = s.habits.findIndex((x) => x.id === id);
   if (i >= 0) s.habits.splice(i, 1);
   const now = new Date().toISOString();
+  for (const t of s.items) {
+    if (t.habitId === id) { delete t.habitId; t.updatedAt = now; }
+  }
   for (const [date, list] of Object.entries(s.habitLog)) {
     if (!list.includes(id)) continue;
     const next = list.filter((x) => x !== id);

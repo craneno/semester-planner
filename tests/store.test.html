@@ -932,6 +932,47 @@ suite('Blocks — a stretch of days, and a colour of its own', async ({ check })
   check('a colour of its own is its own', s.itemColor(s.itemById('red')) === '#9E4A5C');
   check('...and without one, the area\u2019s', s.itemColor(s.itemById('trip')) === '#3C6E8F');
 });
+
+/* A task tied to a habit. What has to hold: ticking the task ticks the
+   habit for the task's day and unticking unticks it; one of a series ticks
+   the day the occurrence is on; a task with no day counts for today; a day
+   ahead is left for its day; a habit deleted unties its tasks. */
+suite('Habits — a task that counts for one', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+    items: [], cards: [], notes: {},
+    habits: [{ id: 'h1', name: '10k steps or workout', order: 0, archived: false }], habitLog: {}, habitLogAt: {}
+  });
+  const { today, addDays } = await import('../js/util.js');
+  const yday = addDays(today(), -1);
+  s.upsertItem({ id: 'leg', title: 'Leg day', areaId: 'gen', habitId: 'h1', plan: { date: yday, start: null, mins: 0 } });
+  s.upsertItem({ id: 'push', title: 'Push day', areaId: 'gen', habitId: 'h1', plan: { date: yday, start: null, mins: 0 }, repeat: { freq: 'weekly', every: 1, days: [new Date(yday + 'T12:00').getDay()], until: null, count: null } });
+  s.upsertItem({ id: 'walk', title: 'Walk', areaId: 'gen', habitId: 'h1' });
+  s.upsertItem({ id: 'soon', title: 'Soon', areaId: 'gen', habitId: 'h1', plan: { date: addDays(today(), 2), start: null, mins: 0 } });
+  s.upsertItem({ id: 'plain', title: 'Plain', areaId: 'gen', plan: { date: yday, start: null, mins: 0 } });
+
+  check('the link survives a save', s.itemById('leg').habitId === 'h1');
+  s.toggleItem('leg', true);
+  check('ticking the task ticks the habit on its day', s.habitDone(yday, 'h1'));
+  s.toggleItem('leg', false);
+  check('...and unticking unticks it', !s.habitDone(yday, 'h1'));
+  s.toggleItem('push@' + yday, true);
+  check('one of a series ticks the day it is on', s.habitDone(yday, 'h1'));
+  s.toggleItem('push@' + yday, false);
+  s.toggleItem('walk', true);
+  check('a task with no day counts for today', s.habitDone(today(), 'h1'));
+  s.toggleItem('walk', false);
+  s.toggleItem('soon', true);
+  check('a day ahead is left for its day', !s.habitDone(addDays(today(), 2), 'h1'));
+  s.toggleItem('plain', true);
+  check('a task not tied to it does nothing', !s.habitDone(yday, 'h1'));
+  s.deleteHabit('h1');
+  check('a habit deleted unties its tasks', !('habitId' in s.itemById('leg')) && !('habitId' in s.itemById('walk')));
+  s.toggleItem('leg', true);
+  check('...and a tick after that is only the task\u2019s', s.itemById('leg').done && !s.habitDone(yday, 'h1'));
+});
 </script>
 </body>
 </html>
