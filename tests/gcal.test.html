@@ -101,6 +101,10 @@ suite('Calendar — recurring series detection', async ({ check }) => {
       !!timed.start.dateTime && !timed.start.date, JSON.stringify(timed.start));
     check('...for exactly as long as it is', timed.end.dateTime.includes('10:30'),
       timed.end.dateTime);
+
+    // a run past midnight ends on the morning after, not at 23:59 the same day
+    const late = G.eventBodyFor(item({ date: '2026-09-12', start: '19:30', mins: 13 * 60 }));
+    check('a block past midnight ends the next morning on Google', late.end.dateTime.startsWith('2026-09-13T08:30'), late.end.dateTime);
     check('both carry the id that makes it ours',
       allDay.extendedProperties.private.plannerItemId === 't1'
       && timed.extendedProperties.private.plannerItemId === 't1');

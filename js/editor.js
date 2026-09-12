@@ -218,7 +218,8 @@ function render(item) {
         onchange: (e) => { set({ plan: { ...plan, date: e.target.value || today(), start: null, mins: 0 } }, { resync: true }); rerender(); }
       })));
   } else if (scheduled) {
-    const endOf = (p) => fromMin(Math.min(24 * 60 - 1, toMin(p.start || '09:00') + (p.mins || 60)));
+    // wrapped: a block that runs past midnight ends the next morning
+    const endOf = (p) => fromMin((toMin(p.start || '09:00') + (p.mins || 60)) % (24 * 60));
     props.append(prop('Date',
       h('input', {
         type: 'date', value: plan.date || '',
@@ -237,9 +238,10 @@ function render(item) {
         h('input', {
           type: 'time', value: endOf(plan), style: { maxWidth: '110px' },
           onchange: (e) => {
-            // stored as a duration, so an end before the start is nonsense
-            const mins = toMin(e.target.value) - toMin(plan.start || '09:00');
-            if (mins <= 0) { toast('The end has to come after the start.'); rerender(); return; }
+            // stored as a duration; an end before the start is the next morning
+            let mins = toMin(e.target.value) - toMin(plan.start || '09:00');
+            if (mins < 0) mins += 24 * 60;
+            if (mins === 0) { toast('The end has to come after the start.'); rerender(); return; }
             set({ plan: { ...plan, mins }, estMins: mins }, { resync: true });
             rerender();
           }

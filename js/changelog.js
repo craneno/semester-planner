@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v61', date: '2026-09-12',
+    title: 'Past midnight',
+    notes: [
+      'A block can end the next morning: an end before its start in the task page means after midnight, the field shows it that way, and Google gets the right day for the end.'
+    ]
+  },
+  {
     version: 'v60', date: '2026-09-11',
     title: 'The whole day',
     notes: [

@@ -517,6 +517,12 @@ function applyIncoming(raw, { replace, win }) {
  * rather than times — `end.date` being the morning *after*, which is why it is
  * a day on rather than the same date twice.
  */
+/** The end of a block as Google wants it: a run past midnight ends on the morning after. */
+function endRfc3339(date, start, mins) {
+  const end = toMin(start) + mins;
+  return toRfc3339(end >= 24 * 60 ? addDays(date, 1) : date, fromMin(end % (24 * 60)));
+}
+
 export function eventBodyFor(item) {
   const area = areaById(item.areaId);
   const start = item.plan.start;
@@ -524,7 +530,7 @@ export function eventBodyFor(item) {
   const when = start
     ? {
       start: { dateTime: toRfc3339(item.plan.date, start), timeZone: tz() },
-      end: { dateTime: toRfc3339(item.plan.date, fromMin(toMin(start) + mins)), timeZone: tz() }
+      end: { dateTime: endRfc3339(item.plan.date, start, mins), timeZone: tz() }
     }
     : {
       start: { date: item.plan.date },
