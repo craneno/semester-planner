@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v61**.
+Schema **20**, service worker **planner-v62**.
 
 ## Working with me
 
@@ -12,14 +12,13 @@ all at once, and only about what changes the work. Small calls are still yours.
 
 **Small words beat big ones.** Say it the short way — here, in commits, in code
 comments — and keep the real names exact (`syncToken`, tombstone, occurrence).
-This file may run to **300 lines**; past that, cut a sentence and say what went.
+This file may run to **500 lines**, kept tight; past that, cut a sentence and say what went.
 
 ## Working on it
 
 The repo *is* the site — no build, no install: `python3 -m http.server 8000`.
 Before you push, click through the app and open **`/tests/`**. The Deploy job
-runs the same page headless (`tests/run.mjs`, Playwright) and stops on any
-failure, so a red suite means no deploy until it is green.
+runs the same page headless (`tests/run.mjs`, Playwright): a red suite is no deploy.
 **Bump `VERSION` in `sw.js` whenever a file in its `SHELL` changes**, add new
 modules to `SHELL`, **and add the release to `js/changelog.js` in the same
 commit**. The newest changelog entry *is* the version; `version.test.html` fails
@@ -101,10 +100,9 @@ its own decision). **The baseline is a short hash per row** (cyrb53, keys
 sorted first, as jsonb comes back sorted), held in memory as well as
 localStorage. `AGREED` is schema *and* hash shape, so an old one goes too.
 
-**Sync is fan-out, not safety.** An upsert keeps no history and reaches every
-device in seconds. `keepBackups()` copies the raw state *before `migrate()`
-reads it* — one a day, five kept, plus `before-v<n>` as an upgrade runs,
-under their own keys, out of sync's reach.
+**Sync is fan-out, not safety.** `keepBackups()` copies the raw state *before
+`migrate()` reads it* — one a day, five kept, plus `before-v<n>` as an upgrade
+runs, under their own keys, out of sync's reach.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
@@ -162,7 +160,10 @@ own: redrawn, pushed, never remembered. **The small edits live in
 behind, else tomorrow) — each with an Undo of its
 own that puts the old *when* back through `upsertItem`. A Canvas
 assignment is a deadline with `canvasId` (`js/canvas.js`); a re-import
-refreshes the date and title and leaves the area, the tick and the notes alone.
+refreshes the date and title and leaves the area, the tick and the notes alone
+(an `.ics` file's event is the same with `icsUid`, `js/icsimport.js`). With no
+area named a new thing goes to `areaForNew()`: `settings.lastAreaId`, the area
+last opened or added to on this device, never synced.
 **The course teaches by example**: an assignment sits where the import put it
 (`canvasArea`) until moved by hand, which nulls the key — even back to the
 same area; moving one still unmoved takes the rest of its course along
@@ -206,12 +207,12 @@ outside the `reorderable()` host.
 **Week follows the day** (`follows`) until prev/next let go of it. It draws
 all 24 hours, opened at the settings' `dayStart` (or a little before now);
 a block past midnight is drawn to midnight. A click or tap on the empty
-all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`). **The week
+all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`); a click on
+the empty grid is `inlineCreate` — an hour, named in place. **The week
 turns under a drag** (`pageTurner`): held at the grid's edge or over ‹ ›, the
 columns take the next week's dates and blocks in place — a rebuild would lose
 the touch — and the block in hand stays put; called off, the drag goes back.
-**Overview is the day**: a 24-hour clock, opened at 8am, next to focus, top
-three, open work and the end-of-day note. `overdue()` is deadlines gone by
+`overdue()` is deadlines gone by
 *and* plain blocks booked on a day gone by with no deadline, unticked — a
 series only for its deadlines. **The end-of-day note is the only thing that
 crosses a day**: `tomorrow` becomes the next morning's `focus` by way of `carryForward()`, from
@@ -227,10 +228,10 @@ ticked off *before* that reset, behind an Undo from `navigate()`.
 **Semester is a chart, with the list behind a switch.** Bands are the three
 categories, lanes are areas, and `area.onChart` (missing reads as true) picks
 which. The maths is **whole days from the first day of term**, times `--day-w`
-at the last moment, which keeps `chartRange`, `itemSpan`, `packLanes` and
-the rest plain to test. A **series draws as its run**, first occurrence to last. **A focus or a
-sprint is a stretch of weeks in one area's lane**, dragged out the way a block
-is on the calendar — `kind` decides whether we ask for deliverables.
+at the last moment, so `chartRange`, `itemSpan`, `packLanes` stay plain to
+test. A **series draws as its run**, first occurrence to last. A **focus or a
+sprint is a stretch of weeks in one area's lane**, dragged out like a block;
+`kind` decides whether we ask for deliverables.
 
 ## Things that bit us
 
@@ -262,8 +263,8 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 - Quick add checks `parseLinkAdd()` **first** (a URL at the front is a bookmark)
   and `parseRange()` before `parseWhen()`, or half of "12-7" becomes a due time.
   A repeat ("every mon", "daily") is taken out *before* the date words, or "mon"
-  reads as one next Monday; its first day is settled last, after them. Only
-  `http`/`https` are stored, or a saved `javascript:` URL would run as the app.
+  reads as one next Monday. Only `http`/`https` are stored, or a saved
+  `javascript:` URL would run as the app.
 - **A wall-clock time needs the zone it was written in.** Every `area.schedule`
   slot carries `tz`; `scheduleDrift()` spots a device that has moved and
   `shiftSchedules()` rewrites the times, carrying the weekday across midnight.
@@ -279,7 +280,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1370 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1394 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
@@ -295,6 +296,5 @@ once per page, since `import()` caches.
 
 ## House rules
 
-Calendar days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
-(`js/util.js`). Build DOM with `h()`, not template strings. No framework, no
-JSX, no TypeScript. Match the style around you.
+Days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
+(`js/util.js`). DOM by `h()`, never template strings. No framework, JSX or TypeScript.

@@ -43,6 +43,12 @@ suite('Slices — take a state, never own one', async ({ check }) => {
 
   check('the default area is the first personal one', A.defaultAreaId(s) === 'p1');
   check('...and none where there is none', A.defaultAreaId({ areas: [] }) === null);
+  // where a new thing goes: the area last opened or added to, else the default
+  const st = (last) => ({ ...s, settings: { lastAreaId: last } });
+  const otherArea = s.areas.find((a) => a.id !== 'p1').id;
+  check('a new thing goes to the area last used', A.areaForNew(st(otherArea)) === otherArea, `${otherArea} → ${A.areaForNew(st(otherArea))}`);
+  check('...or the default with none remembered', A.areaForNew(st(null)) === 'p1');
+  check('...or the default when the remembered one is gone', A.areaForNew(st('nope')) === 'p1');
   check('areas in a category come in order', A.areasInCategory(s, 'personal').map((a) => a.id).join() === 'p1,p2');
 
   check('a wish lands in the state it was given', W.addWish(s, 'Calipers $30') !== null && s.wishlist.length === 1);

@@ -29,3 +29,10 @@ export function chartAreas(s) {
 /** Where an item goes when nothing else is said: the Personal area, if there
  *  is one. Falls back to unassigned rather than inventing an area. */
 export const defaultAreaId = (s) => areasInCategory(s, 'personal')[0]?.id || null;
+
+/** Where a new thing goes with no area named: the area last used or visited
+ *  on this device (`settings.lastAreaId`, never synced), else the default. */
+export const areaForNew = (s) => {
+  const last = s.settings?.lastAreaId;
+  return last && s.areas.some((a) => a.id === last && !a.archived) ? last : defaultAreaId(s);
+};

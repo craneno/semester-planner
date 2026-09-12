@@ -36,6 +36,7 @@ export const areaName = bind(A.areaName);
 export const areasInCategory = bind(A.areasInCategory);
 export const chartAreas = bind(A.chartAreas);
 export const defaultAreaId = bind(A.defaultAreaId);
+export const areaForNew = bind(A.areaForNew);
 export const unfiledCards = bind(Cd.unfiledCards);
 export const cardsForArea = bind(Cd.cardsForArea);
 export const cardById = bind(Cd.cardById);

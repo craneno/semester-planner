@@ -11,7 +11,7 @@
 
 import { h, fmtDate, fmtTime, fmtDuration, toMin, fromMin, clamp } from './util.js';
 import {
-  state, commit, upsertItem, ITEM_TYPES, AREA_CATEGORIES, areasInCategory, defaultAreaId
+  state, commit, upsertItem, ITEM_TYPES, AREA_CATEGORIES, areasInCategory, areaForNew
 } from './store.js';
 import { modal, closeModal, toast } from './ui.js';
 import { openItem } from './editor.js';
@@ -352,7 +352,7 @@ export function edgeScroll(scroller, ev, margin = 44) {
  * two days is not a thing either grid can draw, and following the pointer
  * sideways into tomorrow would silently move the block you are drawing.
  */
-export function dragCreate(host, { only, hit, hourH, origin = 0, onPick, edge }) {
+export function dragCreate(host, { only, hit, hourH, origin = 0, onPick, onClick, edge }) {
   host.addEventListener('pointerdown', (ev) => {
     if (ev.button !== 0) return;
     // touch is left alone: the same gesture scrolls the grid, and a calendar
@@ -407,9 +407,9 @@ export function dragCreate(host, { only, hit, hourH, origin = 0, onPick, edge })
       document.body.classList.remove('is-sweeping');
       ghost?.remove();
       ghost = null;
-      // a press that never moved is a click, and a click on a calendar should
-      // not leave anything behind either
+      // a press that never moved is a click: the hour under it, if anyone wants it
       if (fire && started && pend) onPick(pend);
+      else if (fire && !started) onClick?.(anchor);
     };
     const up = () => finish(true);
     const cancel = () => finish(false);
@@ -466,12 +466,58 @@ const TYPE_LABEL = {
  * With no `start` (or `allDay: true`) it asks for an all-day plan instead —
  * the rail above the week grid — which is a plan with a date and no time.
  */
+/**
+ * A block named where it will sit: a click on the empty grid draws an hour
+ * there with a name box in it, the way a calendar does. Enter makes it,
+ * Escape or an empty name takes it away, and leaving the box with a name in
+ * it makes it too. The full form is one Edit away, in the toast.
+ */
+export function inlineCreate(col, { date, start, mins = 60 }, { hourH, origin = 0, onDone } = {}) {
+  col.closest('.week-body, .day-body')?.querySelector('.blk.is-new')?.remove();   // one at a time
+  mins = Math.max(SNAP, Math.min(mins, DAY - toMin(start)));
+  const hour12 = state.settings.hour12;
+  const input = h('input', { type: 'text', placeholder: 'Name it', 'aria-label': 'Name' });
+  const el = h('div', {
+    class: 'blk plan is-new',
+    style: { top: ((toMin(start) - origin) / 60 * hourH) + 'px', height: Math.max(22, mins / 60 * hourH - 2) + 'px' }
+  }, h('div', { class: 't' }, `${label(toMin(start), hour12)} · ${fmtDuration(mins)}`), input);
+  let done = false;
+  const leave = () => { if (done) return; done = true; el.remove(); };
+  const create = () => {
+    if (done) return;
+    const title = input.value.trim();
+    if (!title) { leave(); return; }
+    done = true;
+    let item;
+    commit(() => {
+      item = upsertItem({ title, type: 'event', areaId: areaForNew(), plan: { date, start, mins }, estMins: mins });
+      state.settings.lastAreaId = item.areaId;
+    });
+    el.remove();
+    pushItem(item.id).catch(() => {});
+    toast(`${title} · ${fmtDate(date, { weekday: true })} ${fmtTime(start, hour12)}`, { action: 'Edit', onAction: () => openItem(item.id) });
+    onDone?.(item);
+  };
+  input.addEventListener('keydown', (e) => {
+    // the page's own keys (n, /, t…) must not fire from inside the box
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); create(); }
+    if (e.key === 'Escape') { e.preventDefault(); leave(); }
+  });
+  input.addEventListener('blur', () => { setTimeout(() => (input.value.trim() ? create() : leave()), 0); });
+  // a press on the box is typing, not a drag of the grid under it
+  el.addEventListener('pointerdown', (e) => e.stopPropagation());
+  col.append(el);
+  input.focus();
+  return el;
+}
+
 export function newBlockPrompt({ date, start, mins, allDay = !start }, { onDone } = {}) {
   const hour12 = state.settings.hour12;
   // a tap at 23:30 asks for an hour; the day has half of one left
   if (!allDay) mins = Math.max(SNAP, Math.min(mins, DAY - toMin(start)));
   const draft = {
-    title: '', type: 'event', areaId: defaultAreaId(),
+    title: '', type: 'event', areaId: areaForNew(),
     start: allDay ? null : start, mins: allDay ? 0 : mins,
     // an input[type=time] cannot hold 24:00, so a range that runs to midnight
     // shows as 23:59 — and keeps its real length unless the field is touched

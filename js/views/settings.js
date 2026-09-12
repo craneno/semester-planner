@@ -7,6 +7,7 @@ import { applyAppearance, THEMES, FONT_STACKS } from '../appearance.js';
 import { CHANGELOG, APP_VERSION } from '../changelog.js';
 import * as G from '../gcal.js';
 import * as C from '../cloud.js';
+import { openIcsImport } from '../icsimport.js';
 import { importCanvas, refreshFeed, isFeedUrl } from '../canvas.js';
 
 /* One listener each, for the life of the page, that calls whichever painter
@@ -505,6 +506,21 @@ export function renderSettings(root, { navigate }) {
         }
       }, 'Forget link'));
   }
+  const calIn = h('input', {
+    type: 'file', accept: '.ics,text/calendar', style: { display: 'none' },
+    onchange: async (e) => {
+      const f = e.target.files?.[0];
+      if (f) openIcsImport(await f.text(), { navigate });
+      e.target.value = '';
+    }
+  });
+  p.append(section('Calendar file', [
+    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
+      'Any calendar saved as an .ics file — Google\u2019s export, a club\u2019s schedule — becomes blocks in one area. Weekly rules repeat; an event brought in before is brought up to date, not made twice. Or drop the file on the Week.'),
+    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+      h('button', { class: 'btn', onclick: () => calIn.click() }, 'Import a calendar file'), calIn)
+  ]));
+
   p.append(section('Canvas', [
     h('p', { style: { fontSize: '13px', color: 'var(--ink-2)', margin: '0 0 8px' } },
       'Every assignment in your Canvas feed becomes a deadline in the right course. '

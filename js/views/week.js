@@ -8,7 +8,8 @@ import {
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
-import { dragCreate, tapCreate, dragBlock, newBlockPrompt, packBlocks, applyLanes } from '../timegrid.js';
+import { dragCreate, tapCreate, dragBlock, newBlockPrompt, inlineCreate, packBlocks, applyLanes } from '../timegrid.js';
+import { acceptIcsDrop } from '../icsimport.js';
 import { pushItem, editEvent, canEditEvents } from '../gcal.js';
 import { openEvent, openClass } from '../eventedit.js';
 import { moveItem } from '../actions.js';
@@ -233,13 +234,6 @@ export function renderWeek(root, { navigate } = {}) {
 
   for (const d of days) {
     const col = h('div', { class: 'daycol', style: { height: hours.length * hourH + 'px' } });
-    // double click empty space -> an hour, named the same way a drag is
-    col.addEventListener('dblclick', (e) => {
-      if (e.target !== col) return;
-      const rect = col.getBoundingClientRect();
-      const mins = snap((e.clientY - rect.top) / hourH * 60 + dayStart * 60);
-      newBlockPrompt({ date: col.dataset.date, start: fromMin(mins), mins: 60 }, { onDone: navigate });
-    });
     dress(col, d);
     fillCol(col, d);
     body.append(col);
@@ -251,7 +245,9 @@ export function renderWeek(root, { navigate } = {}) {
     hit: (ev) => hit(ev, body, days, dayStart, hourH),
     hourH, origin: dayStart * 60,
     edge: (ev) => edgeScroll(ev, body),
-    onPick: (range) => newBlockPrompt(range, { onDone: navigate })
+    onPick: (range) => newBlockPrompt(range, { onDone: navigate }),
+    // a plain click: an hour there, named in place
+    onClick: (at) => inlineCreate(at.col, { date: at.date, start: fromMin(at.mins), mins: 60 }, { hourH, origin: dayStart * 60, onDone: navigate })
   });
   // and on a phone, where the drag scrolls, a tap on empty grid asks for an hour
   tapCreate(body, {
@@ -265,6 +261,8 @@ export function renderWeek(root, { navigate } = {}) {
   const scroller = h('div', { class: 'week-scroll' }, wrap);
 
   root.append(scroller);
+  // a calendar file dropped on the week is offered as blocks
+  acceptIcsDrop(root, { navigate });
 
   /* ---- unscheduled tray ----
      Work with no block yet: due soon, or with no date at all. Due before the

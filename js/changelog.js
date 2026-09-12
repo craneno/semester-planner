@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v62', date: '2026-09-12',
+    title: 'Getting things in',
+    notes: [
+      'A click on the empty week draws an hour there with a name box in it: Enter makes it, Escape takes it away. The full form is one Edit away in the toast, or a drag still opens it.',
+      'A new thing with no area named goes where you were last: the area page you are on, or the area you last added to, on this device.',
+      'A calendar file (.ics) becomes blocks: drop it on the Week, or Settings → Calendar file. Weekly rules repeat; a file brought in again brings its events up to date rather than making them twice.'
+    ]
+  },
+  {
     version: 'v61', date: '2026-09-12',
     title: 'Past midnight',
     notes: [

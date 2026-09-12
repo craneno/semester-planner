@@ -75,6 +75,7 @@ export function parseIcs(text) {
       case 'DTSTART': cur.start = icsWhen(value, params); break;
       case 'DTEND': cur.end = icsWhen(value, params); break;
       case 'LAST-MODIFIED': cur.modified = value; break;
+      case 'RRULE': cur.rrule = value; break;
       default: break;
     }
   }

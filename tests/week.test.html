@@ -111,6 +111,60 @@ suite('Week — the page turns under a drag', async ({ check }) => {
     if (item()) s.deleteItem('w1');
   }
 });
+
+/* A click on the empty grid names a block where it will sit. What has to
+   hold: the click draws an hour there with a box in it, nothing is made
+   yet; Enter makes the block on that day at that hour in the area last
+   used; Escape takes the box away and makes nothing. */
+suite('Week — a click names a block in place', async ({ check }) => {
+  const W = await import('../js/views/week.js');
+  const stage = document.createElement('div');
+  stage.id = 'stage';
+  document.body.append(stage);
+  const navigate = () => W.renderWeek(stage, { navigate });
+  const pt = (type, x, y, target) => (target || window).dispatchEvent(new PointerEvent(type,
+    { bubbles: true, button: 0, pointerId: 8, pointerType: 'mouse', clientX: x, clientY: y }));
+  const key = (el, k) => el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+  const mine = () => s.state.items.filter((t) => t.title === 'Office hours');
+  const hadWeekStart = s.state.settings.weekStart, hadLast = s.state.settings.lastAreaId;
+  try {
+    s.state.settings.weekStart = 0;
+    s.state.settings.lastAreaId = 'gen';
+    W.showWeekOf('2026-09-09');
+    W.renderWeek(stage, { navigate });
+    const col = stage.querySelectorAll('.daycol')[2];      // Tue 8 Sep
+    const r = col.getBoundingClientRect();
+    const y = r.top + 10 * 52 + 5;                          // ten hours down: 10am
+    pt('pointerdown', r.left + r.width / 2, y, col);
+    pt('pointerup', r.left + r.width / 2, y);
+    const box = stage.querySelector('.blk.is-new');
+    const input = box?.querySelector('input');
+    check('a click draws an hour there with a name box in it', !!input && box.parentElement === col);
+    check('...saying when', /10am|10:00/.test(box.textContent), box.textContent);
+    check('...and nothing is made yet', mine().length === 0);
+    input.value = 'Office hours';
+    key(input, 'Enter');
+    const made = mine()[0];
+    check('Enter makes it, there and then', !!made && made.plan.date === '2026-09-08' && made.plan.start === '10:00' && made.plan.mins === 60, JSON.stringify(made?.plan));
+    check('...in the area last used', made.areaId === 'gen');
+    check('...drawn as a block, the box gone', !stage.querySelector('.blk.is-new') && !!stage.querySelector('.blk.plan[data-id="' + made.id + '"]'));
+
+    // the week was drawn again for the new block, so the column is a new one
+    const col2 = stage.querySelectorAll('.daycol')[2];
+    pt('pointerdown', r.left + r.width / 2, y + 3 * 52, col2);
+    pt('pointerup', r.left + r.width / 2, y + 3 * 52);
+    const box2 = stage.querySelector('.blk.is-new');
+    check('a second click, another box', !!box2);
+    key(box2.querySelector('input'), 'Escape');
+    check('Escape takes it away and makes nothing', !stage.querySelector('.blk.is-new') && mine().length === 1);
+  } finally {
+    stage.remove();
+    W.showWeekOf();
+    s.state.settings.weekStart = hadWeekStart;
+    s.state.settings.lastAreaId = hadLast;
+    for (const t of mine()) s.deleteItem(t.id);
+  }
+});
 </script>
 </body>
 </html>

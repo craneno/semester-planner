@@ -421,6 +421,12 @@ textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 .blk.ext { background: transparent; border: 1px solid var(--rule); border-left: 2.5px dashed var(--ink-3); cursor: grab; }
 .blk.ext.dragging { cursor: grabbing; }
 .blk.plan.done { opacity: .5; }
+/* a block being named where it will sit */
+.blk.is-new { border-style: dashed; border-left-style: solid; background: var(--accent-soft); cursor: text; z-index: 14; }
+.blk.is-new input {
+  display: block; width: 100%; border: 0; padding: 0; margin-top: 1px; background: transparent;
+  font: inherit; font-weight: 500; color: inherit; outline: none;
+}
 .blk.dragging { opacity: .85; box-shadow: var(--shadow-2); transform: scale(1.015); z-index: 20; }
 /* Picked up by a finger, which has no cursor to change: the block has to say
    so itself, or a hold that worked looks like one that did not. */

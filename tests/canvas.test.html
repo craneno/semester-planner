@@ -342,6 +342,54 @@ suite('Canvas — by itself, once a day', async ({ check }) => {
   // userId back leaves cloud.js signed out, as it was found.
   C.cloud.userId = null;
 });
+
+/* A calendar file becomes blocks. What has to hold: a timed event is a
+   scheduled block of its length, a whole-day one an all-day plan, a weekly
+   rule a weekly repeat on its days until its UNTIL; brought in twice, the
+   second time brings the same events up to date rather than making them
+   again; and the one with no start is left out. */
+suite('Calendar file — .ics to blocks', async ({ check }) => {
+  const I = await import('../js/icsimport.js');
+  const { parseIcs } = await import('../js/canvas.js');
+  const ICS = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT', 'UID:one@x', 'SUMMARY:Lab safety', 'LOCATION:Snell 108',
+    'DTSTART;TZID=America/New_York:20260915T140000', 'DTEND;TZID=America/New_York:20260915T153000', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:two@x', 'SUMMARY:Club night', 'DTSTART;VALUE=DATE:20260918', 'DTEND;VALUE=DATE:20260919', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:three@x', 'SUMMARY:Standup', 'DTSTART;TZID=America/New_York:20260914T090000', 'DTEND;TZID=America/New_York:20260914T091500',
+    'RRULE:FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=20261211T000000Z', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:four@x', 'SUMMARY:No when', 'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+  const rows = I.planIcs(parseIcs(ICS));
+  check('three events with a start, one without left out', rows.length === 3, String(rows.length));
+  const lab = rows.find((r) => r.uid === 'one@x'), club = rows.find((r) => r.uid === 'two@x'), stand = rows.find((r) => r.uid === 'three@x');
+  check('a timed event is a scheduled block of its length', lab.plan.date === '2026-09-15' && lab.plan.start === '14:00' && lab.plan.mins === 90, JSON.stringify(lab.plan));
+  check('...with its room', lab.location === 'Snell 108');
+  check('a whole-day event is an all-day plan', club.plan.date === '2026-09-18' && !club.plan.start, JSON.stringify(club.plan));
+  check('a weekly rule is a weekly repeat on its days', stand.repeat?.freq === 'weekly' && stand.repeat.days.join() === '1,3', JSON.stringify(stand.repeat));
+  check('...until its last day', stand.repeat.until === '2026-12-11');
+  check('a rule this planner cannot say is no rule', I.repeatFromRrule('FREQ=HOURLY') === null);
+  check('COUNT is kept when there is no UNTIL', I.repeatFromRrule('FREQ=DAILY;COUNT=5').count === 5);
+
+  const before = s.state.items.length;
+  try {
+    let res;
+    s.commit(() => { res = I.applyIcs(rows, 'gen'); });
+    check('brought in: three made, in the area asked for', res.made === 3 && res.updated === 0 && s.state.items.filter((t) => t.icsUid).every((t) => t.areaId === 'gen'), JSON.stringify(res));
+    const made = s.state.items.find((t) => t.icsUid === 'one@x');
+    check('...as events, the room in the notes', made.type === 'event' && made.notes === 'Snell 108');
+    // moved by hand, then the file comes in again with a new time
+    s.commit(() => { s.upsertItem({ id: made.id, areaId: 'th' }); });
+    const again = I.planIcs(parseIcs(ICS.replace('20260915T140000', '20260915T150000')));
+    s.commit(() => { res = I.applyIcs(again, 'gen'); });
+    check('again: nothing made twice, all brought up to date', res.made === 0 && res.updated === 3, JSON.stringify(res));
+    check('...the new time taken, the area you moved it to kept', made.plan.start === '15:00' && made.areaId === 'th', `${made.plan.start} ${made.areaId}`);
+  } finally {
+    s.commit(() => { for (const t of s.state.items.filter((t) => t.icsUid)) s.deleteItem(t.id); });
+    check('put back', s.state.items.length === before);
+  }
+});
 </script>
 </body>
 </html>

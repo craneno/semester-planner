@@ -5,7 +5,7 @@ import {
   state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
   reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules,
-  undo, redo
+  undo, redo, areaForNew
 } from './store.js';
 import { toast, closePeek, reorderable, modal, closeModal, modalOpen, navSlide, navSettle } from './ui.js';
 import { applyAppearance } from './appearance.js';
@@ -81,6 +81,8 @@ export function navigate() {
   // an area deleted while its page was open: the hash still named it, so
   // Overview drew under a lying address and go('overview') did nothing
   if (current.kind === 'view' && /^#\/area\//.test(location.hash)) history.replaceState(null, '', '#/' + current.id);
+  // the page you are on is where a new thing goes next (settings are not undo's, and this key never syncs)
+  if (current.kind === 'area' && state.settings.lastAreaId !== current.id) commit(() => { state.settings.lastAreaId = current.id; });
   paintChrome();
   const host = $('#view');
   const view = current.kind === 'view' ? VIEWS[current.id] : null;
@@ -442,8 +444,9 @@ function wireQuickAdd() {
     }
 
     const parsed = parseQuickAdd(input.value);
+    if (!parsed.areaId) parsed.areaId = areaForNew();
     let created;
-    commit(() => { created = upsertItem(parsed); });
+    commit(() => { created = upsertItem(parsed); state.settings.lastAreaId = created.areaId; });
     // a block typed here is a block like any other, and belongs on the
     // calendar as soon as it exists rather than whenever something else pushes
     if (parsed.plan?.date) G.pushItem(created.id).catch(() => {});
