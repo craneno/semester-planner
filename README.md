@@ -40,7 +40,7 @@ backup** moves data between them.
 
 ## Connect Google Calendar
 
-You need your own OAuth client — there's no server, so there's nowhere to hide a shared secret.
+You need your own OAuth client — a page cannot hold a shared secret.
 
 1. **Google Cloud Console** → create or pick a project.
 2. **APIs & Services → Library** → enable **Google Calendar API**.
@@ -59,6 +59,19 @@ You need your own OAuth client — there's no server, so there's nowhere to hide
    The redirect URI is only used by the installed-PWA sign-in path, but Google rejects the request if it's missing.
 5. Copy the client ID into **Settings → Google Calendar → OAuth client ID**, then **Connect Google Calendar**.
 6. Pick which calendar to sync. Default is `primary`.
+7. **Stay signed in** (optional; needs [cloud sync](#cloud-sync-supabase) set up and signed in). On its own the
+   sign-in lasts an hour and then asks again, with a popup the browser may block. The `google-token` Edge
+   Function holds the client secret and trades the sign-in for a refresh token, kept on the device, so the
+   planner signs itself in for a week or more. From **Credentials**, copy the same OAuth client's
+   **Client secret**, then from the repo:
+
+   ```
+   supabase secrets set GOOGLE_CLIENT_SECRET=…
+   supabase functions deploy google-token
+   ```
+
+   Then **Connect Google Calendar** once more. Under a consent screen still in "Testing", Google ends the
+   grant after seven days and the planner asks again; published, it lasts until you revoke it.
 
 ### How the sync actually works
 
@@ -79,12 +92,13 @@ resize the block in Google Calendar and the planner picks up the new time. Turn 
 
 - **Polling, not push.** True instant push needs a server to receive Google's webhooks. 60-second
   polling is as live as a static site gets.
-- **Tokens last about an hour.** The app refreshes silently in the background. In a browser tab this
-  is invisible. In the installed iOS PWA, popups can't hand a result back to a standalone window, so
-  it falls back to a full-page redirect — you'll occasionally see a Google page flash by.
-- The access token is kept in `localStorage`. Reasonable for a personal planner on your own devices;
-  don't run this on a shared machine.
-- Only events inside your semester date range are mirrored.
+- **Tokens last about an hour** — unless `google-token` is deployed (step 7), which renews them quietly.
+  Without it the app tries a silent popup, which a browser may block: then it's Connect again. In the
+  installed iOS PWA, popups can't hand a result back to a standalone window, so it falls back to a
+  full-page redirect — you'll occasionally see a Google page flash by.
+- The access token, and the refresh token beside it, are kept in `localStorage`. Reasonable for a
+  personal planner on your own devices; don't run this on a shared machine.
+- Only events from the day the calendar began to a year ahead are mirrored.
 
 
 ---

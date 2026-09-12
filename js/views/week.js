@@ -81,16 +81,13 @@ export function renderWeek(root, { navigate } = {}) {
   const hour12 = state.settings.hour12;
 
   /* ---- toolbar ---- */
-  const first = parseYmd(days[0]), last = parseYmd(days[6]);
-  const span = first.getMonth() === last.getMonth()
-    ? `${MONTHS[first.getMonth()]} ${first.getDate()}–${last.getDate()}`
-    : `${MONTHS[first.getMonth()].slice(0, 3)} ${first.getDate()} – ${MONTHS[last.getMonth()].slice(0, 3)} ${last.getDate()}`;
+  const title = h('h2', { style: { marginLeft: '6px' } }, spanFor(days));
 
   root.append(h('div', { class: 'weekbar' },
-    h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, -7); follows = false; navigate(); }, 'aria-label': 'Previous week' }, '‹'),
+    h('button', { class: 'btn sm', dataset: { turn: '-1' }, onclick: () => { anchor = addDays(anchor, -7); follows = false; navigate(); }, 'aria-label': 'Previous week' }, '‹'),
     h('button', { class: 'btn sm', onclick: () => { anchor = today(); follows = true; navigate(); } }, 'Today'),
-    h('button', { class: 'btn sm', onclick: () => { anchor = addDays(anchor, 7); follows = false; navigate(); }, 'aria-label': 'Next week' }, '›'),
-    h('h2', { style: { marginLeft: '6px' } }, span),
+    h('button', { class: 'btn sm', dataset: { turn: '1' }, onclick: () => { anchor = addDays(anchor, 7); follows = false; navigate(); }, 'aria-label': 'Next week' }, '›'),
+    title,
     h('div', { style: { flex: 1 } }),
     h('span', { class: 'eyebrow num', title: 'Planned work this week' },
       `${load.count} tasks · ${fmtHours(load.mins)}`),
@@ -108,15 +105,16 @@ export function renderWeek(root, { navigate } = {}) {
     title: 'Due dates, all-day events, and planned work with no time set'
   }, 'All day'));
 
-  for (const d of days) {
+  const headFor = (d) => {
     const dt = parseYmd(d);
-    const isToday = d === today();
-    head.append(h('div', { class: 'dhead' + (isToday ? ' today' : '') + ([0, 6].includes(dt.getDay()) ? ' weekend' : '') },
+    return h('div', { class: 'dhead' + (d === today() ? ' today' : '') + ([0, 6].includes(dt.getDay()) ? ' weekend' : '') },
       h('div', { class: 'eyebrow' }, DOW[dt.getDay()]),
-      h('div', { class: 'dnum' }, String(dt.getDate()))));
+      h('div', { class: 'dnum' }, String(dt.getDate())));
+  };
 
-    // the empty rail is where an all-day plan is made: a click, or a tap,
-    // on the cell itself — a flag in it is that flag's to open
+  // the empty rail is where an all-day plan is made: a click, or a tap,
+  // on the cell itself — a flag in it is that flag's to open
+  const cellFor = (d) => {
     const cell = h('div', {
       class: 'cell', title: 'Click for an all-day plan',
       onclick: (e) => { if (e.target === cell) newBlockPrompt({ date: d, allDay: true }, { onDone: navigate }); }
@@ -145,8 +143,9 @@ export function renderWeek(root, { navigate } = {}) {
         onclick: () => openItem(t.id)
       }, '◷ ' + t.title));
     }
-    rail.append(cell);
-  }
+    return cell;
+  };
+  for (const d of days) { head.append(headFor(d)); rail.append(cellFor(d)); }
 
   /* ---- grid ---- */
   const body = h('div', { class: 'week-body' });
@@ -163,17 +162,23 @@ export function renderWeek(root, { navigate } = {}) {
   // a block that runs past midnight is drawn to midnight: the grid ends there
   const until = (s, e) => Math.min(e, dayEnd * 60) - s;
 
-  days.forEach((d, i) => {
+  /* The week turns under a drag (pageTurner): the columns stay, and take
+     the next week's dates and blocks. So a column is dressed and filled by
+     date, and can be again. */
+  const dress = (col, d) => {
     const dt = parseYmd(d);
-    const col = h('div', {
-      class: 'daycol' + ([0, 6].includes(dt.getDay()) ? ' weekend' : '') + (d === today() ? ' today' : ''),
-      dataset: { date: d },
-      style: { height: hours.length * hourH + 'px' }
-    });
+    col.dataset.date = d;
+    col.classList.toggle('weekend', [0, 6].includes(dt.getDay()));
+    col.classList.toggle('today', d === today());
+  };
 
+  const fillCol = (col, d) => {
     /* Everything with a time on it, gathered before any of it is placed:
        a class and a block of work that share an hour have to share the
-       column, and that cannot be decided one block at a time. */
+       column, and that cannot be decided one block at a time. A block being
+       carried is left out: it is in the grid already, under the pointer,
+       and the week drawn under it may be the one it came from. */
+    const held = body.querySelector('.blk.dragging');
     const laid = [];
     const lay = (start, mins, el) => { laid.push({ start, mins }); col.append(el); return el; };
 
@@ -198,10 +203,12 @@ export function renderWeek(root, { navigate } = {}) {
     // external google events
     if (showExternal) {
       for (const e of eventsOn(d).filter((x) => !x.allDay && x.start)) {
+        if (held?.dataset.eid === e.id) continue;
         const s = toMin(e.start), en = toMin(e.end) || s + 60;
         const hgt = Math.max(18, (until(s, en) / 60) * hourH - 2);
         const el = h('div', {
           class: 'blk ext' + (hgt < COMPACT_H ? ' compact' : ''),
+          dataset: { eid: e.id },
           style: { top: top(s) + 'px', height: hgt + 'px' },
           title: `${e.title}${e.location ? ' · ' + e.location : ''} (Google Calendar)`
         },
@@ -209,7 +216,7 @@ export function renderWeek(root, { navigate } = {}) {
         h('div', { class: 'n' }, e.title));
         // Google's own event: moved like a block when two-way sync is on, a
         // click opening the small editor either way
-        if (canEditEvents()) wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate);
+        if (canEditEvents()) wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate, turner);
         else el.addEventListener('click', () => openEvent(e.id, { after: navigate }));
         lay(s, en - s, el);
       }
@@ -217,6 +224,7 @@ export function renderWeek(root, { navigate } = {}) {
 
     // planned work blocks
     for (const t of itemsPlannedOn(d).filter((x) => x.plan.start)) {
+      if (held?.dataset.id === t.id) continue;
       const s = toMin(t.plan.start), mins = t.plan.mins || t.estMins || 60;
       const color = areaColor(t.areaId);
       const hgt = Math.max(20, (until(s, s + mins) / 60) * hourH - 2);
@@ -231,24 +239,30 @@ export function renderWeek(root, { navigate } = {}) {
       },
       h('div', { class: 't' }, fmtTime(t.plan.start, hour12) + ' · ' + fmtDuration(mins)),
       h('div', { class: 'n' }, t.title));
-      wireBlock(el, t, body, days, dayStart, dayEnd, hourH, navigate);
+      wireBlock(el, t, body, days, dayStart, dayEnd, hourH, navigate, turner);
       lay(s, mins, el);
     }
 
     // and now the widths, which only the whole day knows
-    applyLanes(col.querySelectorAll('.blk'), packBlocks(laid));
+    applyLanes(col.querySelectorAll('.blk:not(.dragging)'), packBlocks(laid));
     if (d === today()) placeNowLine(col, dayStart, hourH);
+  };
 
+  const turner = pageTurner({ body, days, title, head, rail, headFor, cellFor, dress, fillCol });
+
+  for (const d of days) {
+    const col = h('div', { class: 'daycol', style: { height: hours.length * hourH + 'px' } });
     // double click empty space -> an hour, named the same way a drag is
     col.addEventListener('dblclick', (e) => {
       if (e.target !== col) return;
       const rect = col.getBoundingClientRect();
       const mins = snap((e.clientY - rect.top) / hourH * 60 + dayStart * 60);
-      newBlockPrompt({ date: d, start: fromMin(mins), mins: 60 }, { onDone: navigate });
+      newBlockPrompt({ date: col.dataset.date, start: fromMin(mins), mins: 60 }, { onDone: navigate });
     });
-
+    dress(col, d);
+    fillCol(col, d);
     body.append(col);
-  });
+  }
 
   // press on empty grid and drag out a range, the way a calendar does
   dragCreate(body, {
@@ -295,7 +309,7 @@ export function renderWeek(root, { navigate } = {}) {
       class: 'tray-item', dataset: { id: t.id },
       style: { '--c': areaColor(t.areaId) }
     }, t.title, t.due ? h('span', { class: 'eyebrow', style: { marginLeft: '7px' } }, fmtDate(t.due)) : null);
-    wireTray(chip, t, body, days, dayStart, hourH, navigate);
+    wireTray(chip, t, body, days, dayStart, hourH, navigate, turner);
     items.append(chip);
   }
   tray.append(items);
@@ -316,6 +330,14 @@ export function renderWeek(root, { navigate } = {}) {
 
 const snap = (mins) => clamp(Math.round(mins / 15) * 15, 0, 24 * 60 - 15);
 
+/** "September 6–12", or across a month "Sep 28 – Oct 4". */
+function spanFor(days) {
+  const first = parseYmd(days[0]), last = parseYmd(days[6]);
+  return first.getMonth() === last.getMonth()
+    ? `${MONTHS[first.getMonth()]} ${first.getDate()}–${last.getDate()}`
+    : `${MONTHS[first.getMonth()].slice(0, 3)} ${first.getDate()} – ${MONTHS[last.getMonth()].slice(0, 3)} ${last.getDate()}`;
+}
+
 /** How tall an hour is drawn, straight from the stylesheet that draws it. */
 const hourHeight = () => cssPx('--hour-h', 52);
 
@@ -327,6 +349,67 @@ function edgeScroll(ev, body) {
   const margin = 48;
   if (ev.clientY < r.top + margin) sc.scrollTop -= 12;
   else if (ev.clientY > r.bottom - margin) sc.scrollTop += 12;
+}
+
+/* ---- turning the week under a drag ----
+   A block carried to the grid's edge, or over ‹ ›, and held there turns
+   the page, the way a calendar does: the days take the next week's dates
+   and blocks, the ghost stays under the pointer, and the drop lands where
+   the pointer is. Nothing is rebuilt — a redraw under a finger loses the
+   touch — so the block picked up stays where it was until the drop, and
+   `days` is changed in place, since every hit test reads it. One turn per
+   visit to the edge: to turn again, come away and back, so a hand held
+   there does not run off through the term. A drag called off goes back to
+   the week it began in. */
+const TURN_MS = 550, TURN_ZONE = 18;
+function pageTurner({ body, days, title, head, rail, headFor, cellFor, dress, fillCol }) {
+  let timer = null, dir = 0, from = null;
+  const hot = (d) => {
+    for (const b of document.querySelectorAll('.weekbar [data-turn]')) b.classList.toggle('is-hot', Number(b.dataset.turn) === d);
+  };
+  const zone = (ev) => {
+    const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-turn]');
+    if (over) return Number(over.dataset.turn);
+    const r = body.closest('.week-scroll')?.getBoundingClientRect();
+    if (!r || ev.clientY < r.top || ev.clientY > r.bottom) return 0;
+    return ev.clientX < r.left + TURN_ZONE ? -1 : ev.clientX > r.right - TURN_ZONE ? 1 : 0;
+  };
+  const stop = () => { clearTimeout(timer); timer = null; dir = 0; hot(0); };
+  const turn = (d) => {
+    if (!body.isConnected) return stop();    // drawn again under us: this grid is gone
+    if (!from) from = { anchor, follows };
+    anchor = addDays(anchor, 7 * d);
+    follows = false;
+    for (let i = 0; i < days.length; i++) days[i] = addDays(days[i], 7 * d);
+    title.textContent = spanFor(days);
+    head.replaceChildren(head.firstChild, ...days.map((d) => headFor(d)));
+    rail.replaceChildren(rail.firstChild, ...days.map((d) => cellFor(d)));
+    body.querySelectorAll('.daycol').forEach((col, i) => {
+      for (const n of [...col.children]) if (!n.classList.contains('dragging') && !n.classList.contains('drop-ghost')) n.remove();
+      dress(col, days[i]);
+      fillCol(col, days[i]);
+    });
+  };
+  return {
+    /** Each move of a drag: arm a turn, keep one armed, or let it go. */
+    at(ev) {
+      const d = zone(ev);
+      if (d === dir) return;
+      stop();
+      dir = d;
+      hot(d);
+      if (!d) return;
+      timer = setTimeout(() => { timer = null; turn(d); }, TURN_MS);
+    },
+    /** The drag is over. True when the week has to be drawn again here: it was turned, and nothing landed. */
+    end(dropped) {
+      stop();
+      const back = !!from && !dropped;
+      if (back) { anchor = from.anchor; follows = from.follows; }
+      from = null;
+      return back;
+    }
+  };
 }
 
 /**
@@ -364,25 +447,27 @@ function hit(ev, body, days, dayStart, hourH, dayEnd = 24) {
  * grid's hit test names one. The top and bottom edges stretch it. All three
  * are `dragBlock`, shared with Overview's clock; only the geometry differs.
  */
-function wireBlock(el, item, body, days, dayStart, dayEnd, hourH, navigate) {
+function wireBlock(el, item, body, days, dayStart, dayEnd, hourH, navigate, turner) {
   const mins = item.plan.mins || item.estMins || 60;
   dragBlock(el, { date: item.plan.date, start: item.plan.start, mins }, {
     hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
     hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
-    edge: (ev) => edgeScroll(ev, body),
+    edge: (ev) => { edgeScroll(ev, body); turner.at(ev); },
     onDrop: (plan) => moveItem(item.id, plan, { after: navigate }),
+    onEnd: (dropped) => { if (turner.end(dropped)) navigate(); },
     onClick: () => openItem(item.id)
   });
 }
 
 /* A Google event moves like a block, and the move goes to Google — with
    an Undo, since `events` is not the store's to remember. */
-function wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate) {
+function wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate, turner) {
   const s = toMin(e.start), en = toMin(e.end) || s + 60;
   dragBlock(el, { date: e.date, start: e.start, mins: en - s }, {
     hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
     hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
-    edge: (ev) => edgeScroll(ev, body),
+    edge: (ev) => { edgeScroll(ev, body); turner.at(ev); },
+    onEnd: (dropped) => { if (turner.end(dropped)) navigate(); },
     onDrop: (plan) => {
       const before = { date: e.date, start: e.start, end: e.end, allDay: false };
       editEvent(e.id, { date: plan.date, start: plan.start, end: fromMin(toMin(plan.start) + plan.mins), allDay: false });
@@ -399,7 +484,7 @@ function wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate) {
    the nearest column whatever the pointer is over, and a wiggle let go on the
    tray itself used to plan the task for Sunday at a quarter to midnight. On
    touch the chip waits for a hold, so a swipe along the tray scrolls it. */
-function wireTray(chip, item, body, days, dayStart, hourH, navigate) {
+function wireTray(chip, item, body, days, dayStart, hourH, navigate, turner) {
   let ghost = null, pend = null;
   const drop = () => { ghost?.remove(); ghost = null; pend = null; };
   draggable(chip, {
@@ -407,6 +492,7 @@ function wireTray(chip, item, body, days, dayStart, hourH, navigate) {
     onStart: () => { chip.classList.add('dragging'); },
     onMove: (ev) => {
       edgeScroll(ev, body);
+      turner.at(ev);
       const { date, mins, col, inside } = hit(ev, body, days, dayStart, hourH);
       if (!inside) { drop(); return; }
       if (!ghost) ghost = h('div', { class: 'drop-ghost' });
@@ -415,10 +501,11 @@ function wireTray(chip, item, body, days, dayStart, hourH, navigate) {
       col.append(ghost);
       pend = { date, start: fromMin(mins) };
     },
-    onCancel: () => { chip.classList.remove('dragging'); drop(); },
+    onCancel: () => { chip.classList.remove('dragging'); drop(); turner.end(false); },
     onEnd: () => {
       chip.classList.remove('dragging');
       ghost?.remove(); ghost = null;
+      turner.end(!!pend);      // the redraw below draws whichever week that left us in
       if (pend) {
         commit(() => {
           item.plan = { date: pend.date, start: pend.start, mins: item.estMins || 60 };

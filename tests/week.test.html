@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Week tests</title>
+<link rel="stylesheet" href="./tests.css">
+<style>
+  /* enough of the week's geometry for a hit test: seven columns side by
+     side, and a scroller with edges to hold a drag at. Off to the left, so
+     the report under it stays readable. */
+  #stage { position: absolute; left: -2000px; top: 0; width: 900px; height: 600px; }
+  #stage .week-scroll { height: 500px; overflow: auto; }
+  #stage .week-body, #stage .week-head, #stage .allday-rail { display: grid; grid-template-columns: 50px repeat(7, 1fr); }
+  #stage .daycol { position: relative; }
+  #stage .blk { position: absolute; left: 0; right: 0; }
+</style>
+</head>
+<body>
+<!-- the hosts ui.js writes to: a drop toasts, and Escape asks the peek to close -->
+<div id="toasts" hidden></div>
+<aside id="peek" hidden></aside>
+<div id="peek-scrim" hidden></div>
+<script type="module">
+/* The week turns under a drag. What has to hold: a block carried to the
+   grid's edge and held there turns the page in place — the days take the
+   next week's dates, nothing is rebuilt under the pointer, and the block in
+   hand is neither lost nor drawn twice; let go on a day of the new week,
+   it lands there, and that week is the one drawn; called off after a turn,
+   the drag goes back to the week it began in. */
+import { suite, sharedStoreWith } from './harness.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+  items: [], cards: [], notes: {}
+});
+
+// a hidden tab clamps timers to a second; a message hop after the wait
+// keeps the chain from getting slower still
+const hop = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+const tick = (ms) => new Promise((r) => setTimeout(r, ms)).then(hop);
+
+suite('Week — the page turns under a drag', async ({ check }) => {
+  const W = await import('../js/views/week.js');
+  const stage = document.createElement('div');
+  stage.id = 'stage';
+  document.body.append(stage);
+  let draws = 0;
+  const navigate = () => { draws++; W.renderWeek(stage, { navigate }); };
+  const dates = () => [...stage.querySelectorAll('.daycol')].map((c) => c.dataset.date);
+  const pt = (type, x, y, target) => (target || window).dispatchEvent(new PointerEvent(type,
+    { bubbles: true, button: 0, pointerId: 7, pointerType: 'mouse', clientX: x, clientY: y }));
+  const mid = (r) => [r.left + r.width / 2, r.top + r.height / 2];
+  const item = () => s.state.items.find((t) => t.id === 'w1');
+  const hadWeekStart = s.state.settings.weekStart;
+
+  try {
+    s.state.settings.weekStart = 0;
+    s.upsertItem({ id: 'w1', title: 'Write up', areaId: 'gen', plan: { date: '2026-09-09', start: '10:00', mins: 60 } });
+    W.showWeekOf('2026-09-09');
+    W.renderWeek(stage, { navigate });
+    check('the week asked for is drawn', dates()[0] === '2026-09-06' && dates()[6] === '2026-09-12', dates().join(' '));
+    const blk = stage.querySelector('.blk.plan[data-id="w1"]');
+    check('the block sits on its day', blk?.parentElement.dataset.date === '2026-09-09');
+
+    // pick it up, carry it to the right edge of the grid, and wait there
+    const [bx, by] = mid(blk.getBoundingClientRect());
+    pt('pointerdown', bx, by, blk);
+    pt('pointermove', bx + 12, by + 12);
+    const sc = stage.querySelector('.week-scroll').getBoundingClientRect();
+    pt('pointermove', sc.right - 4, by);
+    check('the button for that way lights up', stage.querySelector('[data-turn="1"]').classList.contains('is-hot'));
+    check('...and nothing has turned yet', dates()[0] === '2026-09-06');
+    await tick(1500);
+    check('held at the edge, the week turns', dates()[0] === '2026-09-13' && dates()[6] === '2026-09-19', dates().join(' '));
+    const title = stage.querySelector('.weekbar h2').textContent;
+    check('...the heads and the title with it', stage.querySelector('.dhead .dnum').textContent === '13' && /13–19/.test(title), title);
+    check('the block in hand stays in hand', stage.querySelector('.blk.dragging')?.dataset.id === 'w1');
+    check('...and is not drawn twice', stage.querySelectorAll('.blk.plan[data-id="w1"]').length === 1);
+    check('nothing was rebuilt under the pointer', draws === 0, String(draws));
+
+    // back over the grid the turn lets go; let go over Wednesday of the new week
+    pt('pointermove', bx, by);
+    check('back over the grid, nothing is armed', !stage.querySelector('.is-hot'));
+    const wed = stage.querySelectorAll('.daycol')[3].getBoundingClientRect();
+    pt('pointermove', wed.left + wed.width / 2, wed.top + 30);
+    pt('pointerup', wed.left + wed.width / 2, wed.top + 30);
+    check('let go there, the block lands in the new week', item().plan.date === '2026-09-16', item().plan.date);
+    check('...and that week is the one drawn', draws >= 1 && dates()[0] === '2026-09-13', `${draws} draws, ${dates()[0]}`);
+
+    // called off after a turn: back to the week the drag began in
+    const blk2 = stage.querySelector('.blk.plan[data-id="w1"]');
+    const [cx, cy] = mid(blk2.getBoundingClientRect());
+    pt('pointerdown', cx, cy, blk2);
+    pt('pointermove', cx + 12, cy + 12);
+    const sc2 = stage.querySelector('.week-scroll').getBoundingClientRect();
+    pt('pointermove', sc2.left + 4, cy);
+    await tick(1500);
+    check('held at the left edge, the week turns back', dates()[0] === '2026-09-06', dates().join(' '));
+    const before = draws;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    check('called off, the block is where it was', item().plan.date === '2026-09-16', item().plan.date);
+    check('...and the week drawn is the one the drag began in', draws === before + 1 && dates()[0] === '2026-09-13', `${draws - before} draws, ${dates()[0]}`);
+  } finally {
+    stage.remove();
+    W.showWeekOf();
+    s.state.settings.weekStart = hadWeekStart;
+    if (item()) s.deleteItem('w1');
+  }
+});
+</script>
+</body>
+</html>

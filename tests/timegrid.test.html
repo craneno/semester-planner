@@ -171,10 +171,12 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     host.append(el);
 
     let opened = 0;
+    const ends = [];
     dragBlock(el, { date: '2026-09-10', start: '09:00', mins: 60 }, {
       hit: () => ({ date: '2026-09-10', mins: 540, col: host }),
       hourH: 52,
       onDrop: () => {},
+      onEnd: (dropped) => { ends.push(dropped); },
       onClick: () => { opened++; }
     });
 
@@ -190,6 +192,8 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     window.dispatchEvent(pt('pointerup', 10, 90));
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     check('the click after a drag is eaten, not an open', opened === 1, String(opened));
+    // the hit test names the block's own slot, so this drag put it back where it was
+    check('the end of a drag says whether anything landed: here, nothing', ends.length === 1 && ends[0] === false, JSON.stringify(ends));
 
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     check('...and only that one — the next tap opens it again', opened === 2, String(opened));
@@ -201,6 +205,7 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     touch('pointerup', 10, 10);
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     check('a tap opens it, having waited for nothing', opened === 3, String(opened));
+    check('...and a tap is no drag: nothing ended', ends.length === 1, String(ends.length));
 
     host.remove();
   }

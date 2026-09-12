@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v58', date: '2026-09-11',
+    title: 'Signed in for the week, and the week turned in hand',
+    notes: [
+      'Google sign-in keeps. With cloud sync signed in and the google-token function deployed, Connect brings back a refresh token, kept on this device, and the planner signs itself in for a week or more — no popup every hour. Set the client secret once: supabase secrets set GOOGLE_CLIENT_SECRET=… then supabase functions deploy google-token, and Connect again. Without it, sign-in is as before.',
+      'A block dragged to the edge of the week, or over ‹ ›, and held there turns the page: the days take the next week, and the block lands where you let go. Come away and back to turn again; called off, it goes back. Google events and tray chips the same.'
+    ]
+  },
+  {
     version: 'v57', date: '2026-09-11',
     title: 'Empty said once',
     notes: [

@@ -1,8 +1,10 @@
 // gcal.js — Google Calendar, two-way, browser-only (no server).
 //
-// Auth: Google Identity Services token client (popup) with a full-page
-// implicit redirect fallback for installed PWAs, where popups can't return
-// a result to the standalone window.
+// Auth: Google Identity Services (popup) with a full-page redirect fallback
+// for installed PWAs, where popups can't return a result to the standalone
+// window. With a cloud session the sign-in goes the code way through the
+// google-token Edge Function, which holds the client secret, and comes back
+// with a refresh token: the next hour is asked for quietly, no popup.
 //
 // Read:  incremental sync with syncToken, polled while the app is visible,
 //        from the day the calendar began to a year ahead (pullWindow).
@@ -15,6 +17,7 @@ import {
   repeats, occurrencesBetween
 } from './store.js';
 import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays, today } from './util.js';
+import * as C from './cloud.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 const SCOPES = [
@@ -45,24 +48,63 @@ export const isSignedIn = () => !!(gcal.token && gcal.token.expires_at > Date.no
 const standalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 
-/* ---------------- token ---------------- */
+/* ---------------- token ----------------
+   An access token lasts an hour. With a refresh token beside it — given
+   when the sign-in went through google-token on the edge — the next hour is
+   asked for quietly, for as long as Google keeps the grant: a week under a
+   consent screen still in Testing, until revoked once published. Both stay
+   in localStorage, on this device only: never in state, never synced. */
 
 function loadToken() {
   try {
     const t = JSON.parse(localStorage.getItem(TOKEN_KEY) || 'null');
-    if (t && t.expires_at > Date.now() + 30000) { gcal.token = t; return true; }
+    // an expired token is kept for the refresh token on it
+    if (t?.access_token) { gcal.token = t; return isSignedIn(); }
   } catch { /* ignore */ }
   return false;
 }
-function storeToken(access_token, expires_in) {
-  gcal.token = { access_token, expires_at: Date.now() + (Number(expires_in) || 3600) * 1000 };
+function saveToken() {
   try { localStorage.setItem(TOKEN_KEY, JSON.stringify(gcal.token)); } catch { /* ignore */ }
+}
+function storeToken(access_token, expires_in, refresh_token) {
+  // Google gives a refresh token once, at consent; a renewal keeps the one we have
+  const keep = refresh_token || gcal.token?.refresh_token;
+  gcal.token = {
+    access_token, expires_at: Date.now() + (Number(expires_in) || 3600) * 1000,
+    ...(keep ? { refresh_token: keep } : {})
+  };
+  saveToken();
+}
+/** The hour is up (a 401 said so): the access token goes, the grant stays. */
+function expireToken() {
+  if (!gcal.token) return;
+  gcal.token = { ...gcal.token, expires_at: 0 };
+  saveToken();
 }
 export function forgetToken() {
   gcal.token = null;
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
   setStatus('signed-out', 'Signed out of Google.');
 }
+
+/** A fresh hour from the refresh token, or null. A grant Google has ended is dropped, not asked again. */
+async function refresh() {
+  const rt = gcal.token?.refresh_token;
+  if (!rt) return null;
+  try {
+    const t = await C.googleToken({ client_id: cfg().clientId, grant: 'refresh', refresh_token: rt });
+    if (!t?.access_token) return null;
+    storeToken(t.access_token, t.expires_in, t.refresh_token);
+    return gcal.token;
+  } catch (e) {
+    if (e.code === 'invalid_grant') { delete gcal.token.refresh_token; saveToken(); }
+    gcal.lastError = e;
+    return null;
+  }
+}
+
+/** Whether a sign-in can be made to keep: a cloud session to ask google-token as. */
+const keeps = async () => !!(await C.session());
 
 let gisPromise = null;
 function loadGis() {
@@ -90,30 +132,66 @@ function ensureTokenClient() {
   return tokenClient;
 }
 
-function redirectSignIn() {
+/* The code way: the popup hands back a code, google-token trades it for an
+   access token and a refresh token, and this device is signed in for a
+   week or more. Only where there is a cloud session to ask as. */
+function codeSignIn() {
+  return new Promise((resolve, reject) => {
+    const fail = (msg) => { setStatus('signed-out', msg); reject(new Error(msg)); };
+    const client = window.google.accounts.oauth2.initCodeClient({
+      client_id: cfg().clientId, scope: SCOPES, ux_mode: 'popup',
+      callback: async (resp) => {
+        if (resp.error) return fail(resp.error_description || resp.error);
+        try {
+          const t = await C.googleToken({ client_id: cfg().clientId, grant: 'code', code: resp.code, redirect_uri: 'postmessage' });
+          if (!t?.access_token) return fail('Google sent no token back.');
+          storeToken(t.access_token, t.expires_in, t.refresh_token);
+          setStatus('ready', 'Connected.');
+          resolve(gcal.token);
+        } catch (e) { fail(e.message); }
+      },
+      error_callback: (err) => fail(err?.message || (err?.type === 'popup_closed' ? 'Google sign-in was closed.' : 'Google sign-in did not open.'))
+    });
+    try { client.requestCode(); } catch (e) { fail(e.message); }
+  });
+}
+
+/** @param {{ keep?: boolean }} [opts]  keep: come back with a code for google-token, not a token */
+function redirectSignIn({ keep = false } = {}) {
   const redirect = location.origin + location.pathname;
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.search = new URLSearchParams({
     client_id: cfg().clientId,
     redirect_uri: redirect,
-    response_type: 'token',
+    response_type: keep ? 'code' : 'token',
     scope: SCOPES,
     include_granted_scopes: 'true',
     state: 'planner',
-    prompt: 'consent'
+    prompt: 'consent',
+    ...(keep ? { access_type: 'offline' } : {})
   }).toString();
   location.assign(url.toString());
 }
 
-/** Called once at boot: picks up #access_token after a redirect sign-in. */
-export function captureRedirectToken() {
-  if (!location.hash.includes('access_token')) return false;
-  const p = new URLSearchParams(location.hash.slice(1));
-  const at = p.get('access_token');
-  if (!at) return false;
-  storeToken(at, p.get('expires_in'));
-  history.replaceState(null, '', location.pathname + location.search);
-  return true;
+/** Called once at boot: picks up #access_token, or ?code, after a redirect sign-in. */
+export async function captureRedirectToken() {
+  if (location.hash.includes('access_token')) {
+    const p = new URLSearchParams(location.hash.slice(1));
+    const at = p.get('access_token');
+    if (!at) return false;
+    storeToken(at, p.get('expires_in'));
+    history.replaceState(null, '', location.pathname + location.search);
+    return true;
+  }
+  const q = new URLSearchParams(location.search);
+  if (q.get('state') !== 'planner' || !q.get('code')) return false;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const t = await C.googleToken({ client_id: cfg().clientId, grant: 'code', code: q.get('code'), redirect_uri: location.origin + location.pathname });
+    if (!t?.access_token) return false;
+    storeToken(t.access_token, t.expires_in, t.refresh_token);
+    return true;
+  } catch (e) { setStatus('signed-out', e.message); return false; }
 }
 
 /**
@@ -124,9 +202,14 @@ export async function signIn(interactive = true) {
   if (isSignedIn()) return gcal.token;
   setStatus('connecting');
 
-  if (standalone() && interactive) { redirectSignIn(); return null; }
+  // the quiet way in first: a refresh token asks for the hour, no popup
+  if (await refresh()) { setStatus('ready', 'Connected.'); return gcal.token; }
+
+  const keep = interactive && await keeps();
+  if (standalone() && interactive) { redirectSignIn({ keep }); return null; }
 
   await loadGis();
+  if (keep) return codeSignIn();
   const client = ensureTokenClient();
   return new Promise((resolve, reject) => {
     client.callback = (resp) => {
@@ -172,7 +255,7 @@ async function api(path, { method = 'GET', body, params, retry = true } = {}) {
   });
 
   if (res.status === 401 && retry) {
-    forgetToken();
+    expireToken();
     await signIn(false);
     return api(path, { method, body, params, retry: false });
   }
@@ -846,8 +929,8 @@ export async function flushOutbox() {
 let timer = null;
 
 export async function start() {
-  captureRedirectToken();
   loadToken();
+  await captureRedirectToken();
   if (!cfg().enabled || !isConfigured()) { setStatus(isConfigured() ? 'signed-out' : 'off'); return; }
   if (!isSignedIn()) {
     try { await signIn(false); } catch { setStatus('signed-out', 'Sign in to sync.'); return; }

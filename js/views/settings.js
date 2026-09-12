@@ -92,7 +92,7 @@ export function renderSettings(root, { navigate }) {
     h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 12px' } },
       'From Google Cloud Console → Credentials → OAuth client ID (Web application). Add this exact origin — ',
       h('code', { class: 'mono' }, location.origin),
-      ' — to both Authorised JavaScript origins and Authorised redirect URIs. See README.md.'),
+      ' — to both Authorised JavaScript origins and Authorised redirect URIs. With cloud sync signed in and google-token deployed, a sign-in keeps for a week or more. See README.md.'),
     field('Calendar', calPicker),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' } },
       h('button', {

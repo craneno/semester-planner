@@ -196,7 +196,7 @@ export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) 
  * scroller, and any real movement hands it back — you cannot pick up a block
  * you were only scrolling past.
  */
-export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onClick, dayEnd = DAY }) {
+export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onEnd, onClick, dayEnd = DAY }) {
   const startMin = toMin(plan.start);
 
   /* The click is the block's, not the browser's. One is fired after every
@@ -313,7 +313,10 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, onDrop, onCl
       // one would stamp updatedAt and push it to Google for nothing
       const same = fire && pend
         && pend.date === plan.date && pend.start === plan.start && pend.mins === plan.mins;
-      if (fire && pend && !same) onDrop?.(pend);
+      const dropped = !!(fire && pend && !same);
+      if (dropped) onDrop?.(pend);
+      // the drag is over either way, and says whether anything landed
+      onEnd?.(dropped);
     };
     const up = () => finish(true);
     const cancel = () => finish(false);

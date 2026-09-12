@@ -464,6 +464,110 @@ suite('Calendar — Google\'s own events, edited in place', async ({ check }) =>
     s.state.events = [];
   }
 });
+
+/* A sign-in that keeps. An access token lasts an hour; a refresh token,
+   given when the sign-in went through google-token on the edge, buys the
+   next hour without a popup. What has to hold: the refresh token is tried
+   first and kept; a 401 spends the hour, not the grant; a grant Google has
+   ended is dropped, not asked again for ever; with cloud sync signed in,
+   Connect goes the code way and comes back with a refresh token; the
+   function not deployed is said plainly; and with no cloud session the
+   browser-only way is as it was. */
+suite('Calendar — a sign-in that keeps', async ({ check }) => {
+  const G = await import('../js/gcal.js');
+  const C = await import('../js/cloud.js');
+  const real = globalThis.fetch;
+  const calls = [];
+  let answer = () => ({ status: 200, json: {} });
+  globalThis.fetch = async (url, init = {}) => {
+    const c = { method: init.method || 'GET', url: String(url), body: init.body ? JSON.parse(init.body) : null };
+    calls.push(c);
+    const r = await answer(c);
+    const text = r.text ?? JSON.stringify(r.json ?? {});
+    return { ok: r.status < 300, status: r.status, text: async () => text, json: async () => JSON.parse(text) };
+  };
+  const toks = () => calls.filter((c) => c.url.includes('/functions/v1/google-token'));
+  const g = s.state.settings.gcal;
+  const cl = s.state.settings.cloud;
+  const had = { g: { ...g }, cl: { ...cl }, google: window.google, token: G.gcal.token, status: G.gcal.status };
+  Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary' });
+  Object.assign(cl, { url: 'https://x.supabase.co', anonKey: 'anon' });
+  const withSession = (tok) => C._setClient({ auth: { getSession: async () => ({ data: { session: tok ? { access_token: tok } : null } }) } }, { userId: 'u1' });
+  withSession('sb-jwt');
+  // Google's script, stood in for: a popup that never opens, and a code
+  // client that hands back a code at once
+  let popups = 0;
+  window.google = { accounts: { oauth2: {
+    initTokenClient: () => ({ requestAccessToken() { popups++; this.error_callback({ type: 'popup_closed' }); } }),
+    initCodeClient: (o) => ({ requestCode: () => o.callback({ code: 'code-1' }) })
+  } } };
+
+  try {
+    // the hour is up, and a refresh token is on the token
+    G.gcal.token = { access_token: 'old', expires_at: 0, refresh_token: 'r1' };
+    answer = (c) => c.url.includes('google-token') ? { status: 200, json: { access_token: 'new', expires_in: 3600 } } : { status: 200, json: {} };
+    await G.signIn(false);
+    check('the refresh token buys the hour, with no popup', G.gcal.token.access_token === 'new' && popups === 0, G.gcal.token.access_token);
+    check('...asked of google-token as a refresh, with the client id', toks().length === 1 && toks()[0].body.grant === 'refresh' && toks()[0].body.refresh_token === 'r1' && toks()[0].body.client_id === 'test-client', JSON.stringify(toks()[0]?.body));
+    check('...and the refresh token is kept, Google having sent none back', G.gcal.token.refresh_token === 'r1');
+    const stored = JSON.parse(localStorage.getItem('semesterPlanner.gcalToken') || 'null');
+    check('...on this device: in localStorage, never in state', stored?.refresh_token === 'r1' && !JSON.stringify(s.state).includes('refresh_token'));
+
+    // a 401 mid-flight: the hour is spent, the grant is not
+    calls.length = 0;
+    let first = true;
+    answer = (c) => {
+      if (c.url.includes('google-token')) return { status: 200, json: { access_token: 'new2', expires_in: 3600 } };
+      if (first) { first = false; return { status: 401, text: 'expired' }; }
+      return { status: 200, json: { items: [] } };
+    };
+    await G.listCalendars();
+    const lists = calls.filter((c) => c.url.includes('calendarList'));
+    check('a 401 refreshes and asks again', toks().length === 1 && G.gcal.token.access_token === 'new2' && lists.length === 2, `${toks().length} refreshes, ${lists.length} asks, ${G.gcal.token.access_token}`);
+    check('...keeping the refresh token', G.gcal.token.refresh_token === 'r1');
+
+    // Google has ended the grant: dropped, and the browser-only way is tried
+    calls.length = 0;
+    G.gcal.token = { access_token: 'old', expires_at: 0, refresh_token: 'r1' };
+    answer = (c) => c.url.includes('google-token')
+      ? { status: 400, text: JSON.stringify({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }) }
+      : { status: 200, json: {} };
+    await G.signIn(false).catch(() => {});
+    check('a grant Google has ended is dropped', !G.gcal.token?.refresh_token, JSON.stringify(G.gcal.token));
+    check('...and the browser-only way is tried instead', popups === 1 && G.gcal.status === 'signed-out', `${popups} popups, ${G.gcal.status}`);
+
+    // Connect, with cloud sync signed in: the code way, and a refresh token comes back
+    calls.length = 0;
+    answer = (c) => c.url.includes('google-token') ? { status: 200, json: { access_token: 'via-code', expires_in: 3600, refresh_token: 'r2' } } : { status: 200, json: {} };
+    await G.signIn(true);
+    check('Connect goes the code way when cloud sync is signed in', toks().length === 1 && toks()[0].body.grant === 'code' && toks()[0].body.code === 'code-1' && toks()[0].body.redirect_uri === 'postmessage', JSON.stringify(toks()[0]?.body));
+    check('...and comes back signed in for good', G.gcal.token.access_token === 'via-code' && G.gcal.token.refresh_token === 'r2' && G.isSignedIn());
+
+    // the function not deployed: said plainly, not a hung Connecting…
+    G.gcal.token = null;
+    calls.length = 0;
+    answer = (c) => c.url.includes('google-token') ? { status: 404, text: 'not found' } : { status: 200, json: {} };
+    const err = await G.signIn(true).then(() => null, (e) => e);
+    check('google-token missing names the deploy', /functions deploy google-token/.test(err?.message || '') && G.gcal.status === 'signed-out', err?.message);
+
+    // no cloud session: the browser-only way, as before
+    withSession(null);
+    calls.length = 0;
+    popups = 0;
+    await G.signIn(true).catch(() => {});
+    check('with no cloud session, the popup way as before', popups === 1 && toks().length === 0, `${popups} popups, ${toks().length} asks`);
+  } finally {
+    globalThis.fetch = real;
+    window.google = had.google;
+    G.gcal.token = had.token;
+    G.gcal.status = had.status;
+    try { localStorage.removeItem('semesterPlanner.gcalToken'); } catch { /* ignore */ }
+    Object.assign(g, had.g);
+    Object.assign(cl, had.cl);
+    C._setClient(null);
+    C.cloud.userId = null;
+  }
+});
 </script>
 </body>
 </html>

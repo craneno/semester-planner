@@ -721,6 +721,41 @@ export async function trackParcel({ carrier, number }) {
   return JSON.parse(text);
 }
 
+/** The cloud session's token, or null with none: what the edge functions act as. */
+export async function session() {
+  if (!isConfigured()) return null;
+  try {
+    const c = await client();
+    const { data } = await c.auth.getSession();
+    return data?.session?.access_token || null;
+  } catch { return null; }
+}
+
+/**
+ * Trade a Google sign-in code, or a refresh token, for tokens on the edge,
+ * where the client secret lives (supabase/functions/google-token). Null
+ * when there is no cloud session to ask as: the page then signs in the
+ * browser-only way, an hour at a time. Throws with the function's words —
+ * `code` is Google's `error` (`invalid_grant` is a grant that has ended).
+ */
+export async function googleToken(body) {
+  const token = await session();
+  if (!token) return null;
+  const res = await fetch(cfg().url.replace(/\/+$/, '') + '/functions/v1/google-token', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + token, apikey: cfg().anonKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  if (res.status === 404) throw Object.assign(new Error('The google-token function is not deployed yet. From the repo: supabase secrets set GOOGLE_CLIENT_SECRET=… then supabase functions deploy google-token'), { code: 404 });
+  if (!res.ok) {
+    let j = null;
+    try { j = JSON.parse(text); } catch { /* plain words */ }
+    throw Object.assign(new Error(j?.error_description || j?.error || text || `Google token: ${res.status}`), { code: j?.error || res.status });
+  }
+  return JSON.parse(text);
+}
+
 /** Forget this device's sync bookkeeping without touching the data itself. */
 export function resetLocalSyncState() {
   if (cloud.userId) { try { localStorage.removeItem(BASE_KEY(cloud.userId)); } catch { /* ignore */ } }

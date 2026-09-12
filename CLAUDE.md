@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v57**.
+Schema **20**, service worker **planner-v58**.
 
 ## Working with me
 
@@ -47,12 +47,11 @@ state as their first argument (`areas`, `cards`, `links`, `wishlist`,
 `sprints`, `habits`), bound to the live `state` by `bind()`. **A slice never
 owns state**: `storeWith` busts only `store.js`, so a slice that kept its own
 would be shared by every fresh instance in the tests. Items, notes, areas'
-edits, the selectors over items and the sync rows stay in `store.js`. A new
-slice goes in `sw.js`'s `SHELL` too, or `version.test.html` fails. Use the selectors that are already
-there (`itemById`, `itemsDueOn`, `upcoming`, `classesOn`, `dayTimeline`, …)
-instead of filtering by hand again. `commit(fn, { source })` — `app.js` redraws
-only for `external`, `gcal`, `cloud`, `editor`, `restore`, `undo`, `redo`,
-`canvas`; tag one made from a
+edits, the selectors over items and the sync rows stay in `store.js`. Use the
+selectors that are already there (`itemById`, `itemsDueOn`, `upcoming`,
+`classesOn`, `dayTimeline`, …) instead of filtering by hand again.
+`commit(fn, { source })` — `app.js` redraws only for `external`, `gcal`,
+`cloud`, `editor`, `restore`, `undo`, `redo`, `canvas`; tag one made from a
 floating panel, or the view under it will not repaint (`set()` in the editor
 and `tickItem` are). `modal()` focuses the first control in its *body*, never
 the ✕.
@@ -139,8 +138,12 @@ error. An all-day plan goes as `start`/`end` **dates**, the end being the
 morning *after*. **Google is read over `pullWindow()`** — `calendar.start` to
 a year ahead, never the term — and a token only reports the window it was
 made under, so `gcal.window` is kept beside it and `windowMoved()` starts
-over. `ITEM_TYPES` is `event`, `task`, `meeting`, `homework`; no area puts it
-in General. `eventsOn` drops a Google event that **shadows a class** on the
+over. **A sign-in keeps through `google-token`** (`supabase/functions/`, the
+client secret on the edge): with a cloud session `signIn()` goes the code way
+and keeps the refresh token beside the access token, device-only; it is tried
+first, a 401 spends the hour not the grant (`expireToken`), and
+`invalid_grant` drops it. `ITEM_TYPES` is `event`, `task`, `meeting`,
+`homework`; no area puts it in General. `eventsOn` drops a Google event that **shadows a class** on the
 schedule that day (same start, and same end or a shared word), since a
 schedule read off Google is on Google still. The Canvas import keeps to the term (`inTerm`, two weeks'
 slack): the feed carries every course still enrolled in. Each *seed*
@@ -198,13 +201,15 @@ Categories and areas are **data, not screens**, so `route()` handles `#/week`,
 right when an open area is deleted); `AREA_CATEGORIES` is the one source for
 the sidebar, the breakdown and the editor's select. Habits and the wishlist sit
 under Personal but are **not** areas: `CATEGORY_PINS` hangs them off the group,
-outside the `reorderable()` host. **A category row's caret goes after the
-label**, or the sidebar's line-up breaks.
+outside the `reorderable()` host.
 
 **Week follows the day** (`follows`) until prev/next let go of it. It draws
 the settings' hours, opened wider for anything on those days (`shownHours`);
 a block past midnight is drawn to midnight. A click or tap on the empty
-all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`).
+all-day rail makes an all-day plan (`newBlockPrompt({ allDay })`). **The week
+turns under a drag** (`pageTurner`): held at the grid's edge or over ‹ ›, the
+columns take the next week's dates and blocks in place — a rebuild would lose
+the touch — and the block in hand stays put; called off, the drag goes back.
 **Overview is the day**: a 24-hour clock, opened at 8am, next to focus, top
 three, open work and the end-of-day note. `overdue()` is deadlines gone by
 *and* plain blocks booked on a day gone by with no deadline, unticked — a
@@ -214,20 +219,16 @@ the draw *before* anything reads the note, only when `pendingTomorrow()` says
 so (a `commit()` with no check would sync a row every visit), tagged
 `{ source: 'carry' }`, and marked spent (`tomorrowUsed`) either way.
 **Every note writer calls `touchNote(date)`**, or the note has no clock and
-an old copy beats a new one. **A journal entry lives in the day it was
-written**, `notes[date].journal[areaId]`, so a term of writing syncs as small
-rows; the **freewrite** is one string on the area. **The day starts at 3am** —
-`DAY_RESET_HOUR` and `today(now)` in `js/util.js`, the one place that decides it
-— so an entry written at 1am files under the day it is about. `sweepDone()`
-deletes work ticked off *before* that reset, behind an Undo from `navigate()`.
+an old copy beats a new one. **The day starts at 3am** — `DAY_RESET_HOUR` and
+`today(now)` in `js/util.js`, the one place that decides it — so an entry
+written at 1am files under the day it is about. `sweepDone()` deletes work
+ticked off *before* that reset, behind an Undo from `navigate()`.
 
 **Semester is a chart, with the list behind a switch.** Bands are the three
 categories, lanes are areas, and `area.onChart` (missing reads as true) picks
 which. The maths is **whole days from the first day of term**, times `--day-w`
 at the last moment, which keeps `chartRange`, `itemSpan`, `packLanes` and
-the rest plain to test. A bar wide enough writes its title inside; too narrow,
-outside, and *left* near the end of term, hence `head` as well as `reserve`.
-A **series draws as its run**, first occurrence to last. **A focus or a
+the rest plain to test. A **series draws as its run**, first occurrence to last. **A focus or a
 sprint is a stretch of weeks in one area's lane**, dragged out the way a block
 is on the calendar — `kind` decides whether we ask for deliverables.
 
@@ -278,7 +279,7 @@ is on the calendar — `kind` decides whether we ask for deliverables.
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1340 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1369 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
@@ -290,8 +291,7 @@ waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
 `storeWith(raw)`, which **checks** its seed. A file that has not reported in
 90s is a **failure**. A fresh instance has its own `state`, so a suite that
 pokes state *and* calls `gcal.js`/`cloud.js` must use `sharedStoreWith()` —
-once per page, since `import()` caches. To add a field to a task:
-`upsertItem()`, a fallback in `migrate()`, a row in `js/editor.js`.
+once per page, since `import()` caches.
 
 ## House rules
 
