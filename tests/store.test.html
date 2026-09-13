@@ -985,6 +985,36 @@ suite('Habits — a task that counts for one', async ({ check }) => {
   s.toggleItem('leg', true);
   check('...and a tick after that is only the task\u2019s', s.itemById('leg').done && !s.habitDone(yday, 'h1'));
 });
+
+/* An item from the cloud takes today's shape. What has to hold: a row an
+   older build sends (plannedDate, estimate) lands as plan and estMins with
+   every field a view reads; a row already in shape is the same bytes after. */
+suite('Sync — an item from an older build lands in shape', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+    items: [], cards: [], notes: {}
+  });
+  s.applyRow({ kind: 'item', id: 'old', data: { id: 'old', title: 'Old shape', areaId: 'gen', plannedDate: '2026-09-10', estimate: 30, updatedAt: '2026-09-01T00:00:00.000Z' } });
+  const t = s.itemById('old');
+  check('it landed', !!t);
+  check('the old day is a plan', t?.plan?.date === '2026-09-10' && t.plan.start === null, JSON.stringify(t?.plan));
+  check('the old estimate is estMins', t?.estMins === 30);
+  check('every field a view reads is there', t && t.type === 'task' && Array.isArray(t.subtasks) && t.notes === '' && t.priority === 'normal' && t.done === false && 'due' in t && 'repeat' in t);
+  check('its clock is kept', t?.updatedAt === '2026-09-01T00:00:00.000Z');
+  check('...and the app reads it that day', s.itemsPlannedOn('2026-09-10').some((x) => x.id === 'old'));
+
+  s.upsertItem({ id: 'now', title: 'Now', areaId: 'gen', plan: { date: '2026-09-11', start: '10:00', mins: 60 } });
+  const sent = JSON.parse(JSON.stringify(s.snapshotRows().find((r) => r.kind === 'item' && r.id === 'now')));
+  s.applyRow(sent);
+  const back = s.snapshotRows().find((r) => r.kind === 'item' && r.id === 'now');
+  // keys sorted, as the sync hash sorts them: jsonb hands them back sorted anyway
+  const bytes = (d) => JSON.stringify(Object.fromEntries(Object.keys(d).sort().map((k) => [k, d[k]])));
+  check('a row already in shape is the same bytes after', bytes(back.data) === bytes(sent.data), bytes(back.data));
+  s.applyRow({ kind: 'item', id: 'now', deleted: true });
+  check('a tombstone still takes it away', s.itemById('now') === null);
+});
 </script>
 </body>
 </html>

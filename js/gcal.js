@@ -1,3 +1,4 @@
+// @ts-check
 // gcal.js — Google Calendar, two-way, browser-only (no server).
 //
 // Auth: Google Identity Services (popup) with a full-page redirect fallback
@@ -45,8 +46,10 @@ const cfg = () => state.settings.gcal;
 export const isConfigured = () => !!cfg().clientId;
 export const isSignedIn = () => !!(gcal.token && gcal.token.expires_at > Date.now() + 30000);
 
+// the browser's globals tsc does not know: Google's script, iOS's flag
+const win = /** @type {any} */ (window);
 const standalone = () =>
-  window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  window.matchMedia('(display-mode: standalone)').matches || win.navigator.standalone === true;
 
 /* ---------------- token ----------------
    An access token lasts an hour. With a refresh token beside it — given
@@ -108,7 +111,7 @@ const keeps = async () => !!(await C.session());
 
 let gisPromise = null;
 function loadGis() {
-  if (window.google?.accounts?.oauth2) return Promise.resolve();
+  if (win.google?.accounts?.oauth2) return Promise.resolve();
   if (gisPromise) return gisPromise;
   gisPromise = new Promise((res, rej) => {
     const s = document.createElement('script');
@@ -123,7 +126,7 @@ function loadGis() {
 let tokenClient = null;
 function ensureTokenClient() {
   if (tokenClient) return tokenClient;
-  tokenClient = window.google.accounts.oauth2.initTokenClient({
+  tokenClient = win.google.accounts.oauth2.initTokenClient({
     client_id: cfg().clientId,
     scope: SCOPES,
     callback: () => {},
@@ -138,7 +141,7 @@ function ensureTokenClient() {
 function codeSignIn() {
   return new Promise((resolve, reject) => {
     const fail = (msg) => { setStatus('signed-out', msg); reject(new Error(msg)); };
-    const client = window.google.accounts.oauth2.initCodeClient({
+    const client = win.google.accounts.oauth2.initCodeClient({
       client_id: cfg().clientId, scope: SCOPES, ux_mode: 'popup',
       callback: async (resp) => {
         if (resp.error) return fail(resp.error_description || resp.error);
@@ -237,6 +240,9 @@ export async function signIn(interactive = true) {
 
 /* ---------------- fetch wrapper ---------------- */
 
+/** One call to the Calendar API, signed in first, once more after a 401.
+ * @param {string} path
+ * @param {{ method?: string, body?: any, params?: Object<string, any>, retry?: boolean }} [opts] */
 async function api(path, { method = 'GET', body, params, retry = true } = {}) {
   if (!isSignedIn()) {
     const ok = await signIn(false).catch(() => null);

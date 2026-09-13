@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v71**.
+Schema **20**, service worker **planner-v72**.
 
 ## Working with me
 
@@ -122,7 +122,10 @@ Links, the wishlist, sprints, habits and each day's ticks (`habitlog:<date>`)
 are rows of their own since schema 20, each with a clock in `rowStamp()`;
 `meta` is only the semester and `SYNCED_SETTINGS`. `push()` reads back what the server
 kept: a row that comes back different was refused by the trigger, and is taken
-up here, its hash recorded, or it would be pushed again for ever.
+up here, its hash recorded, or it would be pushed again for ever. **An item
+from the cloud goes through `normalItem()`** (migrate's shape) in `applyRow`,
+so an older build cannot put an old shape in state; a row already in shape
+must come out the same bytes, or every pull would push it back up.
 
 ## Data model
 
@@ -307,7 +310,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1568 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1579 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
@@ -330,5 +333,6 @@ Days are `'YYYY-MM-DD'` **local**, times `'HH:MM'` 24h, timestamps ISO
 (`js/util.js`). DOM by `h()`, never template strings. No framework, JSX or
 TypeScript — but the shapes are JSDoc in `js/types.js`, and a module that
 says `// @ts-check` at its top is read by `tsc` in the Deploy job
-(`jsconfig.json`; the pure ones do, the views not yet). A new field on a task
+(`jsconfig.json`; the pure ones, the store, sync and Google do; the views
+not yet). A new field on a task
 goes in the `Item` typedef too.

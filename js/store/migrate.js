@@ -259,44 +259,7 @@ export function migrate(raw) {
   }
   if (from < 10) addHabits(['Sunscreen']);
 
-  // normalise items (older schemas used plannedDate / dueDate / estimate)
-  s.items = s.items.map((t) => {
-    const plan = t.plan && typeof t.plan === 'object'
-      ? t.plan
-      : (t.plannedDate || t.planned
-        ? { date: t.plannedDate || t.planned, start: t.plannedStart || null, mins: t.estMins || t.estimate || 60 }
-        : null);
-    return {
-      id: t.id || uid('t'),
-      title: t.title || 'Untitled',
-      areaId: t.areaId || t.courseId || null,
-      type: ITEM_TYPES.includes(t.type) ? t.type : (LEGACY_TYPE[t.type] || 'task'),
-      due: t.due || t.dueDate || null,
-      dueTime: t.dueTime || null,
-      plan,
-      priority: t.priority || 'normal',   // low | normal | high
-      estMins: Number(t.estMins ?? t.estimate ?? 60) || 60,
-      done: !!t.done,
-      doneAt: t.doneAt || null,
-      subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
-      notes: t.notes || '',
-      repeat: isRepeat(t.repeat) ? t.repeat : null,
-      canvasId: t.canvasId || null,   // the Canvas assignment this came from, if any
-      // its course, and where the import put it (null once moved by hand).
-      // Only when there: a key on every row would make each look edited to sync
-      ...(t.canvasCourse ? { canvasCourse: t.canvasCourse } : {}),
-      ...('canvasArea' in t ? { canvasArea: t.canvasArea || null } : {}),
-      ...(t.icsUid ? { icsUid: t.icsUid } : {}),      // the calendar-file event it came from
-      ...(t.color ? { color: t.color } : {}),          // a colour of its own, else the area's
-      ...(t.habitId ? { habitId: t.habitId } : {}),    // the habit a tick of this ticks too
-      gcalId: t.gcalId || null,
-      // one Google event per occurrence, so a series needs one id per day it
-      // lands on rather than the single `gcalId` a one-off carries
-      gcalIds: (t.gcalIds && typeof t.gcalIds === 'object') ? t.gcalIds : null,
-      createdAt: t.createdAt || new Date().toISOString(),
-      updatedAt: t.updatedAt || new Date().toISOString()
-    };
-  });
+  s.items = s.items.map(normalItem);
 
   // The calendar began when the planner did, not when the term does: a
   // life is longer than a semester. A planner saved before this never wrote
@@ -315,4 +278,47 @@ function earliestDay(s) {
   for (const t of s.items) { if (t.plan?.date) days.push(t.plan.date); if (t.due) days.push(t.due); }
   for (const d of Object.keys(s.notes)) if (/^\d{4}-\d{2}-\d{2}$/.test(d)) days.push(d);
   return days.reduce((a, b) => (b < a ? b : a));
+}
+
+/** One task in today's shape. Older schemas used plannedDate / dueDate /
+ *  estimate; a row from an older build comes through here too (applyRow),
+ *  so a device that has not upgraded yet cannot put an old shape in state.
+ *  A row already in shape comes out the same bytes — the safety suite
+ *  holds it to that, or every pull would push the row back up. */
+export function normalItem(t) {
+  const plan = t.plan && typeof t.plan === 'object'
+    ? t.plan
+    : (t.plannedDate || t.planned
+      ? { date: t.plannedDate || t.planned, start: t.plannedStart || null, mins: t.estMins || t.estimate || 60 }
+      : null);
+  return {
+    id: t.id || uid('t'),
+    title: t.title || 'Untitled',
+    areaId: t.areaId || t.courseId || null,
+    type: ITEM_TYPES.includes(t.type) ? t.type : (LEGACY_TYPE[t.type] || 'task'),
+    due: t.due || t.dueDate || null,
+    dueTime: t.dueTime || null,
+    plan,
+    priority: t.priority || 'normal',   // low | normal | high
+    estMins: Number(t.estMins ?? t.estimate ?? 60) || 60,
+    done: !!t.done,
+    doneAt: t.doneAt || null,
+    subtasks: Array.isArray(t.subtasks) ? t.subtasks : [],
+    notes: t.notes || '',
+    repeat: isRepeat(t.repeat) ? t.repeat : null,
+    canvasId: t.canvasId || null,   // the Canvas assignment this came from, if any
+    // its course, and where the import put it (null once moved by hand).
+    // Only when there: a key on every row would make each look edited to sync
+    ...(t.canvasCourse ? { canvasCourse: t.canvasCourse } : {}),
+    ...('canvasArea' in t ? { canvasArea: t.canvasArea || null } : {}),
+    ...(t.icsUid ? { icsUid: t.icsUid } : {}),      // the calendar-file event it came from
+    ...(t.color ? { color: t.color } : {}),          // a colour of its own, else the area's
+    ...(t.habitId ? { habitId: t.habitId } : {}),    // the habit a tick of this ticks too
+    gcalId: t.gcalId || null,
+    // one Google event per occurrence, so a series needs one id per day it
+    // lands on rather than the single `gcalId` a one-off carries
+    gcalIds: (t.gcalIds && typeof t.gcalIds === 'object') ? t.gcalIds : null,
+    createdAt: t.createdAt || new Date().toISOString(),
+    updatedAt: t.updatedAt || new Date().toISOString()
+  };
 }

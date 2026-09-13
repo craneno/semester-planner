@@ -1,9 +1,12 @@
+// @ts-check
 // store.js — single source of truth. Local-first, localStorage-backed.
+
+/** @typedef {import('./types.js').Item} Item */
 
 import { uid, today, addDays, toMin, fromMin, tz, zoneShift, zoneLabel } from './util.js';
 import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js';
 import { SCHEMA_VERSION, AREA_CATEGORIES, CATEGORY_IDS, ITEM_TYPES, AREA_COLORS, areaCategory } from './store/constants.js';
-import { migrate } from './store/migrate.js';
+import { migrate, normalItem } from './store/migrate.js';
 import { keepBackups } from './store/backups.js';
 import * as A from './store/areas.js';
 import * as Cd from './store/cards.js';
@@ -315,7 +318,10 @@ function occurrencesOn(item, date) {
   return out;
 }
 
-/** Every occurrence of every series inside a window, in date order. */
+/** Every occurrence of every series inside a window, in date order.
+ * @param {string} from
+ * @param {string} to
+ * @param {(t: Item) => boolean} [pick]  which series to ask */
 export function occurrencesBetween(from, to, pick = () => true) {
   const out = [];
   for (const item of state.items) {
@@ -1023,8 +1029,10 @@ export function deleteArea(id) {
  * Turn a card into a task and consume it. The card's own text goes through the
  * quick-add parser, so "call advisor thu 2pm 30m" arrives dated exactly as it
  * would from the bar up top.
- * @param {'task'|'timed'} as  'timed' also books a work block, which is what
- *   makes it reach Google Calendar — a due date alone is never pushed.
+ * @param {string} id
+ * @param {{ as?: 'task'|'timed', areaId?: string|null }} [opts]  'timed' also
+ *   books a work block, which is what makes it reach Google Calendar — a due
+ *   date alone is never pushed.
  */
 export function cardToItem(id, { as = 'task', areaId } = {}) {
   const card = cardById(id);
@@ -1192,7 +1200,7 @@ export function applyRow({ kind, id, data, deleted }) {
     // no longer has a heading for would land here and vanish from the sidebar,
     // so translate on the way in, exactly as migrate() does on the way up.
     case 'area': return put(state.areas, deleted ? data : { ...data, category: areaCategory(data) });
-    case 'item': return put(state.items, data);
+    case 'item': return put(state.items, deleted ? data : normalItem(data));
     case 'card': return put(state.cards, data);
     case 'note':
       if (deleted) { if (state.notes[id]) { delete state.notes[id]; return true; } return false; }

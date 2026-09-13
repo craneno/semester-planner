@@ -12,6 +12,7 @@ import { suite } from './harness.js';
 suite('Cloud sync — delete durability', async ({ check }) => {
   const { state, commit, subscribe, upsertItem, deleteItem, itemById, applyRow, snapshotRows, SCHEMA_VERSION } = await import('../js/store.js');
   const C = await import('../js/cloud.js');
+  const { normalItem } = await import('../js/store/migrate.js');
 
   // A hidden tab throttles a timer set from inside another timer harder
   // with every link in the chain; a message hop after each wait starts the
@@ -112,7 +113,8 @@ suite('Cloud sync — delete durability', async ({ check }) => {
   const serverRow = (fake, id) => fake.table.find((r) => r.kind === 'item' && r.id === id);
   const at = (n) => new Date(Date.UTC(2026, 0, 1) + n * 1000).toISOString();   // the fake's clock, n seconds in
   const remote = (id, n, title = id) => ({
-    user_id: USER, kind: 'item', id, data: { id, title }, deleted: false, updated_at: at(n), synced_at: at(n)
+    // in shape, as a device on this schema sends it (a bare row is sent back up in shape: tShapeSettles)
+    user_id: USER, kind: 'item', id, data: normalItem({ id, title, createdAt: at(n), updatedAt: at(n) }), deleted: false, updated_at: at(n), synced_at: at(n)
   });
 
   function reset() {
@@ -248,13 +250,37 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     // seed goes in place, oldest last, and the next sync has to push one out
     const seed = (i) => ({ at: 'seed-' + i, ms: 0, up: 0, down: 0, adopted: 0, full: false, error: null });
     C.cloud.log.splice(0, C.cloud.log.length, ...Array.from({ length: 35 }, (_, i) => seed(i)));
-    fake.table.push({ user_id: USER, kind: 'item', id: 'from-phone', data: { id: 'from-phone', title: 'phone' },
-      deleted: false, updated_at: new Date(Date.UTC(2026, 0, 5)).toISOString(), synced_at: new Date(Date.UTC(2026, 0, 5)).toISOString() });
+    // in shape, as a device on this schema sends it (a bare row is put in
+    // shape and sent back up — tShapeSettles)
+    const jan5 = new Date(Date.UTC(2026, 0, 5)).toISOString();
+    fake.table.push({ user_id: USER, kind: 'item', id: 'from-phone', data: normalItem({ id: 'from-phone', title: 'phone', createdAt: jan5, updatedAt: jan5 }),
+      deleted: false, updated_at: jan5, synced_at: jan5 });
     await C.sync();
     e = C.cloud.log[0];
     check('a row that came down is counted, in the newest entry', e.down === 1 && e.up === 0, JSON.stringify(e));
     check('the log is kept to thirty, the oldest dropped first',
       C.cloud.log.length === 30 && C.cloud.log[29].at === 'seed-28', `(${C.cloud.log.length} entries, last ${C.cloud.log[29]?.at})`);
+  }
+
+  /* A row an older build sends is put in today's shape on the way in, and
+     that shape goes back up once, under the row's own clock, so the server
+     holds it too — and then nothing more, or every pull would be a push. */
+  async function tShapeSettles() {
+    const fake = fresh();
+    await C.sync();                       // this device's own piles go up first
+    const base = fake.writes;
+    const jan5 = new Date(Date.UTC(2026, 0, 5)).toISOString();
+    fake.table.push({ user_id: USER, kind: 'item', id: 'bare', data: { id: 'bare', title: 'bare', plannedDate: '2026-09-10', createdAt: jan5, updatedAt: jan5 },
+      deleted: false, updated_at: jan5, synced_at: at(900) });
+    await C.sync();
+    const t = itemById('bare');
+    check('a bare row lands in shape', t?.plan?.date === '2026-09-10' && Array.isArray(t.subtasks), JSON.stringify(t));
+    const kept = fake.table.find((r) => r.id === 'bare');
+    check('...and the shape went up once, under its own clock', fake.writes === base + 1 && kept.data.plan?.date === '2026-09-10' && kept.updated_at === jan5,
+      `(wrote ${fake.writes - base}; server has ${JSON.stringify(kept?.data).slice(0, 80)}, at ${kept?.updated_at})`);
+    const after = fake.writes;
+    await C.sync();
+    check('...and the next sync writes nothing', fake.writes === after, `(wrote ${fake.writes - after} more)`);
   }
 
   /* A push with nothing edited here, sync after sync, is a loop — the kind
@@ -521,7 +547,9 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     commit(() => { upsertItem({ id: 'cf', title: 'first' }); });
     await C.sync();
     commit(() => { upsertItem({ id: 'cf', title: 'typed here' }); });
-    Object.assign(serverRow(fake, 'cf'), { data: { id: 'cf', title: 'from the phone' }, updated_at: '2027-01-01T00:00:00.000Z', synced_at: at(900) });
+    // in shape, as a device on this schema sends it; a bare row would be put
+    // in shape and sent back up (tShapeSettles), and that is a write
+    Object.assign(serverRow(fake, 'cf'), { data: normalItem({ id: 'cf', title: 'from the phone', createdAt: '2027-01-01T00:00:00.000Z', updatedAt: '2027-01-01T00:00:00.000Z' }), updated_at: '2027-01-01T00:00:00.000Z', synced_at: at(900) });
     const before = fake.writes;
     await C.sync();
     check('a local edit older than the server copy loses', itemById('cf')?.title === 'from the phone', String(itemById('cf')?.title));
@@ -643,6 +671,7 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['remote tombstone applied', tRemoteTombstoneApplied],
     ['a push settles', tPushSettles],
     ['the sync log', tSyncLog],
+    ['a bare row settles in shape', tShapeSettles],
     ['the loop breaker', tLoopBreaker],
     ['history and restore', tRestore],
     ['resume refreshes first', tResume],

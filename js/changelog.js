@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v72', date: '2026-09-13',
+    title: 'In shape',
+    notes: [
+      'A task that arrives from an older build is put in today\'s shape on the way in, never left as it came.',
+      'The store, sync and Google modules are read by the typechecker in the Deploy job now, along with the pure ones.'
+    ]
+  },
+  {
     version: 'v71', date: '2026-09-13',
     title: 'One card per file',
     notes: [

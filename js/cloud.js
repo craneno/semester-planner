@@ -1,3 +1,4 @@
+// @ts-check
 // cloud.js — Supabase sync. Local-first: localStorage stays the working copy,
 // Postgres is durable storage plus the fan-out between your devices.
 //
@@ -146,7 +147,9 @@ function resetClient() {
   sb = null;
 }
 
-/** Test seam: inject a stand-in for the Supabase client. */
+/** Test seam: inject a stand-in for the Supabase client.
+ * @param {any} fake
+ * @param {{ userId?: string, email?: string }} [who] */
 export function _setClient(fake, { userId, email } = {}) {
   sb = fake;
   if (userId) { cloud.userId = userId; cloud.email = email || null; }
