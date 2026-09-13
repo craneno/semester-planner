@@ -532,6 +532,20 @@ suite('Calendar — a sign-in that keeps', async ({ check }) => {
     check('a 401 refreshes and asks again', toks().length === 1 && G.gcal.token.access_token === 'new2' && lists.length === 2, `${toks().length} refreshes, ${lists.length} asks, ${G.gcal.token.access_token}`);
     check('...keeping the refresh token', G.gcal.token.refresh_token === 'r1');
 
+    // a bad day — google-token down, no network — keeps the grant and waits:
+    // no popup, and the status says a pause, not a problem
+    calls.length = 0;
+    G.gcal.token = { access_token: 'old', expires_at: 0, refresh_token: 'r1' };
+    answer = (c) => c.url.includes('google-token') ? { status: 502, text: 'bad gateway' } : { status: 200, json: {} };
+    const paused = await G.signIn(false).then(() => null, (e) => e);
+    check('a refresh that failed for a reason of the day keeps the grant', G.gcal.token.refresh_token === 'r1', JSON.stringify(G.gcal.token));
+    check('...asks no popup, and says it waits', popups === 0 && paused?.code === 'retry' && G.gcal.status === 'waiting', `${popups} popups, ${paused?.code}, ${G.gcal.status}`);
+    check('...and is in Problems, with the reason', (await import('../js/problems.js')).problems().some((x) => x.tag === 'google refresh' && /bad gateway/.test(x.text)));
+    await G.sync();
+    check('a sync while it waits is a pause, not a problem', G.gcal.status === 'waiting', G.gcal.status);
+    check('a click still asks', await G.signIn(true).then(() => 'signed', (e) => e.code) !== 'retry');
+    popups = 0;
+
     // Google has ended the grant: dropped, and the browser-only way is tried
     calls.length = 0;
     G.gcal.token = { access_token: 'old', expires_at: 0, refresh_token: 'r1' };
@@ -541,6 +555,10 @@ suite('Calendar — a sign-in that keeps', async ({ check }) => {
     await G.signIn(false).catch(() => {});
     check('a grant Google has ended is dropped', !G.gcal.token?.refresh_token, JSON.stringify(G.gcal.token));
     check('...and the browser-only way is tried instead', popups === 1 && G.gcal.status === 'signed-out', `${popups} popups, ${G.gcal.status}`);
+    // ...once. The next quiet try asks no window; a sync says signed out and stops
+    await G.signIn(false).catch(() => {});
+    await G.sync();
+    check('the quiet way that failed is not tried again by itself', popups === 1 && G.gcal.status === 'signed-out', `${popups} popups, ${G.gcal.status}`);
 
     // Connect, with cloud sync signed in: the code way, and a refresh token comes back
     calls.length = 0;

@@ -6,7 +6,7 @@
 const KEY = 'semesterPlanner.problems';
 const KEEP = 20;
 
-/** @typedef {{ at: string, tag: string, text: string }} Problem */
+/** @typedef {{ at: string, tag: string, text: string, n?: number }} Problem */
 
 /** @type {Problem[]} */
 let list = load();
@@ -29,10 +29,19 @@ export function describe(err) {
   return String(err.message || err);
 }
 
-/** Keeps it. The newest is last in the store, first in `problems()`. */
+/** Keeps it. The newest is last in the store, first in `problems()`. The
+ *  same slip again — a refresh failing once a minute — is the one line,
+ *  counted, so it cannot push the others out. */
 export function note(tag, err) {
-  list.push({ at: new Date().toISOString(), tag, text: describe(err).slice(0, 300) });
-  if (list.length > KEEP) list = list.slice(-KEEP);
+  const text = describe(err).slice(0, 300);
+  const last = list[list.length - 1];
+  if (last && last.tag === tag && last.text === text) {
+    last.at = new Date().toISOString();
+    last.n = (last.n || 1) + 1;
+  } else {
+    list.push({ at: new Date().toISOString(), tag, text });
+    if (list.length > KEEP) list = list.slice(-KEEP);
+  }
   save();
 }
 

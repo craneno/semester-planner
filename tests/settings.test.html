@@ -64,6 +64,9 @@ suite('Problems — the last twenty, kept on the device', async ({ check }) => {
   check('...on the device', JSON.parse(localStorage.getItem('semesterPlanner.problems')).length === 20);
   P.note('x', new Error('boom'));
   check('an Error is its message', P.problems()[0].text === 'boom' && P.problems()[0].tag === 'x');
+  P.note('x', new Error('boom'));
+  P.note('x', 'boom');
+  check('the same slip again is one line, counted', P.problems()[0].n === 3 && P.problems().length === 20 && P.problems().filter((r) => r.text === 'boom').length === 1, `${P.problems()[0].n} × ${P.problems().length}`);
   P.note('y', null);
   check('nothing thrown is an empty line, not a crash', P.problems()[0].text === '');
   check('each is stamped', /^\d{4}-\d{2}-\d{2}T/.test(P.problems()[0].at));

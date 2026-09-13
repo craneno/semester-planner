@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v73', date: '2026-09-13',
+    title: 'A sign-in that waits',
+    notes: [
+      'A Google grant that failed to refresh for a reason of the day is tried again a minute on, never swapped for Google\'s window: that window, once a minute, was the sign-in you kept seeing.',
+      'The quiet way in is tried once per spell, and a refresh that fails says why under Problems, the same slip counted on one line.'
+    ]
+  },
+  {
     version: 'v72', date: '2026-09-13',
     title: 'In shape',
     notes: [

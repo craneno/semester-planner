@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v72**.
+Schema **20**, service worker **planner-v73**.
 
 ## Working with me
 
@@ -152,7 +152,11 @@ over. **A sign-in keeps through `google-token`** (`supabase/functions/`, the
 client secret on the edge): with a cloud session `signIn()` goes the code way
 and keeps the refresh token beside the access token, device-only; it is tried
 first, a 401 spends the hour not the grant (`expireToken`), and
-`invalid_grant` drops it. `ITEM_TYPES` is `event`, `task`, `meeting`,
+`invalid_grant` drops it. **A held grant that failed today is waited on**:
+`signIn(false)` throws `retry` (status `waiting`) and the minute timer tries
+again, never Google's window — that window once a minute *was* the "sign
+in again" — and the quiet way is tried once per spell (`quietTried`). Under
+a consent screen in Testing Google ends a grant after seven days. `ITEM_TYPES` is `event`, `task`, `meeting`,
 `homework`; no area puts it in General. `eventsOn` drops a Google event that **shadows a class** on the
 schedule that day (same start, and same end or a shared word), since a
 schedule read off Google is on Google still. The Canvas import keeps to the term (`inTerm`, two weeks'
@@ -310,7 +314,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1579 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1586 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

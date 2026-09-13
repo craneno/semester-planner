@@ -19,6 +19,7 @@ import {
 } from './store.js';
 import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays, today } from './util.js';
 import * as C from './cloud.js';
+import { warn } from './problems.js';
 
 const API = 'https://www.googleapis.com/calendar/v3';
 const SCOPES = [
@@ -90,21 +91,31 @@ export function forgetToken() {
   setStatus('signed-out', 'Signed out of Google.');
 }
 
-/** A fresh hour from the refresh token, or null. A grant Google has ended is dropped, not asked again. */
+/** A fresh hour from the refresh token, or null. A grant Google has ended is
+ *  dropped, not asked again; any other failure keeps the grant for the next
+ *  try, and says why under Settings → Problems. */
 async function refresh() {
   const rt = gcal.token?.refresh_token;
   if (!rt) return null;
   try {
     const t = await C.googleToken({ client_id: cfg().clientId, grant: 'refresh', refresh_token: rt });
-    if (!t?.access_token) return null;
+    if (!t?.access_token) { warn('google refresh', 'no cloud session to ask google-token as'); return null; }
     storeToken(t.access_token, t.expires_in, t.refresh_token);
+    quietTried = false;
     return gcal.token;
   } catch (e) {
     if (e.code === 'invalid_grant') { delete gcal.token.refresh_token; saveToken(); }
     gcal.lastError = e;
+    warn('google refresh', e);
     return null;
   }
 }
+
+/* The quiet way — Google's script asked for an hour with no prompt — was
+   tried and failed since the last token. Tried again on every sync it put a
+   Google window in front of you once a minute; once is enough, and Connect
+   in Settings is the way back in. */
+let quietTried = false;
 
 /** Whether a sign-in can be made to keep: a cloud session to ask google-token as. */
 const keeps = async () => !!(await C.session());
@@ -149,6 +160,8 @@ function codeSignIn() {
           const t = await C.googleToken({ client_id: cfg().clientId, grant: 'code', code: resp.code, redirect_uri: 'postmessage' });
           if (!t?.access_token) return fail('Google sent no token back.');
           storeToken(t.access_token, t.expires_in, t.refresh_token);
+          if (!gcal.token.refresh_token) warn('google sign-in', 'Google sent no refresh token: this sign-in lasts an hour. Disconnect, then Connect again.');
+          quietTried = false;
           setStatus('ready', 'Connected.');
           resolve(gcal.token);
         } catch (e) { fail(e.message); }
@@ -207,6 +220,19 @@ export async function signIn(interactive = true) {
 
   // the quiet way in first: a refresh token asks for the hour, no popup
   if (await refresh()) { setStatus('ready', 'Connected.'); return gcal.token; }
+  // The grant is still held, so the refresh failed for a reason of the day —
+  // no cloud session yet, a dropped network on waking. Asking Google's
+  // window instead is what put a sign-in in front of you every hour: the
+  // next sync tries the grant again, a minute on. A click still asks.
+  if (gcal.token?.refresh_token && !interactive) {
+    const msg = 'Google paused — trying again in a minute.';
+    setStatus('waiting', msg);
+    throw Object.assign(new Error(msg), { code: 'retry' });
+  }
+  if (!interactive && quietTried) {
+    setStatus('signed-out', 'Sign in to sync.');
+    throw Object.assign(new Error('Sign in to Google.'), { code: 'auth' });
+  }
 
   const keep = interactive && await keeps();
   if (standalone() && interactive) { redirectSignIn({ keep }); return null; }
@@ -217,17 +243,20 @@ export async function signIn(interactive = true) {
   return new Promise((resolve, reject) => {
     client.callback = (resp) => {
       if (resp.error) {
+        if (!interactive) quietTried = true;
         setStatus('signed-out', resp.error_description || resp.error);
         reject(new Error(resp.error_description || resp.error));
         return;
       }
       storeToken(resp.access_token, resp.expires_in);
+      quietTried = false;
       setStatus('ready', 'Connected.');
       resolve(gcal.token);
     };
     // a popup that was blocked, or closed, never reaches `callback`; without
     // this the promise hung, api() with it, and the status said Connecting…
     client.error_callback = (err) => {
+      if (!interactive) quietTried = true;
       const msg = err?.message || (err?.type === 'popup_closed' ? 'Google sign-in was closed.' : 'Google sign-in did not open.');
       setStatus('signed-out', msg);
       reject(new Error(msg));
@@ -427,6 +456,9 @@ export async function sync({ full = false } = {}) {
     } while (pageToken);
   } catch (err) {
     if (err.code === 410) { cfg().syncToken = ''; commit(); return sync({ full: true }); }
+    // the grant is waited on, or the quiet way already failed: not an error,
+    // and not the "Calendar problem" that sent you to Settings each hour
+    if (err.code === 'retry' || err.code === 'auth') return;
     gcal.lastError = err;
     setStatus('error', err.message);
     return;
@@ -945,7 +977,13 @@ export async function start() {
   await captureRedirectToken();
   if (!cfg().enabled || !isConfigured()) { setStatus(isConfigured() ? 'signed-out' : 'off'); return; }
   if (!isSignedIn()) {
-    try { await signIn(false); } catch { setStatus('signed-out', 'Sign in to sync.'); return; }
+    // the timer runs either way: a grant that failed on a bad first try —
+    // a phone waking with no network yet — is tried again in a minute
+    try { await signIn(false); } catch (e) {
+      if (e.code !== 'retry') setStatus('signed-out', 'Sign in to sync.');
+      schedule();
+      return;
+    }
   }
   setStatus('ready');
   listCalendars().catch(() => {});

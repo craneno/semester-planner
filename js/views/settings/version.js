@@ -47,7 +47,7 @@ function problemsCard() {
     for (const r of rows) {
       box.append(h('div', { class: 'problem' },
         h('span', { class: 'num' }, new Date(r.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })),
-        h('span', { class: 'eyebrow' }, r.tag),
+        h('span', { class: 'eyebrow' }, r.tag + (r.n > 1 ? ` ×${r.n}` : '')),
         h('span', { class: 'what' }, r.text)));
     }
     box.append(h('button', { class: 'btn sm ghost', style: { marginTop: '8px' }, onclick: () => { clearProblems(); paint(); } }, 'Clear'));

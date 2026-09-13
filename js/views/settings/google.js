@@ -46,7 +46,7 @@ export function renderGoogle({ navigate }) {
     h('p', { class: 'help', style: { margin: '2px 0 12px' } },
       'From Google Cloud Console → Credentials → OAuth client ID (Web application). Add this exact origin — ',
       h('code', { class: 'mono' }, location.origin),
-      ' — to both Authorised JavaScript origins and Authorised redirect URIs. With cloud sync signed in and google-token deployed, a sign-in keeps for a week or more. See README.md.'),
+      ' — to both Authorised JavaScript origins and Authorised redirect URIs. With cloud sync signed in and google-token deployed, a sign-in keeps: for a week under a consent screen still in Testing, or until you revoke it once the app is published (OAuth consent screen → Publish app). See README.md.'),
     field('Calendar', calPicker),
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' } },
       h('button', {
