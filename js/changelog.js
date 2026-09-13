@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v75', date: '2026-09-13',
+    title: 'Tomorrow, up top',
+    notes: [
+      'Overview no longer opens on “A busy week ahead · 10 tasks · 13h of work”. It opens on tomorrow: the first thing on it and how much is on the day, on the phone and the laptop alike. Tap it for that week.'
+    ]
+  },
+  {
     version: 'v74', date: '2026-09-13',
     title: 'The habit has a name again',
     notes: [

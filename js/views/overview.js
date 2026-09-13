@@ -5,11 +5,11 @@
 // page; this is it.
 
 import {
-  h, clear, today, startOfWeek, weekDays, fmtDate, fmtTime, fmtHours, fmtDuration,
+  h, clear, today, fmtDate, fmtTime, fmtHours, fmtDuration,
   toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce, addDays
 } from '../util.js';
 import {
-  state, commit, upsertItem, toggleItem, upcoming, overdue, workloadFor,
+  state, commit, upsertItem, toggleItem, upcoming, overdue,
   categoryLoad, note, touchNote, carryForward, pendingTomorrow, areaColor,
   areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor, dayTimeline
 } from '../store.js';
@@ -26,9 +26,6 @@ export function renderOverview(root, { navigate, go }) {
   clear(root);
   const pad = h('div', { class: 'pad' });
   const day = today();
-  const ws = state.settings.weekStart;
-  const days = weekDays(startOfWeek(day, ws));
-  const load = workloadFor(days);
   const late = overdue();
   const soon = upcoming(14);
 
@@ -37,21 +34,10 @@ export function renderOverview(root, { navigate, go }) {
   // does not re-render the page it is in the middle of building.
   if (pendingTomorrow(day)) commit(() => carryForward(day), { source: 'carry' });
 
-  /* headline — a sentence, not a scoreboard */
-  const headline = load.count === 0
-    ? 'Nothing scheduled this week yet.'
-    : load.count <= 4 ? 'A light week ahead.'
-      : load.count <= 9 ? 'A steady week ahead.' : 'A busy week ahead.';
-
-  // the headline has already said "nothing", so an empty week gets no score under it
-  const score = load.count
-    ? `${load.count} ${load.count === 1 ? 'task' : 'tasks'} · about ${fmtHours(load.mins)} of work`
-      + (late.length ? ` · ${late.length} past due` : '')
-    : late.length ? `${late.length} past due` : '';
-  pad.append(h('section', { style: { marginBottom: '22px' } },
-    h('div', { class: 'eyebrow' }, state.semester.name),
-    h('h1', { style: { margin: '6px 0 8px' } }, headline),
-    score ? h('p', { style: { margin: 0, color: 'var(--ink-2)' } }, score) : null));
+  /* The page opens on tomorrow, not on a score: "a busy week, 10 tasks,
+     13h" was a number to feel bad about, and the one thing the evening
+     wants to know is what the morning starts with. */
+  pad.append(h('section', { class: 'overview-top' }, tomorrowPeek(day, go)));
 
   pad.append(captureStrip(navigate));
   pad.append(unfiledQueue(navigate, go));
@@ -249,6 +235,24 @@ function todayColumn(day, { navigate, go }) {
   return col;
 }
 
+/** Tomorrow at a glance: the first thing on it and how much, so the evening
+ *  knows what the morning is. It opens that week. */
+function tomorrowPeek(day, go) {
+  const tmw = addDays(day, 1);
+  const first = dayTimeline(tmw)[0];
+  const plannedTmw = itemsPlannedOn(tmw).length, dueTmw = itemsDueOn(tmw).length;
+  const bits = [plannedTmw ? `${plannedTmw} planned` : '', dueTmw ? `${dueTmw} due` : ''].filter(Boolean).join(' · ');
+  return h('button', {
+    class: 'card tomorrow-peek', type: 'button', title: 'Open that week',
+    onclick: () => { showWeekOf(tmw); go('week'); }
+  },
+  h('span', { class: 'eyebrow' }, `Tomorrow · ${fmtDate(tmw, { weekday: true })}`),
+  h('span', { class: 'peek-first' }, first
+    ? `${fmtTime(first.start, state.settings.hour12)} ${first.title}`
+    : (plannedTmw || dueTmw ? 'Nothing timed yet' : 'Nothing on it yet')),
+  bits ? h('span', { class: 'eyebrow num' }, bits) : null);
+}
+
 /* ---------------- right: what to do about it ---------------- */
 
 function decisionColumn(day, { navigate, go, soon }) {
@@ -296,22 +300,6 @@ function decisionColumn(day, { navigate, go, soon }) {
   col.append(h('section', { class: 'card' },
     h('div', { class: 'card-h' }, h('span', { class: 'eyebrow' }, 'Focus')),
     focus));
-
-  /* tomorrow at a glance: the first thing on it and how much, so the
-     evening knows what the morning is. It opens that week. */
-  const tmw = addDays(day, 1);
-  const first = dayTimeline(tmw)[0];
-  const plannedTmw = itemsPlannedOn(tmw).length, dueTmw = itemsDueOn(tmw).length;
-  const bits = [plannedTmw ? `${plannedTmw} planned` : '', dueTmw ? `${dueTmw} due` : ''].filter(Boolean).join(' · ');
-  col.append(h('button', {
-    class: 'card tomorrow-peek', type: 'button', title: 'Open that week',
-    onclick: () => { showWeekOf(tmw); go('week'); }
-  },
-  h('span', { class: 'eyebrow' }, `Tomorrow · ${fmtDate(tmw, { weekday: true })}`),
-  h('span', { class: 'peek-first' }, first
-    ? `${fmtTime(first.start, state.settings.hour12)} ${first.title}`
-    : (plannedTmw || dueTmw ? 'Nothing timed yet' : 'Nothing on it yet')),
-  bits ? h('span', { class: 'eyebrow num' }, bits) : null));
 
   /* open work, split the way the sidebar splits it */
   const byCat = h('div', { class: 'card-b' });

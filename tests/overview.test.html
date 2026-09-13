@@ -35,7 +35,8 @@ suite('Overview — the day on one page', async ({ check }) => {
   const v = renderInto(renderOverview);
   try {
     const text = v.stage.textContent;
-    check('a headline', !!v.stage.querySelector('h1') && /week/i.test(v.stage.querySelector('h1').textContent));
+    check('no scoreboard up top', !v.stage.querySelector('h1') && !/tasks · about/.test(text));
+    check('the page opens on tomorrow', v.stage.firstElementChild.querySelector('.tomorrow-peek') === v.stage.querySelector('.tomorrow-peek'));
     const blk = [...v.stage.querySelectorAll('.today-col .blk')].find((b) => b.textContent.includes('Write the lab'));
     check('today\u2019s block is in the day column', !!blk);
     check('...at its hour, as tall as its length', blk && parseFloat(blk.style.top) > 0 && parseFloat(blk.style.height) > 0);
@@ -60,8 +61,8 @@ suite('Overview — an empty day', async ({ check }) => {
   s.state.items = [];
   const v = renderInto(renderOverview);
   try {
-    check('says so', v.stage.querySelector('h1').textContent === 'Nothing scheduled this week yet.');
     check('tomorrow has nothing on it', /Nothing on it yet/.test(v.stage.querySelector('.tomorrow-peek')?.textContent || ''));
+    check('...and there is no score to say zero', !v.stage.querySelector('h1'));
   } finally {
     v.done();
   }
