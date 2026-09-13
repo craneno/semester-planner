@@ -847,6 +847,10 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
   color: var(--ink); font: inherit;
 }
 .tomorrow-peek:hover { border-color: var(--accent); }
+/* at the top of Overview it is the page's opening line, not a card in a column */
+.overview-top { margin-bottom: 18px; }
+.overview-top .tomorrow-peek { margin-top: 0; }
+.overview-top .peek-first { font-size: calc(17px * var(--scale)); font-family: var(--font-heading); font-weight: 600; letter-spacing: -.01em; }
 .tomorrow-peek .peek-first { font-size: calc(13.5px * var(--scale)); font-weight: 550; }
 
 .today-col .card-h { border-bottom: 0; }
