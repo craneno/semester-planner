@@ -841,17 +841,17 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 }
 .day-chip:hover { box-shadow: var(--shadow-1); }
 /* tomorrow, at a glance: one line, a button the size of a card */
-.tomorrow-peek {
+.tomorrow-peek, .next-class {
   display: flex; flex-direction: column; gap: 4px; align-items: flex-start; width: 100%;
   padding: 12px 15px; margin-top: 12px; cursor: pointer; text-align: left;
   color: var(--ink); font: inherit;
 }
-.tomorrow-peek:hover { border-color: var(--accent); }
+.tomorrow-peek:hover, .next-class:hover { border-color: var(--accent); }
 /* at the top of Overview it is the page's opening line, not a card in a column */
 .overview-top { margin-bottom: 18px; }
-.overview-top .tomorrow-peek { margin-top: 0; }
+.overview-top .tomorrow-peek, .next-class { margin-top: 0; }
 .overview-top .peek-first { font-size: calc(17px * var(--scale)); font-family: var(--font-heading); font-weight: 600; letter-spacing: -.01em; }
-.tomorrow-peek .peek-first { font-size: calc(13.5px * var(--scale)); font-weight: 550; }
+.tomorrow-peek .peek-first, .next-class .peek-first { font-size: calc(13.5px * var(--scale)); font-weight: 550; }
 
 .today-col .card-h { border-bottom: 0; }
 

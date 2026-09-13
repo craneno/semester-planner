@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v76', date: '2026-09-13',
+    title: 'The next class',
+    notes: [
+      'The card at the top of Overview is the next class, and only classes: today’s next while one is still ahead (“In class now” while it is on), then “First class tomorrow”, then the first on the next day that has any. Under it, how many classes that day. It moves on by itself when a class ends.'
+    ]
+  },
+  {
     version: 'v75', date: '2026-09-13',
     title: 'Tomorrow, up top',
     notes: [

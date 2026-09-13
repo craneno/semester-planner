@@ -18,10 +18,18 @@ import { suite, sharedStoreWith, renderInto } from './harness.js';
 import { today, addDays } from '../js/util.js';
 
 const day = today(), tmw = addDays(day, 1);
+const dow = (d) => new Date(d + 'T12:00:00').getDay();
+// the term runs around today, whenever the suite runs, so the classes count
+const term = { name: 'Term', start: addDays(day, -30), end: addDays(day, 60) };
 const s = await sharedStoreWith({
   version: 20,
-  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
-  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
+  semester: term,
+  areas: [
+    { id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' },
+    // one class tomorrow at 9:30, none today: the card must say so
+    { id: 'th', name: 'Thermo', category: 'course', order: 1, color: '#8F3C3C',
+      schedule: [{ days: [dow(tmw)], start: '09:30', end: '10:45', location: 'Snell 108' }] }
+  ],
   items: [
     { id: 'blk', title: 'Write the lab', areaId: 'gen', plan: { date: day, start: '10:00', mins: 90 }, due: null },
     { id: 'due', title: 'Problem set 3', areaId: 'gen', plan: null, due: addDays(day, 3) },
@@ -36,16 +44,18 @@ suite('Overview — the day on one page', async ({ check }) => {
   try {
     const text = v.stage.textContent;
     check('no scoreboard up top', !v.stage.querySelector('h1') && !/tasks · about/.test(text));
-    check('the page opens on tomorrow', v.stage.firstElementChild.querySelector('.tomorrow-peek') === v.stage.querySelector('.tomorrow-peek'));
+    check('the page opens on the next class', v.stage.firstElementChild.querySelector('.next-class') === v.stage.querySelector('.next-class'));
     const blk = [...v.stage.querySelectorAll('.today-col .blk')].find((b) => b.textContent.includes('Write the lab'));
     check('today\u2019s block is in the day column', !!blk);
     check('...at its hour, as tall as its length', blk && parseFloat(blk.style.top) > 0 && parseFloat(blk.style.height) > 0);
     check('the focus box holds the note', v.stage.querySelector('.focus-line')?.value === 'Ship it');
     check('the top three has today\u2019s work', /Write the lab/.test(v.stage.querySelector('.overview-side')?.textContent || ''));
     check('the deadline is in the list', text.includes('Problem set 3'));
-    const peek = v.stage.querySelector('.tomorrow-peek');
-    check('tomorrow\u2019s peek names what it starts with', !!peek && /9:30/.test(peek.textContent) && peek.textContent.includes('Lecture'), peek?.textContent);
-    check('...and how much is on it', /1 planned/.test(peek?.textContent || ''));
+    const peek = v.stage.querySelector('.next-class');
+    check('the card is the first class tomorrow', !!peek && /First class tomorrow/.test(peek.textContent), peek?.textContent);
+    check('...named, timed, and where', /9:30/.test(peek.textContent) && peek.textContent.includes('Thermo') && peek.textContent.includes('Snell 108'), peek?.textContent);
+    check('...and how many classes that day', /1 class tomorrow/.test(peek.textContent), peek?.textContent);
+    check('...not a planned block', !peek.textContent.includes('Lecture') && !/planned/.test(peek.textContent));
     peek.click();
     check('...and opens the Week', v.went.includes('week'));
     const W = await import('../js/views/week.js');
@@ -59,13 +69,42 @@ suite('Overview — the day on one page', async ({ check }) => {
 suite('Overview — an empty day', async ({ check }) => {
   const { renderOverview } = await import('../js/views/overview.js');
   s.state.items = [];
+  const kept = s.state.areas[1].schedule;
+  s.state.areas[1].schedule = [];
   const v = renderInto(renderOverview);
   try {
-    check('tomorrow has nothing on it', /Nothing on it yet/.test(v.stage.querySelector('.tomorrow-peek')?.textContent || ''));
+    check('no classes ahead says so', /No classes in the next two weeks/.test(v.stage.querySelector('.next-class')?.textContent || ''));
     check('...and there is no score to say zero', !v.stage.querySelector('h1'));
   } finally {
     v.done();
+    s.state.areas[1].schedule = kept;
   }
+});
+
+suite('Overview — the next class moves on', async ({ check }) => {
+  const { nextClass } = await import('../js/views/overview.js');
+  const twoDays = addDays(day, 2);
+  s.state.areas[1].schedule = [
+    { days: [dow(day)], start: '09:00', end: '10:15' },
+    { days: [dow(day)], start: '13:00', end: '14:15' },
+    { days: [dow(tmw)], start: '09:30', end: '10:45' },
+    { days: [dow(twoDays)], start: '11:00', end: '12:15' }
+  ];
+  const at = (h, m = 0) => h * 60 + m;
+  const early = nextClass(day, at(8));
+  check('before the day: today’s first, two left', early.ahead === 0 && early.list.length === 2 && early.list[0].start === '09:00' && !early.now);
+  const during = nextClass(day, at(9, 30));
+  check('during a class it is that class, and it is now', during.now && during.list[0].start === '09:00' && during.list.length === 2);
+  const between = nextClass(day, at(11));
+  check('once it ends, the next one today', !between.now && between.list[0].start === '13:00' && between.list.length === 1);
+  const evening = nextClass(day, at(15));
+  check('after the last one, tomorrow’s first', evening.ahead === 1 && evening.list[0].start === '09:30' && evening.list.length === 1);
+  // a day with no classes is skipped
+  s.state.areas[1].schedule = s.state.areas[1].schedule.filter((m) => !m.days.includes(dow(tmw)));
+  const skip = nextClass(day, at(15));
+  check('a day with none is skipped', skip.ahead === 2 && skip.date === twoDays && skip.list[0].start === '11:00', JSON.stringify(skip));
+  s.state.areas[1].schedule = [];
+  check('no classes at all is null', nextClass(day, at(15)) === null);
 });
 </script>
 </body>

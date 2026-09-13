@@ -11,7 +11,7 @@ import {
 import {
   state, commit, upsertItem, toggleItem, upcoming, overdue,
   categoryLoad, note, touchNote, carryForward, pendingTomorrow, areaColor,
-  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor, dayTimeline
+  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor, dayTimeline, minsNow
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -34,10 +34,10 @@ export function renderOverview(root, { navigate, go }) {
   // does not re-render the page it is in the middle of building.
   if (pendingTomorrow(day)) commit(() => carryForward(day), { source: 'carry' });
 
-  /* The page opens on tomorrow, not on a score: "a busy week, 10 tasks,
-     13h" was a number to feel bad about, and the one thing the evening
-     wants to know is what the morning starts with. */
-  pad.append(h('section', { class: 'overview-top' }, tomorrowPeek(day, go)));
+  /* The page opens on the next class, not on a score: "a busy week, 10
+     tasks, 13h" was a number to feel bad about, and the one thing worth
+     knowing at a glance is where you have to be next. */
+  pad.append(h('section', { class: 'overview-top' }, nextClassPeek(day, go)));
 
   pad.append(captureStrip(navigate));
   pad.append(unfiledQueue(navigate, go));
@@ -49,6 +49,7 @@ export function renderOverview(root, { navigate, go }) {
   pad.append(deadlines(soon, late, { navigate, go }));
   root.append(pad);
   restoreDayScroll(pad);
+  keepNextClassFresh(pad, go);
 }
 
 /**
@@ -235,22 +236,61 @@ function todayColumn(day, { navigate, go }) {
   return col;
 }
 
-/** Tomorrow at a glance: the first thing on it and how much, so the evening
- *  knows what the morning is. It opens that week. */
-function tomorrowPeek(day, go) {
-  const tmw = addDays(day, 1);
-  const first = dayTimeline(tmw)[0];
-  const plannedTmw = itemsPlannedOn(tmw).length, dueTmw = itemsDueOn(tmw).length;
-  const bits = [plannedTmw ? `${plannedTmw} planned` : '', dueTmw ? `${dueTmw} due` : ''].filter(Boolean).join(' · ');
-  return h('button', {
-    class: 'card tomorrow-peek', type: 'button', title: 'Open that week',
-    onclick: () => { showWeekOf(tmw); go('week'); }
-  },
-  h('span', { class: 'eyebrow' }, `Tomorrow · ${fmtDate(tmw, { weekday: true })}`),
-  h('span', { class: 'peek-first' }, first
-    ? `${fmtTime(first.start, state.settings.hour12)} ${first.title}`
-    : (plannedTmw || dueTmw ? 'Nothing timed yet' : 'Nothing on it yet')),
-  bits ? h('span', { class: 'eyebrow num' }, bits) : null);
+/**
+ * The next class, from now: today's while one is still ahead (or on), then
+ * tomorrow's first, then the first on the next day that has any, up to two
+ * weeks out. Classes only — a planned block is not somewhere to be. It opens
+ * that week, and redraws itself each minute so a class that ends moves it on.
+ */
+export function nextClass(day = today(), mins = minsNow()) {
+  const left = classesOn(day).filter((c) => toMin(c.end) > mins);
+  if (left.length) return { date: day, list: left, ahead: 0, now: toMin(left[0].start) <= mins };
+  for (let n = 1; n <= 14; n++) {
+    const date = addDays(day, n);
+    const list = classesOn(date);
+    if (list.length) return { date, list, ahead: n, now: false };
+  }
+  return null;
+}
+
+function nextClassPeek(day, go) {
+  const next = nextClass(day);
+  const card = h('button', {
+    class: 'card next-class', type: 'button', title: next ? 'Open that week' : 'Open the week',
+    onclick: () => { showWeekOf(next ? next.date : day); go('week'); }
+  });
+  if (!next) {
+    card.append(
+      h('span', { class: 'eyebrow' }, 'Classes'),
+      h('span', { class: 'peek-first' }, 'No classes in the next two weeks'));
+    return card;
+  }
+  const { date, list, ahead, now } = next;
+  const first = list[0];
+  const label = now ? 'In class now' : ahead === 0 ? 'Next class today'
+    : ahead === 1 ? 'First class tomorrow' : `First class ${fmtDate(date, { weekday: true })}`;
+  const n = list.length, word = n === 1 ? 'class' : 'classes';
+  const count = ahead === 0 ? `${n} ${word} left today` : ahead === 1 ? `${n} ${word} tomorrow` : `${n} ${word} that day`;
+  card.append(
+    h('span', { class: 'eyebrow' }, label),
+    h('span', { class: 'peek-first' }, `${fmtTime(first.start, state.settings.hour12)} ${first.title}`
+      + (first.location ? ` · ${first.location}` : '')),
+    h('span', { class: 'eyebrow num' }, count));
+  return card;
+}
+
+/* The card is the one thing on the page that goes stale by itself: a class
+   ends, and the next one is on. One timer, reset on every draw, that swaps
+   the card in place and stops once the page is gone. */
+let classTimer = null;
+function keepNextClassFresh(host, go) {
+  clearInterval(classTimer);
+  classTimer = setInterval(() => {
+    const old = host.querySelector('.next-class');
+    if (!old || !old.isConnected) { clearInterval(classTimer); classTimer = null; return; }
+    const fresh = nextClassPeek(today(), go);
+    if (fresh.textContent !== old.textContent) old.replaceWith(fresh);
+  }, 60 * 1000);
 }
 
 /* ---------------- right: what to do about it ---------------- */
