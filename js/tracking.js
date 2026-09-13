@@ -9,6 +9,7 @@
 
 import { state, commit, applyTracking, failTracking } from './store.js';
 import * as C from './cloud.js';
+import { warn } from './problems.js';
 
 export const TRACK_EVERY = 24 * 60 * 60 * 1000;
 
@@ -63,5 +64,5 @@ export function refreshTracking({ fetch = C.trackParcel, now = Date.now(), only 
 export async function refreshTrackingIfDue(opts = {}) {
   if (!C.isSignedIn() || !tracked().length || !trackingDue(opts.now)) return null;
   try { return await refreshTracking(opts); }
-  catch (err) { console.warn('tracking', err); return null; }
+  catch (err) { warn('tracking', err); return null; }
 }

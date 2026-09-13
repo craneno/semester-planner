@@ -10,6 +10,7 @@
 
 import { state, dayTimeline, minsNow } from './store.js';
 import { today, toMin, fmtTime } from './util.js';
+import { warn } from './problems.js';
 
 export const LEADS = [0, 5, 10, 15, 30, 60];
 const KEY = 'semesterPlanner.reminded';
@@ -52,7 +53,7 @@ async function show(title, body, tag) {
     const opts = { body, tag, icon: './icons/icon-192.png', badge: './icons/icon-192.png' };
     if (reg?.showNotification) return reg.showNotification(title, opts);
     new Notification(title, opts);
-  } catch (e) { console.warn('remind', e); }
+  } catch (e) { warn('remind', e); }
 }
 
 /** One look at the clock. Returns what it said. */
@@ -75,5 +76,5 @@ export function tick(now = minsNow(), date = today()) {
 
 export function start() {
   try { tick(); } catch { /* pre-boot */ }
-  setInterval(() => { try { tick(); } catch (e) { console.warn('remind', e); } }, 30_000);
+  setInterval(() => { try { tick(); } catch (e) { warn('remind', e); } }, 30_000);
 }

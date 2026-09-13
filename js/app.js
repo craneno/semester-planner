@@ -25,6 +25,7 @@ import { refreshHealthIfDue } from './health.js';
 import * as C from './cloud.js';
 import { refreshIfDue } from './canvas.js';
 import { refreshTrackingIfDue } from './tracking.js';
+import { warn, watchWindow } from './problems.js';
 
 /* Plain views. Categories and single areas are routed separately — they are
    data, not screens, so they cannot be listed here. */
@@ -99,7 +100,7 @@ export function navigate() {
     else view.render(host, ctx);
   } catch (err) {
     // one page broken is one page, not the app: say so, and leave a way out
-    console.error('view', err);
+    warn('view', err);
     clear(host);
     host.append(h('div', { class: 'pad' },
       h('div', { class: 'empty' },
@@ -595,6 +596,7 @@ function askAboutZone() {
 /* ---------------- boot ---------------- */
 
 function boot() {
+  watchWindow();     // what nothing catches goes to Settings → Problems
   applyAppearance();
   wireQuickAdd();
   wireKeys();
@@ -647,8 +649,8 @@ function boot() {
   R.start();       // a heads-up before things begin, when asked for
 
   // Google Calendar and Supabase, each only if the user has set it up
-  G.start().catch((e) => console.warn('gcal', e));
-  C.start().catch((e) => console.warn('cloud', e));
+  G.start().catch((e) => warn('gcal', e));
+  C.start().catch((e) => warn('cloud', e));
   // the Canvas feed, once a day: after any sync that ends well, so a device
   // that has just woken or just signed in gets its turn
   C.onCloud((c) => { if (c.status === 'ready') { refreshIfDue(); refreshTrackingIfDue(); refreshHealthIfDue(); } });
@@ -669,7 +671,7 @@ function boot() {
       reloading = true;
       location.reload();
     });
-    navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('sw', e));
+    navigator.serviceWorker.register('./sw.js').catch((e) => warn('sw', e));
   }
 
   window.addEventListener('planner:save-error', () =>

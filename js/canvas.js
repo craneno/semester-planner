@@ -13,6 +13,7 @@
 import { state, commit, upsertItem, areaById, canvasUnmoved } from './store.js';
 import { addDays } from './util.js';
 import * as C from './cloud.js';
+import { warn } from './problems.js';
 
 /* ---------------- the text ---------------- */
 
@@ -262,5 +263,5 @@ export function refreshFeed({ fetch = C.fetchFeed, now = Date.now() } = {}) {
 export async function refreshIfDue(opts = {}) {
   if (!C.isSignedIn() || !feedDue(opts.now)) return null;
   try { return await refreshFeed(opts); }
-  catch (err) { console.warn('canvas feed', err); return null; }
+  catch (err) { warn('canvas feed', err); return null; }
 }

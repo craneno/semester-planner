@@ -91,7 +91,7 @@ suite('Version — the changelog and the shell', async ({ check }) => {
     for (const file of seen) {
       const src = await text('../' + file);
       for (const m of src.matchAll(/\bsettings\.([a-zA-Z]\w*)\s*=[^=]/g)) written.add(m[1]);
-      if (file === 'js/views/settings.js') for (const m of src.matchAll(/\bs\.([a-zA-Z]\w*)\s*=[^=]/g)) written.add(m[1]);
+      if (file.startsWith('js/views/settings')) for (const m of src.matchAll(/\bs\.([a-zA-Z]\w*)\s*=[^=]/g)) written.add(m[1]);
     }
     const listed = new Set([...SYNCED_SETTINGS, ...DEVICE_SETTINGS]);
     const unlisted = [...written].filter((k) => !listed.has(k));

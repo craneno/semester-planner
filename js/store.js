@@ -12,6 +12,7 @@ import * as W from './store/wishlist.js';
 import * as P from './store/sprints.js';
 import * as H from './store/habits.js';
 import * as Q from './store/quickadd.js';
+import { warn } from './problems.js';
 
 /* ---------------- the slices ----------------
    store/ holds what needs no `state` of its own. Pure modules — constants,
@@ -88,7 +89,7 @@ function loadRaw() {
   try {
     const mine = localStorage.getItem(KEY);
     if (mine) return JSON.parse(mine);
-  } catch (e) { console.warn('planner: bad primary store', e); }
+  } catch (e) { warn('planner: bad primary store', e); }
   // one-time adoption of an older build's data — never destructive, the old key stays put
   for (const k of LEGACY_KEYS) {
     try {
@@ -106,7 +107,7 @@ function loadRaw() {
 
 
 const raw = loadRaw();
-try { keepBackups(raw); } catch (e) { console.warn('planner: backup failed', e); }
+try { keepBackups(raw); } catch (e) { warn('planner: backup failed', e); }
 export const state = migrate(raw);
 
 let saveTimer = null;
@@ -118,7 +119,7 @@ export function save() {
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch (e) {
-      console.error('planner: save failed', e);
+      warn('planner: save failed', e);
       window.dispatchEvent(new CustomEvent('planner:save-error', { detail: e }));
     }
   }, 120);

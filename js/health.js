@@ -11,6 +11,7 @@
 import { state, commit, habitDone, toggleHabit } from './store.js';
 import * as C from './cloud.js';
 import { today, addDays } from './util.js';
+import { warn } from './problems.js';
 
 export const HEALTH_EVERY = 60 * 60 * 1000;
 export const DEFAULT_GOAL = 10000;
@@ -71,7 +72,7 @@ export function refreshHealth({ fetch = C.fetchHealth, now = Date.now(), days = 
 /** Once an hour, when signed in. Quiet when it cannot: the steps are not the app's to worry about. */
 export function refreshHealthIfDue() {
   if (!C.isSignedIn() || !healthDue()) return null;
-  return refreshHealth().catch((e) => console.warn('health', e));
+  return refreshHealth().catch((e) => warn('health', e));
 }
 
 /** The latest day with a number, or null. */

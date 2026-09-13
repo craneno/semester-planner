@@ -9,6 +9,15 @@
 
 export const CHANGELOG = [
   {
+    version: 'v71', date: '2026-09-13',
+    title: 'One card per file',
+    notes: [
+      'Settings is one card per file: the page only lays them out, and a slip in one card is one card, not the page.',
+      'A Problems card at the foot of Settings keeps the last twenty things that went wrong on this device, since a phone has no console.',
+      'The git hooks stay LF on Windows.'
+    ]
+  },
+  {
     version: 'v70', date: '2026-09-13',
     title: 'Steadier',
     notes: [

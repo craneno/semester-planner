@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings tests</title>
+<link rel="stylesheet" href="./tests.css">
+<style>
+  .stage { position: absolute; left: -3000px; top: 0; width: 900px; }
+</style>
+</head>
+<body>
+<script type="module">
+/* The page is one card per file. What has to hold: every card is on the
+   page, in its order; the version card names the version loaded; a problem
+   noted shows under Problems and Clear takes it away; and the problems log
+   keeps the last twenty on the device, newest first. */
+import { suite, sharedStoreWith, renderInto } from './harness.js';
+import { APP_VERSION } from '../js/changelog.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+  items: [{ id: 'a', title: 'Lab', areaId: 'gen', plan: { date: '2026-09-14', start: '10:00', mins: 60 }, due: null }],
+  cards: [], notes: {},
+  habits: [{ id: 'h1', name: 'Workout', order: 0, archived: false }], habitLog: {}, habitLogAt: {}
+});
+
+const CARDS = ['Semester', 'Calendar', 'Google Calendar', 'Cloud sync', 'Appearance', 'Data', 'Reminders',
+  'Steps from your phone', 'Calendar file', 'Canvas', `Version ${APP_VERSION}`, 'Problems'];
+
+suite('Settings — every card on the page', async ({ check }) => {
+  const { renderSettings } = await import('../js/views/settings.js');
+  const P = await import('../js/problems.js');
+  P.clearProblems();
+  P.warn('test', new Error('a made-up slip'));
+  const v = renderInto(renderSettings);
+  try {
+    const heads = [...v.stage.querySelectorAll('section.card h2')].map((e) => e.textContent);
+    check('a headline', v.stage.querySelector('h1')?.textContent === 'Settings');
+    for (const name of CARDS) check(`the ${name} card`, heads.includes(name), heads.join(' | '));
+    check('...in that order', CARDS.every((name, i) => heads.indexOf(name) === i), heads.join(' | '));
+    check('no card twice', new Set(heads).size === heads.length);
+    check('the term is in the boxes', v.stage.querySelector('input[type=text]')?.value === 'Fall 2026');
+    check('the habit is offered for the steps', [...v.stage.querySelectorAll('select[aria-label="Habit the steps tick"] option')].some((o) => o.textContent === 'Workout'));
+    check('the steps goal is the default', v.stage.querySelector('input[aria-label="Steps a day"]')?.value === '10000');
+    check('the problem noted shows under Problems', v.stage.textContent.includes('a made-up slip'));
+    const clearBtn = [...v.stage.querySelectorAll('button')].find((b) => b.textContent === 'Clear');
+    check('...with a Clear', !!clearBtn);
+    clearBtn?.click();
+    check('...that takes it away', !v.stage.textContent.includes('a made-up slip') && P.problems().length === 0);
+    check('...and says so', v.stage.textContent.includes('Nothing has gone wrong on this device.'));
+  } finally {
+    v.done();
+  }
+});
+
+suite('Problems — the last twenty, kept on the device', async ({ check }) => {
+  const P = await import('../js/problems.js');
+  P.clearProblems();
+  for (let i = 0; i < 25; i++) P.note('t', 'slip ' + i);
+  check('twenty kept', P.problems().length === 20, String(P.problems().length));
+  check('...newest first', P.problems()[0].text === 'slip 24' && P.problems()[19].text === 'slip 5');
+  check('...on the device', JSON.parse(localStorage.getItem('semesterPlanner.problems')).length === 20);
+  P.note('x', new Error('boom'));
+  check('an Error is its message', P.problems()[0].text === 'boom' && P.problems()[0].tag === 'x');
+  P.note('y', null);
+  check('nothing thrown is an empty line, not a crash', P.problems()[0].text === '');
+  check('each is stamped', /^\d{4}-\d{2}-\d{2}T/.test(P.problems()[0].at));
+  P.clearProblems();
+  check('cleared', P.problems().length === 0 && localStorage.getItem('semesterPlanner.problems') === '[]');
+});
+</script>
+</body>
+</html>

@@ -17,6 +17,7 @@
 import { state, commit, save, subscribe, snapshotRows, applyRow, rowStamp, SCHEMA_VERSION } from './store.js';
 import { debounce } from './util.js';
 import { applyAppearance } from './appearance.js';
+import { warn } from './problems.js';
 
 const CDN = [
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
@@ -254,7 +255,7 @@ function storeBaseline(map) {
     cloud.storageFull = false;
   } catch (e) {
     cloud.storageFull = true;
-    console.warn('cloud: the baseline did not save', e);
+    warn('cloud: the baseline did not save', e);
   }
 }
 
@@ -382,7 +383,7 @@ export async function sync({ full = false, manual = false } = {}) {
       // retry that failed for some other reason, the next expiry hours on
       // would not be refreshed at all
       authRetried = false;
-      console.warn('cloud sync', err);
+      warn('cloud sync', err);
       entry.error = describeSyncError(err);
       setStatus('error', entry.error);
     }

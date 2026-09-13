@@ -1,0 +1,2 @@
+# git runs the hooks with sh, and sh chokes on a \r; core.autocrlf would put one in
+.githooks/* text eol=lf

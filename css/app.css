@@ -1311,6 +1311,11 @@ body.rail-hidden .sidebar { display: none; }
 /* ---------------- version history ---------------- */
 
 .release { border-top: 1px solid var(--rule-soft); padding: 12px 0 4px; }
+/* one thing that went wrong: when, what part, what it said */
+.problem { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 12.5px; border-top: 1px solid var(--rule-soft); }
+.problem:first-child { border-top: 0; }
+.problem .num { min-width: 96px; font-size: 12px; color: var(--ink-3); }
+.problem .what { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .release:first-child { border-top: 0; padding-top: 0; }
 .release-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .release-h h3 { font-size: calc(14px * var(--scale)); }
