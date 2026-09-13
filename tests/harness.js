@@ -71,9 +71,12 @@ async function runSuite(title, body) {
     line(`ERROR ${e.message}`, 'fail');
     console.error(e);
   } finally {
-    // store.js debounces save() by 120ms and cloud.js pushSoon by 1500ms.
-    // Restoring before those fire just lets them overwrite the restore.
-    await new Promise((r) => setTimeout(r, 2000));
+    // store.js debounces save() by 120ms; cloud.js's pushSoon and gcal.js's
+    // outbox wait 1500ms. Restoring before those fire lets them overwrite the
+    // restore — but only a suite that signed in to either can have one in
+    // flight, and that leaves a key behind. The rest wait out save() alone.
+    const signedIn = Object.keys(localStorage).some((k) => /^semesterPlanner\.(cloudBase|cloudSchema|gcalToken)/.test(k));
+    await new Promise((r) => setTimeout(r, signedIn ? 2000 : 400));
     localStorage.clear();
     for (const [k, v] of Object.entries(backup)) localStorage.setItem(k, v);
   }

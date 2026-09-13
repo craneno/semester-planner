@@ -9,6 +9,16 @@
 
 export const CHANGELOG = [
   {
+    version: 'v70', date: '2026-09-13',
+    title: 'Steadier',
+    notes: [
+      'A page that hits a problem says so, with Reload and Overview buttons, instead of a blank app.',
+      'On localhost the offline cache steps aside, so a test or a check always reads the file on disk.',
+      'The device\'s own settings are named in one list beside the synced ones, and the suite reads the code so a new key cannot fall in neither.',
+      'The suite runs in half the time, the deploy keeps its browser between runs, and a pre-push hook catches a missing version bump before the push.'
+    ]
+  },
+  {
     version: 'v69', date: '2026-09-13',
     title: 'The steps keep the tick',
     notes: [

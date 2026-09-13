@@ -93,9 +93,22 @@ export function navigate() {
   clear(host);
 
   const ctx = { navigate, go };
-  if (current.kind === 'category') renderCategory(host, ctx, current.id);
-  else if (current.kind === 'area') renderArea(host, ctx, current.id);
-  else view.render(host, ctx);
+  try {
+    if (current.kind === 'category') renderCategory(host, ctx, current.id);
+    else if (current.kind === 'area') renderArea(host, ctx, current.id);
+    else view.render(host, ctx);
+  } catch (err) {
+    // one page broken is one page, not the app: say so, and leave a way out
+    console.error('view', err);
+    clear(host);
+    host.append(h('div', { class: 'pad' },
+      h('div', { class: 'empty' },
+        h('h3', {}, 'This page hit a problem'),
+        h('p', { class: 'help', style: { margin: '4px 0 12px' } }, `${err?.message || err} — your data is not touched.`),
+        h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'center' } },
+          h('button', { class: 'btn', onclick: () => location.reload() }, 'Reload'),
+          h('button', { class: 'btn ghost', onclick: () => go('overview') }, 'Overview')))));
+  }
 
   document.title = `${pageTitle()} · Semester Planner`;
 }

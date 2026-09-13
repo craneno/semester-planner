@@ -18,6 +18,7 @@
    here too. Tick "Update on reload" in DevTools while developing. */
 import { suite } from './harness.js';
 import { CHANGELOG, APP_VERSION } from '../js/changelog.js';
+import { SYNCED_SETTINGS, DEVICE_SETTINGS } from '../js/store.js';
 
 const text = async (path) => {
   const r = await fetch(path, { cache: 'no-store' });
@@ -83,6 +84,19 @@ suite('Version — the changelog and the shell', async ({ check }) => {
     }
 
     check('the app reaches more than a handful of modules', seen.size > 10, String(seen.size));
+
+    // every settings key the code writes is synced or the device's, on
+    // purpose: one in neither list would sync, or not, by accident
+    const written = new Set();
+    for (const file of seen) {
+      const src = await text('../' + file);
+      for (const m of src.matchAll(/\bsettings\.([a-zA-Z]\w*)\s*=[^=]/g)) written.add(m[1]);
+      if (file === 'js/views/settings.js') for (const m of src.matchAll(/\bs\.([a-zA-Z]\w*)\s*=[^=]/g)) written.add(m[1]);
+    }
+    const listed = new Set([...SYNCED_SETTINGS, ...DEVICE_SETTINGS]);
+    const unlisted = [...written].filter((k) => !listed.has(k));
+    check('every settings key written is synced or the device\u2019s, by name', unlisted.length === 0, `in neither list: ${unlisted.join(', ')}`);
+    check('no key is both', SYNCED_SETTINGS.every((k) => !DEVICE_SETTINGS.includes(k)));
     check('every module the app imports is in the shell', missing.length === 0,
       `not cached: ${missing.join(', ')} — offline, these load from the network or not at all`);
     check('the changelog module is in it', shell.has('./js/changelog.js'));

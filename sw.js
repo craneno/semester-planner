@@ -4,7 +4,7 @@
 // everything it serves came from the same deploy. Anything not in the shell
 // (Google APIs, PDF.js) goes straight to the network.
 
-const VERSION = 'planner-v69';
+const VERSION = 'planner-v70';
 const SHELL = [
   './',
   './index.html',
@@ -84,6 +84,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;      // Google, CDN: network only
+  // on localhost every file is the one on disk: a cache here only ever
+  // served a stale test run or a stale typecheck as green
+  if (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) return;
 
   e.respondWith((async () => {
     const cache = await caches.open(VERSION);

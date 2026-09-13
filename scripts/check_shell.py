@@ -5,7 +5,8 @@
 
 Compares HEAD to its parent: if any file the service worker caches (its
 SHELL, or sw.js itself) changed and VERSION did not, a browser would keep
-the old files, so the build stops here. Run by the Deploy job on each push.
+the old files, so the build stops here. Run by the Deploy job on each push,
+and by .githooks/pre-push before one (git config core.hooksPath .githooks).
 """
 import re, subprocess, sys
 

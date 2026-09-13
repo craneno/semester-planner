@@ -1138,6 +1138,10 @@ export function carryForward(day = today()) {
    cursors — are deliberately NOT synced: they belong to the device. */
 
 export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'sweepDone', 'weekStart', 'dayStart', 'dayEnd', 'stepsGoal', 'stepsHabitId'];
+/** The device's own: credentials, cursors, what this screen has open. Every
+ *  settings key the code writes is in one list or the other — version.test
+ *  reads the sources and says which is missing. */
+export const DEVICE_SETTINGS = ['gcal', 'cloud', 'tzSeen', 'lastAreaId', 'railHidden', 'railClosed', 'canvasFeedAt', 'trackingAt', 'healthAt', 'remindLead'];
 
 // a note holding only a line for tomorrow, or only a journal entry, is not
 // empty: dropped here, neither would ever reach another device

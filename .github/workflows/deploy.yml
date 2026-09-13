@@ -53,6 +53,11 @@ jobs:
       - name: Typecheck the modules that ask for it
         run: npx -y -p typescript@5.6.3 tsc -p jsconfig.json
 
+      # Chromium is the slow part of every deploy; keep it between runs
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.47.2-chromium
       - name: Run the tests in Chromium
         run: |
           npm i --no-save --no-audit --no-fund playwright@1.47.2

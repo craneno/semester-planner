@@ -93,7 +93,7 @@ export function renderSettings(root, { navigate }) {
       type: 'text', placeholder: '1234567890-abc.apps.googleusercontent.com', value: g.clientId,
       oninput: debounce((e) => commit(() => { g.clientId = e.target.value.trim(); }), 400)
     })),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 12px' } },
+    h('p', { class: 'help', style: { margin: '2px 0 12px' } },
       'From Google Cloud Console → Credentials → OAuth client ID (Web application). Add this exact origin — ',
       h('code', { class: 'mono' }, location.origin),
       ' — to both Authorised JavaScript origins and Authorised redirect URIs. With cloud sync signed in and google-token deployed, a sign-in keeps for a week or more. See README.md.'),
@@ -232,7 +232,7 @@ export function renderSettings(root, { navigate }) {
     ontoggle: (e) => { syncLogOpen = e.target.open; }
   },
     h('summary', { class: 'eyebrow', style: { cursor: 'pointer' } }, 'Sync log'),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '4px 0 0' } },
+    h('p', { class: 'help', style: { margin: '4px 0 0' } },
       'The last thirty syncs from this device. "Up" with nothing edited here, sync after sync, is a loop — and sync stops itself after five.'),
     logBox);
 
@@ -249,7 +249,7 @@ export function renderSettings(root, { navigate }) {
       return;
     }
     clear(histBox);
-    if (!rows.length) { histBox.append(h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '4px 0 0' } }, 'Nothing replaced yet.')); return; }
+    if (!rows.length) { histBox.append(h('p', { class: 'help', style: { margin: '4px 0 0' } }, 'Nothing replaced yet.')); return; }
     for (const r of rows) {
       const d = r.data || {};
       const label = d.title || d.name || (typeof d.text === 'string' && d.text.slice(0, 48)) || d.focus || r.id;
@@ -271,7 +271,7 @@ export function renderSettings(root, { navigate }) {
     ontoggle: (e) => { historyOpen = e.target.open; if (e.target.open) paintHistory(); }
   },
     h('summary', { class: 'eyebrow', style: { cursor: 'pointer' } }, 'What the server used to hold'),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '4px 0 0' } },
+    h('p', { class: 'help', style: { margin: '4px 0 0' } },
       'Every version a row had before it was written over, for thirty days. Putting one back makes it the newest, so every device takes it.'),
     histBox);
   if (historyOpen) paintHistory();
@@ -287,14 +287,14 @@ export function renderSettings(root, { navigate }) {
         type: 'text', placeholder: 'eyJhbGciOi…', value: cl.anonKey,
         oninput: debounce((e) => commit(() => { cl.anonKey = e.target.value.trim(); }), 400)
       }))),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 0' } },
+    h('p', { class: 'help', style: { margin: '2px 0 0' } },
       'From your Supabase project → Settings → API. The anon key is meant to be public; row level security is what keeps your rows yours. Run ',
       h('code', { class: 'mono' }, 'supabase/schema.sql'),
       ' in the SQL editor once before signing in.'),
     field('Email', emailIn),
     field('Password', pwIn),
     authRow,
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '10px 0 0' } },
+    h('p', { class: 'help', style: { margin: '10px 0 0' } },
       'Everything keeps working offline and syncs when you get back. Signing out leaves this device\'s data untouched.'),
     logPanel,
     histPanel
@@ -326,7 +326,7 @@ export function renderSettings(root, { navigate }) {
   p.append(section('Appearance', [
     h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, 'Theme'),
     swatches,
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '10px 0 0' } },
+    h('p', { class: 'help', style: { margin: '10px 0 0' } },
       'Parchment is the gentlest for a long session: dark text on light, because '
       + 'light-on-dark haloes if you have any astigmatism; an off-white rather than '
       + 'pure white, which is a glare source at normal screen brightness; contrast '
@@ -403,10 +403,7 @@ export function renderSettings(root, { navigate }) {
     h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
       h('button', {
         class: 'btn primary', onclick: () => {
-          const blob = new Blob([exportJson()], { type: 'application/json' });
-          const a = h('a', { href: URL.createObjectURL(blob), download: `planner-${new Date().toISOString().slice(0, 10)}.json` });
-          document.body.append(a); a.click(); a.remove();
-          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          saveFile(new Blob([exportJson()], { type: 'application/json' }), `planner-${new Date().toISOString().slice(0, 10)}.json`);
         }
       }, 'Export backup'),
       h('button', { class: 'btn', onclick: () => fileInput.click() }, 'Restore from file'),
@@ -538,7 +535,7 @@ export function renderSettings(root, { navigate }) {
     }
   }, ...R.LEADS.map((m) => h('option', { value: m, selected: R.lead() === m }, m ? `${m} minutes before` : 'Off')));
   p.append(section('Reminders', [
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
+    h('p', { class: 'help', style: { margin: '0 0 12px' } },
       'A notification before a class, a calendar event or a planned block begins — on this device, since that is where it shows. The app has to be open somewhere: a tab, or installed on the home screen.'),
     field('Heads-up', remindSel),
     R.permission() === 'denied'
@@ -568,7 +565,7 @@ export function renderSettings(root, { navigate }) {
     const last = HL.latestSteps();
     if (last) stepsBox.append(h('p', { class: 'eyebrow', style: { margin: 0 } }, `Last from the phone: ${fmtDate(last.day)} · ${last.steps.toLocaleString()} steps`));
     if (!C.isSignedIn()) {
-      stepsBox.append(h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: 0 } }, 'Sign in to cloud sync first: the steps come by way of your Supabase project.'));
+      stepsBox.append(h('p', { class: 'help', style: { margin: 0 } }, 'Sign in to cloud sync first: the steps come by way of your Supabase project.'));
       return;
     }
     let token = null, err = null;
@@ -612,7 +609,7 @@ export function renderSettings(root, { navigate }) {
   };
   paintSteps();
   p.append(section('Steps from your phone', [
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 4px' } },
+    h('p', { class: 'help', style: { margin: '0 0 4px' } },
       'Apple Health is the phone\u2019s alone, but a Shortcut can read it and post the day\u2019s steps here. On every day the goal is met, the habit you pick ticks itself. Needs cloud sync, the health-steps function deployed (README), and the tables from supabase/upgrade.sql.'),
     stepsBox
   ]));
@@ -628,11 +625,11 @@ export function renderSettings(root, { navigate }) {
     toast(`${events.length} ${events.length === 1 ? 'event' : 'events'} saved, ${fmtDate(from)} – ${fmtDate(to)}.`);
   };
   p.append(section('Calendar file', [
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
+    h('p', { class: 'help', style: { margin: '0 0 12px' } },
       'Any calendar saved as an .ics file — Google\u2019s export, a club\u2019s schedule — becomes blocks in one area. Weekly rules repeat; an event brought in before is brought up to date, not made twice. Or drop the file on the Week.'),
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
       h('button', { class: 'btn', onclick: () => calIn.click() }, 'Import a calendar file'), calIn),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '8px 0 0' } },
+    h('p', { class: 'help', style: { margin: '8px 0 0' } },
       'And the other way: the blocks, all-day plans and due dates between two days as an .ics file any calendar can read.'),
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
       exFrom, h('span', { class: 'eyebrow' }, 'to'), exTo,
@@ -643,13 +640,13 @@ export function renderSettings(root, { navigate }) {
     h('p', { style: { fontSize: '13px', color: 'var(--ink-2)', margin: '0 0 8px' } },
       'Every assignment in your Canvas feed becomes a deadline in the right course. '
       + 'Bring the feed in again whenever you like: what you have already filed, ticked or written on stays as it is.'),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 12px' } },
+    h('p', { class: 'help', style: { margin: '0 0 12px' } },
       'In Canvas: Calendar → Calendar Feed → open the link → save the .ics file. Then pick it here.'),
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
       h('button', { class: 'btn primary', onclick: () => icsInput.click() }, 'Import feed file'),
       icsInput,
       fromCanvas ? h('span', { class: 'eyebrow num' }, `${fromCanvas} from Canvas`) : null),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '12px 0 0' } },
+    h('p', { class: 'help', style: { margin: '12px 0 0' } },
       'Or let it fetch the feed for you: copy the Calendar Feed link and paste it here. The link is kept in your own row on the server, '
       + 'never on this device, and a small function there reads Canvas for you, once a day and whenever you press Refresh. Deploy it once from the repo: ',
       h('code', { class: 'mono' }, 'supabase functions deploy canvas-feed'),
@@ -668,7 +665,7 @@ export function renderSettings(root, { navigate }) {
   const [current, ...older] = CHANGELOG;
   p.append(section(`Version ${APP_VERSION}`, [
     release(current),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '2px 0 0' } },
+    h('p', { class: 'help', style: { margin: '2px 0 0' } },
       'This is the version this browser has actually loaded — the offline shell is '
       + 'cached whole, one deploy at a time. A new one takes over on the next reload.'),
     older.length
@@ -728,17 +725,14 @@ function backupList() {
         class: 'btn sm', onclick: () => {
           const text = readBackup(b.key);
           if (!text) return toast('That copy is gone.');
-          const blob = new Blob([text], { type: 'application/json' });
-          const a = h('a', { href: URL.createObjectURL(blob), download: `planner-${b.label}.json` });
-          document.body.append(a); a.click(); a.remove();
-          setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+          saveFile(new Blob([text], { type: 'application/json' }), `planner-${b.label}.json`);
         }
       }, 'Save'));
   });
 
   return h('div', { style: { marginTop: '6px' } },
     h('div', { class: 'eyebrow', style: { marginBottom: '4px' } }, 'Copies kept on this device'),
-    h('p', { style: { fontSize: '12.5px', color: 'var(--ink-3)', margin: '0 0 6px' } },
+    h('p', { class: 'help', style: { margin: '0 0 6px' } },
       'Taken before anything is read, so a bad sync cannot reach them. Save one, '
       + 'then Restore from file to put it back.'),
     ...rows, room);
@@ -820,7 +814,7 @@ function toggle(label, help, value, onchange) {
   return h('label', { style: { display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: 'pointer', marginTop: '4px' } },
     h('input', { type: 'checkbox', class: 'check', checked: value, onchange: (e) => onchange(e.target.checked) }),
     h('span', {}, h('div', { style: { fontSize: '13.5px' } }, label),
-      h('div', { style: { fontSize: '12.5px', color: 'var(--ink-3)' } }, help)));
+      h('div', { class: 'help' }, help)));
 }
 
 function fontSelect(role) {

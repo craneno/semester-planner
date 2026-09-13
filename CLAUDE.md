@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v69**.
+Schema **20**, service worker **planner-v70**.
 
 ## Working with me
 
@@ -29,7 +29,12 @@ fetches with `cache: 'reload'` (Pages' `max-age=600` would fill the new cache
 with the old files) and **the fetch handler never writes to the cache**, so a
 page runs one whole deploy, never one version's JS against another's CSS.
 
-**When a change seems not to land**, it is a cache. A hash-only move does not
+`.githooks/pre-push` runs the same check before a push
+(`git config core.hooksPath .githooks`, once). A view that throws draws
+"This page hit a problem" in `navigate()`, never a blank app.
+
+**When a change seems not to land**, it is a cache. On localhost the worker
+serves nothing — every file is the one on disk. A hash-only move does not
 reload — `#/overview` when already there keeps the module instances, so
 `location.reload()`. A new port is a clean cache (serve it `no-store`).
 **Never check with a cache-busting query string** — `sw.js` matches with
@@ -108,7 +113,8 @@ runs, under their own keys, out of sync's reach.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
-anything off the list stays on the device. Postgres only allows the row kinds
+the device's own are the other list (`DEVICE_SETTINGS`), and `version.test`
+reads the sources so a key in neither is a red suite. Postgres only allows the row kinds
 it was built with, so **a new kind needs an `ALTER` the user has to run**
 (`supabase/upgrade.sql`, safe to run twice, named by `describeSyncError()`);
 so does a new table (`planner_feeds`, `planner_health`, `planner_health_tokens`).
@@ -294,14 +300,15 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1537 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1539 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
 
 Suites drive the real modules and wipe app state, so **both guards must stay**:
 refuse to run anywhere but localhost, and put `localStorage` back afterwards,
-waiting out `save()` (120ms) and `pushSoon` (1500ms) first. `store.js` reads
+waiting out `save()` (120ms) — and `pushSoon` (1500ms) only when a suite
+signed in, which leaves a cloud or Google key behind. `store.js` reads
 `localStorage` once, at import, so `migrate()` needs a fresh instance —
 `storeWith(raw)`, which **checks** its seed. A file that has not reported in
 90s is a **failure**. A fresh instance has its own `state`, so a suite that
