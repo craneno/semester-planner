@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v69', date: '2026-09-13',
+    title: 'The steps keep the tick',
+    notes: [
+      'Unticking a gym task no longer unticks the habit on a day the phone\'s steps already met the goal.'
+    ]
+  },
+  {
     version: 'v68', date: '2026-09-12',
     title: 'Steps from the phone',
     notes: [

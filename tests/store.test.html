@@ -968,6 +968,18 @@ suite('Habits — a task that counts for one', async ({ check }) => {
   check('a day ahead is left for its day', !s.habitDone(addDays(today(), 2), 'h1'));
   s.toggleItem('plain', true);
   check('a task not tied to it does nothing', !s.habitDone(yday, 'h1'));
+  // the steps earned the day: an untick of the gym leaves it
+  s.state.settings.stepsHabitId = 'h1';
+  s.state.health[yday] = 12000;
+  s.toggleItem('leg', true);
+  s.toggleItem('leg', false);
+  check('an untick leaves a day the steps earned', s.habitDone(yday, 'h1') && !s.itemById('leg').done);
+  s.state.health[yday] = 4000;
+  s.toggleItem('leg', true);
+  s.toggleItem('leg', false);
+  check('...but not one they did not', !s.habitDone(yday, 'h1'));
+  s.state.settings.stepsHabitId = null;
+  delete s.state.health[yday];
   s.deleteHabit('h1');
   check('a habit deleted unties its tasks', !('habitId' in s.itemById('leg')) && !('habitId' in s.itemById('walk')));
   s.toggleItem('leg', true);

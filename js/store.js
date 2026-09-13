@@ -957,10 +957,14 @@ export function toggleItem(id, force) {
   tickHabitFor(t, t.plan?.date || t.due || today(), t.done);
 }
 
-/** A task tied to a habit ticks it for its day, and unticks it with it. */
+/** A task tied to a habit ticks it for its day, and unticks it with it —
+ *  unless the phone's steps that day met the goal, which earned the tick on
+ *  their own (js/health.js). */
 function tickHabitFor(t, day, on) {
   if (!t.habitId || !state.habits.some((x) => x.id === t.habitId && !x.archived)) return;
   if (day > today()) return;         // a tick ahead of time is the task's; the habit waits for the day
+  if (!on && t.habitId === state.settings.stepsHabitId
+    && (state.health[day] || 0) >= (Number(state.settings.stepsGoal) || 10000)) return;
   if (habitDone(day, t.habitId) !== on) toggleHabit(day, t.habitId, on);
 }
 
