@@ -9,6 +9,7 @@ import {
   habitRemaining, HABIT_TARGET, addHabit, updateHabit, deleteHabit, reorderHabits
 } from '../store.js';
 import { confirmDialog, toast, reorderable } from '../ui.js';
+import { stepsHabit, fmtSteps } from '../health.js';
 
 let anchor = today();
 
@@ -55,6 +56,7 @@ export function renderHabits(root, { navigate }) {
     h('div', { class: 'habit-goal eyebrow' }, `to ${HABIT_TARGET}`));
   table.append(head);
 
+  const stepsId = stepsHabit();
   for (const x of habits) {
     const row = h('div', { class: 'habit-row', dataset: { reorderId: x.id } },
       h('div', { class: 'habit-name' },
@@ -100,7 +102,11 @@ export function renderHabits(root, { navigate }) {
             e.currentTarget.setAttribute('aria-pressed', String(nowOn));
             paintProgress(e.currentTarget.closest('.habit-row'), x.id);
           }
-        }, on ? '✓' : '')));
+        }, on ? '✓' : ''),
+        // the phone's number for the day, under the tick it earned or did not
+        x.id === stepsId && state.health[d] != null
+          ? h('div', { class: 'habit-steps num', title: `${state.health[d].toLocaleString()} steps` }, fmtSteps(state.health[d]))
+          : null));
     }
 
     row.append(h('div', { class: 'habit-streak num' }, streakLabel(x.id)));

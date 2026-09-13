@@ -721,6 +721,42 @@ export async function trackParcel({ carrier, number }) {
   return JSON.parse(text);
 }
 
+/* ---------------- steps from the phone ----------------
+   A Shortcut posts each day's steps to the health-steps function with a
+   token made here (planner_health_tokens, yours alone); the function writes
+   planner_health, and this reads it as you. Neither is a planner row: the
+   phone writes, the app only reads, so nothing here is pushed or
+   tombstoned. */
+const HEALTH = 'planner_health', HEALTH_TOKENS = 'planner_health_tokens';
+
+/** The URL the Shortcut posts to. */
+export const healthUrl = () => cfg().url.replace(/\/+$/, '') + '/functions/v1/health-steps';
+
+/** The token the phone sends, or null with none made. */
+export async function healthToken() {
+  const c = await client();
+  const { data, error } = await c.from(HEALTH_TOKENS).select('token').eq('user_id', cloud.userId).maybeSingle();
+  if (error) throw error;
+  return data?.token || null;
+}
+
+/** A new token; the old one stops working. */
+export async function makeHealthToken() {
+  const c = await client();
+  const token = [...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const { error } = await c.from(HEALTH_TOKENS).upsert({ user_id: cloud.userId, token, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  return token;
+}
+
+/** The days from `since` on: `[{ day, steps, updated_at }]`. */
+export async function fetchHealth(since) {
+  const c = await client();
+  const { data, error } = await c.from(HEALTH).select('day, steps, updated_at').eq('user_id', cloud.userId).gte('day', since).order('day');
+  if (error) throw error;
+  return data || [];
+}
+
 /** The cloud session's token, or null with none: what the edge functions act as. */
 export async function session() {
   if (!isConfigured()) return null;

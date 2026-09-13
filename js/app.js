@@ -21,6 +21,7 @@ import { renderWishlist } from './views/wishlist.js';
 import { renderSettings } from './views/settings.js';
 import * as G from './gcal.js';
 import * as R from './remind.js';
+import { refreshHealthIfDue } from './health.js';
 import * as C from './cloud.js';
 import { refreshIfDue } from './canvas.js';
 import { refreshTrackingIfDue } from './tracking.js';
@@ -626,7 +627,7 @@ function boot() {
     if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
       || meta?.source === 'editor' || meta?.source === 'restore'
       || meta?.source === 'undo' || meta?.source === 'redo'
-      || meta?.source === 'canvas' || meta?.source === 'tracking') navigate();
+      || meta?.source === 'canvas' || meta?.source === 'tracking' || meta?.source === 'health') navigate();
   });
 
   navigate();
@@ -637,7 +638,7 @@ function boot() {
   C.start().catch((e) => console.warn('cloud', e));
   // the Canvas feed, once a day: after any sync that ends well, so a device
   // that has just woken or just signed in gets its turn
-  C.onCloud((c) => { if (c.status === 'ready') { refreshIfDue(); refreshTrackingIfDue(); } });
+  C.onCloud((c) => { if (c.status === 'ready') { refreshIfDue(); refreshTrackingIfDue(); refreshHealthIfDue(); } });
 
   askAboutZone();
 

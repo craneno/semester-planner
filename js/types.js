@@ -170,6 +170,7 @@
  * @property {Object<string, string[]>} habitLog
  * @property {Object<string, Stamp>} habitLogAt
  * @property {any[]} events
+ * @property {Object<string, number>} health   steps a day, from the phone; a mirror
  * @property {any[]} outbox
  * @property {{ name: string, start: Day, end: Day }} semester
  * @property {{ start: Day }} calendar

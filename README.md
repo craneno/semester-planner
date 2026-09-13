@@ -204,6 +204,26 @@ can be pointed at with `FEDEX_API`, `UPS_API`, `USPS_API`. A carrier with no
 keys is not an error: the row says tracking is not set up, and the link to
 the carrier's page still works.
 
+### Steps from your phone
+
+Apple Health is the phone's alone, but a Shortcut can read it and post a
+number. Each day's steps go to the `health-steps` function with a token the
+app makes for you (Settings → **Steps from your phone**), land in
+`planner_health`, and the app reads them as you, once an hour per device. On
+every day the goal is met, the habit you pick ticks itself; a tick is only
+ever added.
+
+```sh
+supabase functions deploy health-steps --no-verify-jwt
+```
+
+Run `supabase/upgrade.sql` once for the two tables. Then, in Settings, make
+a token, and on the phone build the Shortcut the section spells out: an
+automation late every day that finds today's Steps samples, sums them, and
+posts `{ "date": "yyyy-MM-dd", "steps": <sum> }` to the URL shown, with the
+token in an `x-planner-token` header. `--no-verify-jwt` is needed because
+the caller is a Shortcut, not a signed-in session; the token is the proof.
+
 ## Putting it on GitHub
 
 The repo *is* the site — no build step, so the workflow is just edit, commit, push.

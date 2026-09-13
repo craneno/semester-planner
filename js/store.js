@@ -145,7 +145,7 @@ export function commit(fn, meta = {}) {
    restore — clears the stack: history from before the world moved is not
    safe to replay over it. */
 const UNDO_KEYS = ['semester', 'calendar', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
-const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas', 'tracking']);
+const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas', 'tracking', 'health']);
 export const undoSettings = { max: 10, coalesceMs: 800 };
 let undoStack = [], redoStack = [], lastLocalAt = 0;
 
@@ -1133,7 +1133,7 @@ export function carryForward(day = today()) {
    Device-specific settings — Google tokens, Supabase credentials, sync
    cursors — are deliberately NOT synced: they belong to the device. */
 
-export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'sweepDone', 'weekStart', 'dayStart', 'dayEnd'];
+export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'sweepDone', 'weekStart', 'dayStart', 'dayEnd', 'stepsGoal', 'stepsHabitId'];
 
 // a note holding only a line for tomorrow, or only a journal entry, is not
 // empty: dropped here, neither would ever reach another device

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v67**.
+Schema **20**, service worker **planner-v68**.
 
 ## Working with me
 
@@ -110,7 +110,8 @@ runs, under their own keys, out of sync's reach.
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
 anything off the list stays on the device. Postgres only allows the row kinds
 it was built with, so **a new kind needs an `ALTER` the user has to run**
-(`supabase/upgrade.sql`, safe to run twice, named by `describeSyncError()`).
+(`supabase/upgrade.sql`, safe to run twice, named by `describeSyncError()`);
+so does a new table (`planner_feeds`, `planner_health`, `planner_health_tokens`).
 Links, the wishlist, sprints, habits and each day's ticks (`habitlog:<date>`)
 are rows of their own since schema 20, each with a clock in `rowStamp()`;
 `meta` is only the semester and `SYNCED_SETTINGS`. `push()` reads back what the server
@@ -126,7 +127,7 @@ up here, its hash recorded, or it would be pushed again for ever.
 | `state.semester` · `state.calendar` | the term (`name`, `start`, `end`) is for **courses only**: when classes meet, the chart, the Canvas import · `calendar.start` is the day the planner began (worked out once, from the earliest row): Google is read from it, the Week tray drops work due before it. Both in the `meta` row |
 | `state.notes` | per-day `focus`, `text`, `tomorrow`, `top3`, `journal` (`areaId -> entry`), keyed by date — **not** the same as `state.cards`, which are notecards (`areaId: null` = unfiled) |
 | `links` / `wishlist` / `sprints` | link piles; things wanted and the parcels they turn into — a wish with `tracking` is asked about once a day per device (`js/tracking.js`, `track-parcel` on the edge, `trackingAt` device-only); focuses and sprints on the chart |
-| `habits` / `habitLog` · `events` / `outbox` | habits and `date -> [habitId]` · the Google mirror — edited in place by `editEvent`/`removeEvent` (`js/eventedit.js` is the dialog), which patch it at once and queue a PATCH/DELETE keyed `event:<id>`; a pull lays the queue over what came down — and writes waiting to go |
+| `habits` / `habitLog` · `events` / `outbox` · `health` | habits and `date -> [habitId]`; `health` is `date -> steps` from the phone (`js/health.js`), read from `planner_health` once an hour per device (`healthAt`), **never pushed**, ticking `settings.stepsHabitId` at `stepsGoal` — both synced · the Google mirror — edited in place by `editEvent`/`removeEvent` (`js/eventedit.js` is the dialog), which patch it at once and queue a PATCH/DELETE keyed `event:<id>`; a pull lays the queue over what came down — and writes waiting to go |
 
 **Only a `plan` block goes to Google Calendar.** A due date on its own is never
 pushed — the top source of "why isn't it on my calendar". **A push is a queue,
@@ -293,7 +294,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1513 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1535 checks,
 left out of the deploy; CI opens the same page in Chromium. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

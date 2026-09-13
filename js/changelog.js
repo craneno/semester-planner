@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v68', date: '2026-09-12',
+    title: 'Steps from the phone',
+    notes: [
+      'A Shortcut on the phone posts each day\'s steps to your Supabase project (the health-steps function, deployed with --no-verify-jwt, and two tables from supabase/upgrade.sql). The app reads them once an hour, shows them on the Habits page, and on every day the goal is met the habit you pick ticks itself. Set it up under Settings \\u203a Steps from your phone.',
+      'The goal and the habit sync; the token the phone sends lives on the server, in your row.'
+    ]
+  },
+  {
     version: 'v67', date: '2026-09-12',
     title: 'The habit and the task',
     notes: [

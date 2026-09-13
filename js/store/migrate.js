@@ -34,6 +34,7 @@ export const DEFAULTS = () => {
     habitLogAt: {},     // 'YYYY-MM-DD' -> when that day's list last changed; its sync clock
     notes: {},          // 'YYYY-MM-DD' -> { focus, text, top3:[itemId] }
     events: [],         // external Google events, read-only mirror
+    health: {},         // 'YYYY-MM-DD' -> steps that day, from the phone; a mirror, never pushed
     outbox: [],         // queued Google writes while offline/signed out
     settings: {
       theme: 'graphite',
@@ -88,6 +89,7 @@ export function migrate(raw) {
   s.areas = Array.isArray(raw.areas) ? raw.areas : (Array.isArray(raw.courses) ? raw.courses : []);
   s.items = Array.isArray(raw.items) ? raw.items : (Array.isArray(raw.tasks) ? raw.tasks : []);
   s.events = Array.isArray(raw.events) ? raw.events : [];
+  s.health = raw.health && typeof raw.health === 'object' ? raw.health : {};
   s.outbox = Array.isArray(raw.outbox) ? raw.outbox : [];
   s.notes = raw.notes && typeof raw.notes === 'object' ? raw.notes : {};
   s.cards = (Array.isArray(raw.cards) ? raw.cards : []).map((c) => ({

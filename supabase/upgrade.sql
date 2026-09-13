@@ -143,3 +143,39 @@ create policy "planner_feeds owner"
   for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+
+-- Steps from the phone. A Shortcut posts each day's steps to the
+-- health-steps Edge Function with a token the app made for you; the
+-- function writes the day here as the service role, and the app reads
+-- your rows as you. Nothing on a device but the app's own copy.
+create table if not exists public.planner_health (
+  user_id    uuid        not null references auth.users(id) on delete cascade,
+  day        date        not null,
+  steps      integer     not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, day)
+);
+
+alter table public.planner_health enable row level security;
+
+drop policy if exists "planner_health owner reads" on public.planner_health;
+create policy "planner_health owner reads"
+  on public.planner_health
+  for select
+  using (auth.uid() = user_id);
+
+create table if not exists public.planner_health_tokens (
+  user_id    uuid        primary key references auth.users(id) on delete cascade,
+  token      text        not null unique,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.planner_health_tokens enable row level security;
+
+drop policy if exists "planner_health_tokens owner" on public.planner_health_tokens;
+create policy "planner_health_tokens owner"
+  on public.planner_health_tokens
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Steps tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* The phone's steps. What has to hold: a day read in is kept as a number;
+   a day at or over the goal ticks the habit picked for it, under it does
+   not, and a day ahead waits; a tick is never taken back; with no habit
+   picked nothing is ticked; the read is once an hour per device; and a
+   fetch handed in is what is read. */
+import { suite, sharedStoreWith } from './harness.js';
+import { today, addDays } from '../js/util.js';
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+  areas: [], items: [], cards: [], notes: {},
+  habits: [{ id: 'h1', name: '10k steps or workout', order: 0, archived: false }], habitLog: {}, habitLogAt: {}
+});
+
+suite('Steps — what a day does', async ({ check }) => {
+  const H = await import('../js/health.js');
+  const d = (n) => addDays(today(), n);
+  check('the goal is ten thousand until said otherwise', H.stepsGoal() === 10000);
+  check('no habit picked, none', H.stepsHabit() === null);
+  s.state.settings.stepsHabitId = 'h1';
+  s.state.settings.stepsGoal = 8000;
+  check('...picked, that one, at the goal set', H.stepsHabit() === 'h1' && H.stepsGoal() === 8000);
+
+  const t = H.applyHealth([
+    { day: d(-2), steps: 8000 }, { day: d(-1), steps: '7,999' }, { day: today(), steps: 12000.4 }, { day: d(1), steps: 9000 }, { day: 'junk', steps: 1 }
+  ], { now: Date.parse('2026-09-12T20:00:00Z') });
+  check('each day kept as a number, a string of digits with a comma being none', s.state.health[d(-2)] === 8000 && s.state.health[d(-1)] === 0 && s.state.health[today()] === 12000, JSON.stringify(s.state.health));
+  check('...and junk is not', !('junk' in s.state.health) && t.days === 4);
+  check('at the goal ticks the habit', s.habitDone(d(-2), 'h1'));
+  check('under it does not', !s.habitDone(d(-1), 'h1'));
+  check('over it does', s.habitDone(today(), 'h1'));
+  check('a day ahead waits', !s.habitDone(d(1), 'h1'));
+  check('the tally says', t.ticked === 2, String(t.ticked));
+  check('the read is stamped', s.state.settings.healthAt === '2026-09-12T20:00:00.000Z');
+
+  H.applyHealth([{ day: d(-2), steps: 100 }]);
+  check('a tick is never taken back', s.habitDone(d(-2), 'h1') && s.state.health[d(-2)] === 100);
+
+  s.state.settings.stepsHabitId = 'gone';
+  H.applyHealth([{ day: d(-3), steps: 20000 }]);
+  check('a habit that is gone ticks nothing', !s.habitDone(d(-3), 'h1'));
+  s.state.settings.stepsHabitId = null;
+  check('formatted short', H.fmtSteps(8420) === '8.4k' && H.fmtSteps(12345) === '12k' && H.fmtSteps(640) === '640');
+  check('the latest day', H.latestSteps().day === d(1));
+});
+
+suite('Steps — once an hour, and by a fetch handed in', async ({ check }) => {
+  const H = await import('../js/health.js');
+  const now = Date.parse('2026-09-12T20:00:00Z');
+  s.state.settings.healthAt = null;
+  check('never read: due', H.healthDue(now));
+  s.state.settings.healthAt = new Date(now - 30 * 60 * 1000).toISOString();
+  check('half an hour on: not yet', !H.healthDue(now));
+  s.state.settings.healthAt = new Date(now - 61 * 60 * 1000).toISOString();
+  check('an hour on: due', H.healthDue(now));
+
+  let asked = null;
+  const t = await H.refreshHealth({ fetch: async (since) => { asked = since; return [{ day: today(), steps: 3000 }]; }, now });
+  check('the fetch is asked from two weeks back', asked === addDays(today(), -14), asked);
+  check('...and what it gives is read', t.days === 1 && s.state.health[today()] === 3000);
+  check('...and the hour starts now', s.state.settings.healthAt === new Date(now).toISOString());
+  check('a table not there is said plainly', /upgrade\.sql/.test(H.describeHealthError({ code: '42P01', message: 'relation "planner_health" does not exist' })));
+  s.state.settings.healthAt = null;
+  s.state.health = {};
+});
+</script>
+</body>
+</html>
