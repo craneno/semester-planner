@@ -632,6 +632,10 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
   body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
   body.nav-dragging .nav-scrim { transition: none; pointer-events: auto; }
   .main { padding-bottom: calc(52px + env(safe-area-inset-bottom)); }
+  /* iOS zooms the page to any box smaller than 16px when it is focused, and
+     the zoom pans the parked sidebar into view beside the keyboard. Every
+     box is 16px on a phone, and none of them zoom. */
+  input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select { font-size: 16px; }
   .topbar { padding: 10px 12px; gap: 8px; }
   .topbar h1 { font-size: calc(17px * var(--scale)); }
   /* the bar is already title plus quick add on a phone; the day itself is one
@@ -1076,16 +1080,19 @@ body.rail-hidden .sidebar { display: none; }
 .habits { display: flex; flex-direction: column; }
 .habit-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(7, 38px) 44px 62px;
+  grid-template-columns: minmax(0, 1fr) repeat(7, 38px) 52px;
   align-items: center; gap: 2px;
   border-bottom: 1px solid var(--rule-soft); padding: 3px 0;
 }
 .habit-head { border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
 .habit-steps { font-size: 9px; color: var(--ink-3); text-align: center; margin-top: 1px; }
-.habit-tied { font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+/* the name, and under it the tasks tied to it: two lines in one cell, so
+   neither can squeeze the other out */
+.habit-label { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.habit-tied { font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 2px; }
 .habit-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 10px; }
 .habit-title {
-  border: 0; background: transparent; padding: 4px 2px; min-width: 0; flex: 1;
+  border: 0; background: transparent; padding: 4px 2px; min-width: 0; width: 100%;
   color: var(--ink); font: inherit; font-size: calc(13.5px * var(--scale));
 }
 .habit-title:focus { outline: none; background: var(--surface); border-radius: 4px; }
@@ -1111,10 +1118,6 @@ body.rail-hidden .sidebar { display: none; }
 .tick:disabled:hover { border-color: var(--rule); }
 
 .habit-streak { text-align: right; color: var(--ink-2); font-size: 12px; padding-right: 2px; }
-.habit-goal { text-align: right; padding-left: 10px; }
-.habit-goal .goal-n { font-size: 12px; color: var(--ink-3); display: block; }
-.habit-goal .goal-bar { margin-top: 3px; }
-.habit-head .habit-goal { padding-left: 10px; }
 .habit-add { display: flex; gap: 8px; margin-top: 16px; max-width: 420px; }
 .habit-new {
   flex: 1; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--r);
@@ -1122,7 +1125,7 @@ body.rail-hidden .sidebar { display: none; }
 }
 
 @media (max-width: 820px) {
-  .habit-row { grid-template-columns: minmax(0, 1fr) repeat(7, 30px) 30px 46px; }
+  .habit-row { grid-template-columns: minmax(0, 1fr) repeat(7, 30px) 40px; }
   .tick { width: 22px; height: 22px; }
 }
 
@@ -1135,14 +1138,11 @@ body.rail-hidden .sidebar { display: none; }
     grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 6px 3px; padding: 9px 0;
   }
-  .habit-name { grid-row: 1; grid-column: 1 / 5; padding-right: 0; }
-  .habit-streak { grid-row: 1; grid-column: 5 / 6; }
-  .habit-goal { grid-row: 1; grid-column: 6 / 8; padding-left: 8px; }
-  .habit-head .habit-goal { padding-left: 8px; }
+  .habit-name { grid-row: 1; grid-column: 1 / 7; padding-right: 0; }
+  .habit-streak { grid-row: 1; grid-column: 7 / 8; }
   .habit-day { grid-row: 2; width: 100%; }
   .tick { width: 100%; height: 34px; border-radius: 7px; font-size: 15px; }
   .habit-title { font-size: calc(15px * var(--scale)); }
-  .habit-goal .goal-bar { margin-top: 2px; }
 }
 
 

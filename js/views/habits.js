@@ -6,7 +6,7 @@
 import { h, clear, today, addDays, startOfWeek, weekDays, parseYmd, DOW, MONTHS } from '../util.js';
 import {
   state, commit, activeHabits, habitDone, toggleHabit, habitStreak,
-  habitRemaining, HABIT_TARGET, addHabit, updateHabit, deleteHabit, reorderHabits
+  addHabit, updateHabit, deleteHabit, reorderHabits
 } from '../store.js';
 import { confirmDialog, toast, reorderable } from '../ui.js';
 import { stepsHabit, fmtSteps } from '../health.js';
@@ -52,30 +52,29 @@ export function renderHabits(root, { navigate }) {
       h('div', { class: 'eyebrow' }, DOW[dt.getDay()][0]),
       h('div', { class: 'habit-dnum num' }, String(dt.getDate())));
     }),
-    h('div', { class: 'habit-streak eyebrow' }, 'streak'),
-    h('div', { class: 'habit-goal eyebrow' }, `to ${HABIT_TARGET}`));
+    h('div', { class: 'habit-streak eyebrow' }, 'streak'));
   table.append(head);
 
   const stepsId = stepsHabit();
   for (const x of habits) {
+    // the tasks tied to it, by name: a tick of one is a tick here. On its own
+    // line under the name — beside it, the name was squeezed to nothing
+    const tied = [...new Set(state.items.filter((t) => t.habitId === x.id).map((t) => t.title))];
     const row = h('div', { class: 'habit-row', dataset: { reorderId: x.id } },
       h('div', { class: 'habit-name' },
         h('span', { class: 'drag-handle', 'aria-label': `Reorder ${x.name}` }, '⠿'),
-        h('input', {
-          class: 'habit-title', value: x.name, 'aria-label': 'Habit name',
-          onchange: (e) => {
-            const name = e.target.value.trim();
-            if (name) commit(() => updateHabit(x.id, { name }));
-            else e.target.value = x.name;
-          }
-        }),
-        // the tasks tied to it, by name: a tick of one is a tick here
-        (() => {
-          const tied = [...new Set(state.items.filter((t) => t.habitId === x.id).map((t) => t.title))];
-          return tied.length
+        h('div', { class: 'habit-label' },
+          h('input', {
+            class: 'habit-title', value: x.name, 'aria-label': 'Habit name',
+            onchange: (e) => {
+              const name = e.target.value.trim();
+              if (name) commit(() => updateHabit(x.id, { name }));
+              else e.target.value = x.name;
+            }
+          }),
+          tied.length
             ? h('span', { class: 'habit-tied eyebrow', title: 'Tasks that count for this habit: ticking one ticks the day here' }, 'with ' + tied.join(', '))
-            : null;
-        })(),
+            : null),
         h('button', {
           class: 'btn sm ghost habit-del', 'aria-label': `Delete ${x.name}`,
           onclick: async () => {
@@ -110,9 +109,6 @@ export function renderHabits(root, { navigate }) {
     }
 
     row.append(h('div', { class: 'habit-streak num' }, streakLabel(x.id)));
-    row.append(h('div', { class: 'habit-goal' },
-      h('span', { class: 'goal-n num' }, goalLabel(x.id)),
-      h('span', { class: 'meter goal-bar' }, h('span', { style: { width: goalPct(x.id) + '%' } }))));
     table.append(row);
   }
 
@@ -156,20 +152,9 @@ const streakLabel = (id) => {
   return n ? String(n) : '—';
 };
 
-/** How much further to a habit that has stuck — or nothing left to say. */
-const goalLabel = (id) => {
-  const left = habitRemaining(id);
-  return left ? String(left) : '✓';
-};
-const goalPct = (id) => Math.min(100, Math.round((habitStreak(id) / HABIT_TARGET) * 100));
-
-/** A tick only changes that habit's own numbers, and re-rendering the page
+/** A tick only changes that habit's own streak, and re-rendering the page
  *  would take focus off the box you just clicked. */
 function paintProgress(row, id) {
   const streak = row.querySelector('.habit-streak');
   if (streak) streak.textContent = streakLabel(id);
-  const n = row.querySelector('.goal-n');
-  if (n) n.textContent = goalLabel(id);
-  const bar = row.querySelector('.goal-bar > span');
-  if (bar) bar.style.width = goalPct(id) + '%';
 }

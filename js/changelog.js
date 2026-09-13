@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v74', date: '2026-09-13',
+    title: 'The habit has a name again',
+    notes: [
+      'On a phone, typing in any box no longer slides the menu into view: iOS zooms the page for a box smaller than 16px, and the zoom dragged the parked sidebar in beside the keyboard. Every box is 16px on a phone now.',
+      'A habit tied to tasks shows its own name, with the tasks on a small line under it — beside the name they had squeezed it out. The “to 21” column is gone; the streak is the number.'
+    ]
+  },
+  {
     version: 'v73', date: '2026-09-13',
     title: 'A sign-in that waits',
     notes: [
