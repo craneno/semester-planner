@@ -10,6 +10,9 @@ import * as C from '../../cloud.js';
 import * as HL from '../../health.js';
 import { section, field } from './bits.js';
 
+/** What a day of 0 nearly always means. The post got through, so it is the Shortcut. */
+export const ZERO_HELP = 'The phone posted 0. That is the Shortcut summing nothing: in the Health app (your picture → Apps → Shortcuts) let it read Steps, and in the request body send the Sum from “Calculate Statistics” as a Number — not the samples, not text. Run the Shortcut by hand: the function now refuses anything it cannot read as a number and says what it got.';
+
 export function renderSteps() {
   const s = state.settings;
   const stepsBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } });
@@ -29,6 +32,8 @@ export function renderSteps() {
       ...habits.map((x) => h('option', { value: x.id, selected: x.id === HL.stepsHabit() }, x.name)))));
     const last = HL.latestSteps();
     if (last) stepsBox.append(h('p', { class: 'eyebrow', style: { margin: 0 } }, `Last from the phone: ${fmtDate(last.day)} · ${last.steps.toLocaleString()} steps`));
+    // the number arrives, so the wiring is fine; a zero is the Shortcut summing nothing
+    if (last && last.steps === 0) stepsBox.append(h('p', { class: 'help zero-steps', style: { margin: 0 } }, ZERO_HELP));
     if (!C.isSignedIn()) {
       stepsBox.append(h('p', { class: 'help', style: { margin: 0 } }, 'Sign in to cloud sync first: the steps come by way of your Supabase project.'));
       return;
@@ -61,13 +66,19 @@ export function renderSteps() {
         h('summary', {}, 'The Shortcut, step by step'),
         h('ol', { style: { fontSize: '12.5px', color: 'var(--ink-2)', margin: '8px 0 0', paddingLeft: '18px', lineHeight: 1.5 } },
           h('li', {}, 'Shortcuts \u2192 Automation \u2192 + \u2192 Time of Day, every day, late (11:45 PM), Run Immediately.'),
+          h('li', {}, 'In the Health app (your picture → Apps → Shortcuts) let Shortcuts read Steps, or every day sums to 0.'),
           h('li', {}, 'Add “Find Health Samples”: type Steps, Start Date is today, sorted by start date.'),
           h('li', {}, 'Add “Calculate Statistics” on that: Sum.'),
-          h('li', {}, 'Add “Get Contents of URL”: the URL above, Method POST, Headers: x-planner-token = the token above, Request Body JSON: date = Current Date formatted yyyy-MM-dd, steps = the sum.'),
-          h('li', {}, 'Run it once by hand; the day shows here within the hour, and the habit ticks itself.'))),
+          h('li', {}, 'Add “Get Contents of URL”: the URL above, Method POST, Headers: x-planner-token = the token above, Request Body JSON: date = Current Date formatted yyyy-MM-dd, steps = the Sum from the step before, as a Number field (a list or text is refused).'),
+          h('li', {}, 'Run it once by hand: an error there names what went wrong; tap Read now here and the day shows, and the habit ticks itself.'))),
       h('div', {}, h('button', {
         class: 'btn', onclick: async () => {
-          try { const t = await HL.refreshHealth({ now: Date.now() }); toast(`${t.days} ${t.days === 1 ? 'day' : 'days'} read${t.ticked ? ` · ${t.ticked} ticked` : ''}.`); paintSteps(); }
+          try {
+            const t = await HL.refreshHealth({ now: Date.now() });
+            const l = HL.latestSteps();
+            toast(`${t.days} ${t.days === 1 ? 'day' : 'days'} read${l ? ` · ${fmtDate(l.day)} ${l.steps.toLocaleString()} steps` : ''}${t.ticked ? ` · ${t.ticked} ticked` : ''}.`);
+            paintSteps();
+          }
           catch (e) { toast(HL.describeHealthError(e)); }
         }
       }, 'Read now')));
