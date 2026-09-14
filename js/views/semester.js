@@ -1,3 +1,4 @@
+// @ts-check
 // views/semester.js — the whole term, as a chart and as a list.
 //
 // The chart is the default because a semester has a shape: three bands —
@@ -15,11 +16,11 @@
 
 import {
   h, clear, fmtDate, ymd, monthKey, monthLabel, fmtDuration, diffDays, addDays,
-  parseYmd, startOfWeek, today, clamp, MONTHS
+  parseYmd, startOfWeek, today, clamp, MONTHS, cssPx
 } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, ITEM_TYPES, progress, chartAreas,
-  areasInCategory, areaColor, AREA_CATEGORIES, sprintsForArea, sprintProgress, repeatLabel, itemColor
+  areasInCategory, AREA_CATEGORIES, sprintsForArea, sprintProgress, repeatLabel, itemColor
 } from '../store.js';
 import { isRepeat, repeatDates } from '../repeat.js';
 import { areaTag, dueChip, priorityTag, meta } from '../ui.js';
@@ -72,8 +73,11 @@ function modeBtn(key, label, navigate) {
    pixels at the last moment, by multiplying by --day-w. Everything exported
    below is pure, which is the only reason any of it can be tested. */
 
-const LANE_H = 20;          // one packed row of bars
-const BAND_H = 24;          // one packed row of focuses and sprints, which are read first
+// one packed row of bars, and one of focuses and sprints (read first). From
+// the stylesheet, like --hour-h: a phone opens the lanes so a bar's hit box
+// (its ::before) can be 24px tall without lying over the bar below.
+const laneH = () => cssPx('--lane-h', 20);
+const bandH = () => cssPx('--band-h', 24);
 const LABEL_CHAR = 6.4;     // rough px per character, for reserving label room
 const MAX_LABEL = 40;
 
@@ -389,6 +393,7 @@ function areaLane(area, packed, { go, navigate }, range, dayW) {
   // round means finding the frame at the bottom of a tall lane
   const bands = bandRows(sprintsForArea(area.id), range, dayW);
   const bandLanes = bands.rows.length ? bands.lanes : 0;
+  const LANE_H = laneH(), BAND_H = bandH();
   const offset = bandLanes * BAND_H;
 
   const track = h('div', {

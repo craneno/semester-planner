@@ -29,14 +29,14 @@ const send = (id) => pushItem(seriesById(id)?.id || id).catch(() => {});
  */
 export function tickItem(id, on, { after } = {}) {
   // tagged for the panel's checkbox: the view under it lists this row too
-  commit(() => toggleItem(id, on), { source: 'editor' });
+  commit(() => toggleItem(id, on), { source: 'editor', touches: ['items', 'habitLog', 'habitLogAt'] });
   send(id);
   after?.();
   const item = itemById(id);
   toast(on ? `Done · ${item?.title || ''}` : 'Not done', {
     ms: 2600,
     action: 'Undo',
-    onAction: () => { commit(() => toggleItem(id, !on), { source: 'editor' }); send(id); after?.(); }
+    onAction: () => { commit(() => toggleItem(id, !on), { source: 'editor', touches: ['items', 'habitLog', 'habitLogAt'] }); send(id); after?.(); }
   });
 }
 
@@ -48,7 +48,7 @@ export function moveItem(id, plan, { after } = {}) {
   const item = itemById(id);
   if (!item) return;
   const before = whenOf(item);
-  commit(() => upsertItem({ id, plan: { ...item.plan, ...plan } }));
+  commit(() => upsertItem({ id, plan: { ...item.plan, ...plan } }), { touches: ['items'] });
   send(id);
   after?.();
   const next = itemById(id);
@@ -57,7 +57,7 @@ export function moveItem(id, plan, { after } = {}) {
     : fmtDate(next?.plan?.date || plan.date);
   toast(`Moved to ${to}`, {
     action: 'Undo',
-    onAction: () => { commit(() => upsertItem({ id, ...before })); send(id); after?.(); }
+    onAction: () => { commit(() => upsertItem({ id, ...before }), { touches: ['items'] }); send(id); after?.(); }
   });
 }
 
@@ -88,12 +88,12 @@ export function pushForward(id, { after } = {}) {
   if (item.plan?.date) patch = { plan: { ...item.plan, date: day } };
   else if (item.due) patch = { due: day };
   else patch = { plan: { date: day, start: null, mins: 0 }, due: null, dueTime: null };
-  commit(() => upsertItem({ id, ...patch }));
+  commit(() => upsertItem({ id, ...patch }), { touches: ['items'] });
   send(id);
   after?.();
   toast(`Pushed to ${day === today() ? 'today' : fmtDate(day, { weekday: true })}`, {
     action: 'Undo',
-    onAction: () => { commit(() => upsertItem({ id, ...before })); send(id); after?.(); }
+    onAction: () => { commit(() => upsertItem({ id, ...before }), { touches: ['items'] }); send(id); after?.(); }
   });
 }
 

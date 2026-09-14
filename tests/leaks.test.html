@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leak tests</title>
+<link rel="stylesheet" href="./tests.css">
+</head>
+<body>
+<script type="module">
+/* A page is redrawn on every sync, every tick of the clock, every edit made
+   elsewhere. A view that hangs a listener on window or document, or starts
+   an interval, and does not take it down when it draws again, leaks one per
+   redraw — a slower phone by the hour. Each view is drawn once, then ten
+   times more: the ten must add nothing that the one did not. */
+import { suite, sharedStoreWith, renderInto } from './harness.js';
+
+const t = new Date(); t.setHours(12);
+const ymd = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const day = (n) => { const d = new Date(t); d.setDate(d.getDate() + n); return ymd(d); };
+const dow = t.getDay();
+
+const s = await sharedStoreWith({
+  version: 20,
+  semester: { name: 'Leak term', start: day(-30), end: day(60) },
+  areas: [
+    { id: 'a1', name: 'Thermo', category: 'course', order: 0, updatedAt: '2026-01-01T00:00:00Z',
+      schedule: [{ days: [dow, (dow + 2) % 7], start: '09:00', end: '10:15', location: 'Room 1', tz: Intl.DateTimeFormat().resolvedOptions().timeZone }] },
+    { id: 'a2', name: 'Side', category: 'project', order: 1, schedule: [], updatedAt: '2026-01-01T00:00:00Z' }
+  ],
+  items: [
+    { id: 'i1', title: 'Block', areaId: 'a1', plan: { date: day(0), start: '13:00', mins: 90 }, updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'i2', title: 'Deadline', areaId: 'a1', due: day(3), updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'i3', title: 'Daily', areaId: 'a2', plan: { date: day(-2), start: '08:00', mins: 15 }, repeat: { freq: 'daily', every: 1 }, updatedAt: '2026-01-01T00:00:00Z' },
+    { id: 'i4', title: 'Loose', areaId: 'a2', updatedAt: '2026-01-01T00:00:00Z' }
+  ],
+  cards: [{ id: 'c1', text: 'a card', areaId: null, updatedAt: '2026-01-01T00:00:00Z' }],
+  links: [], wishlist: [], sprints: [],
+  habits: [{ id: 'h1', name: 'Lift', order: 0, updatedAt: '2026-01-01T00:00:00Z' }], habitLog: {},
+  notes: { [day(0)]: { focus: 'Ship it', text: '', updatedAt: '2026-01-01T00:00:00Z' } }
+});
+
+/* Count what a render hangs on the page: listeners on window and document,
+   intervals started. Restored afterwards, so the harness is untouched. */
+function watch() {
+  const n = { listeners: 0, intervals: 0 };
+  const ids = [];
+  const undo = [];
+  for (const target of [window, document]) {
+    const proto = Object.getPrototypeOf(target);
+    const add = target.addEventListener, rem = target.removeEventListener;
+    target.addEventListener = function (...a) { n.listeners++; return add.apply(this, a); };
+    target.removeEventListener = function (...a) { n.listeners--; return rem.apply(this, a); };
+    undo.push(() => { delete target.addEventListener; delete target.removeEventListener; void proto; });
+  }
+  const setI = window.setInterval, clearI = window.clearInterval;
+  window.setInterval = function (...a) { const id = setI.apply(this, a); n.intervals++; ids.push(id); return id; };
+  window.clearInterval = function (id) { if (ids.includes(id)) n.intervals--; return clearI.call(this, id); };
+  undo.push(() => { window.setInterval = setI; window.clearInterval = clearI; });
+  return { n, stop: () => { for (const u of undo) u(); for (const id of ids) clearI(id); } };
+}
+
+const VIEWS = {
+  overview: async () => (await import('../js/views/overview.js')).renderOverview,
+  week: async () => (await import('../js/views/week.js')).renderWeek,
+  semester: async () => (await import('../js/views/semester.js')).renderSemester,
+  habits: async () => (await import('../js/views/habits.js')).renderHabits,
+  wishlist: async () => (await import('../js/views/wishlist.js')).renderWishlist,
+  settings: async () => (await import('../js/views/settings.js')).renderSettings,
+  course: async () => { const A = await import('../js/views/areas.js'); return (root, ctx) => A.renderCategory(root, ctx, 'course'); },
+  area: async () => { const A = await import('../js/views/areas.js'); return (root, ctx) => A.renderArea(root, ctx, 'a1'); }
+};
+
+suite('Leaks — ten redraws add nothing', async ({ check }) => {
+  for (const [name, load] of Object.entries(VIEWS)) {
+    const render = await load();
+    const w = watch();
+    let v;
+    try {
+      v = renderInto(render);
+      const once = { ...w.n };
+      for (let i = 0; i < 10; i++) v.ctx.navigate();
+      check(`${name}: no listener on window or document per redraw`, w.n.listeners === once.listeners,
+        `${once.listeners} after one draw, ${w.n.listeners} after eleven`);
+      check(`${name}: no interval per redraw`, w.n.intervals === once.intervals && once.intervals <= 1,
+        `${once.intervals} after one draw, ${w.n.intervals} after eleven`);
+    } finally {
+      v?.done();
+      w.stop();
+    }
+  }
+  void s;
+});
+</script>
+</body>
+</html>

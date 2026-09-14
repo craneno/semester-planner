@@ -1,3 +1,4 @@
+// @ts-check
 // views/settings.js — the page, one card per file under views/settings/.
 // Each section takes { navigate } and gives back its card, or a few; bits.js
 // holds `section`, `field` and `toggle`, which every one of them is built from.

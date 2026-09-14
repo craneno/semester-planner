@@ -1,3 +1,4 @@
+// @ts-check
 // views/overview.js — the whole day on one page. Awareness, not alarm.
 //
 // Left is today as it will actually happen: classes, calendar events, the work
@@ -9,9 +10,9 @@ import {
   toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce, addDays
 } from '../util.js';
 import {
-  state, commit, upsertItem, toggleItem, upcoming, overdue,
-  categoryLoad, note, touchNote, carryForward, pendingTomorrow, areaColor,
-  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor, dayTimeline, minsNow
+  state, commit, upsertItem, upcoming, overdue,
+  categoryLoad, note, touchNote, carryForward, pendingTomorrow,
+  areaName, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, itemById, itemColor, minsNow
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -128,6 +129,9 @@ function todayColumn(day, { navigate, go }) {
   /* Placed by time alone, blocks that share an hour would sit on top of one
      another; the widths are settled once the whole day is gathered. */
   const laid = [];
+  /**
+   * @param {{ start: number, mins: number, cls?: string, color?: string|null, title: string, sub?: string, onclick?: () => void, done?: boolean }} b
+   */
   const block = ({ start, mins, cls, color, title, sub, onclick, done }) => {
     laid.push({ start, mins });
     // to midnight at most: the clock ends there
@@ -304,7 +308,7 @@ function decisionColumn(day, { navigate, go, soon }) {
   focus.append(h('input', {
     class: 'focus-line', value: n.focus, placeholder: 'The one thing that matters today',
     'aria-label': "Today's focus",
-    oninput: debounce((e) => commit(() => { n.focus = e.target.value; touchNote(day); }), 400)
+    oninput: debounce((e) => commit(() => { n.focus = e.target.value; touchNote(day); }, { touches: ['notes'] }), 400)
   }));
 
   // only while it is still last night's line, so editing it stops the credit
@@ -371,7 +375,7 @@ function decisionColumn(day, { navigate, go, soon }) {
       h('textarea', {
         placeholder: 'What moved, what stalled.',
         style: { minHeight: '78px' },
-        oninput: debounce((e) => commit(() => { n.text = e.target.value; touchNote(day); }), 500)
+        oninput: debounce((e) => commit(() => { n.text = e.target.value; touchNote(day); }, { touches: ['notes'] }), 500)
       }, n.text || ''),
       h('div', { class: 'eyebrow', style: { margin: '14px 0 4px' } }, 'Tomorrow needs'),
       h('input', {
@@ -383,7 +387,7 @@ function decisionColumn(day, { navigate, go, soon }) {
           touchNote(day);
           // edited after it was spent: mean it again, and it carries again
           if (n.tomorrowUsed) delete n.tomorrowUsed;
-        }), 400)
+        }, { touches: ['notes'] }), 400)
       }))));
 
   return col;

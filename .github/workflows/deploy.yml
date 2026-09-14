@@ -1,10 +1,12 @@
-# Publishes the planner to GitHub Pages on every push to main.
-# There is no build step — the repo is the site.
+# Checks every pull request and every push to main; publishes main to
+# GitHub Pages once the checks pass. There is no build step — the repo is
+# the site.
 name: Deploy
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -13,24 +15,26 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  # The gate. Runs on a pull request before anyone can merge it, and again
+  # on main. Every bug shipped in the first week parsed fine; the suite in
+  # a real browser is what would have caught them, and the phone's engine
+  # is what would have caught the rest.
+  check:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       # A file the worker caches changed, so its VERSION has to have — or a
-      # browser keeps the old files. scripts/check_shell.py says which.
+      # browser keeps the old files. scripts/check_shell.py says which. On a
+      # pull request the base is the branch it goes into, not the last commit.
       - name: A shell change bumps the version
-        run: python3 scripts/check_shell.py
+        run: python3 scripts/check_shell.py "${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
 
       - name: Check every module parses
         run: |
@@ -41,42 +45,67 @@ jobs:
           node --check sw.js
           node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest'))"
 
-      # The suite, in a real browser. Every bug shipped this week parsed fine;
-      # this is the gate that would have caught them. tests/run.mjs opens
-      # tests/index.html headless and fails on any failing check.
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # Unused names, undefined names, the easy slips. eslint.config.js.
+      - name: Lint
+        run: npx -y eslint@9.13.0 .
 
       # The modules that say `// @ts-check`, read against js/types.js. No
       # TypeScript in the repo — JSDoc, and the compiler run over it.
       - name: Typecheck the modules that ask for it
         run: npx -y -p typescript@5.6.3 tsc -p jsconfig.json
 
-      # Chromium is the slow part of every deploy; keep it between runs
+      # Chromium and WebKit are the slow part of every run; keep them between runs
       - uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-1.47.2-chromium
-      - name: Run the tests in Chromium
+          key: playwright-1.47.2-chromium-webkit
+      - name: Browsers
         run: |
           npm i --no-save --no-audit --no-fund playwright@1.47.2
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps chromium webkit
           python3 -m http.server 8000 >/dev/null 2>&1 &
           sleep 1
-          node tests/run.mjs http://localhost:8000/tests/
 
+      - name: The suite, in Chromium
+        run: node tests/run.mjs --browser chromium
+      - name: The suite, in WebKit
+        run: node tests/run.mjs --browser webkit
+
+      # The app itself, at phone size and laptop size, every route: no
+      # uncaught error, no sideways scroll, no box a phone would zoom for.
+      - name: Smoke, in Chromium
+        run: node tests/smoke.mjs --browser chromium
+      - name: Smoke, in WebKit
+        run: node tests/smoke.mjs --browser webkit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-screenshots
+          path: tests/.smoke/
+          if-no-files-found: ignore
+
+  deploy:
+    needs: check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-
       - name: Package the site
         run: |
           mkdir -p _site
           rsync -a --exclude '.git' --exclude '.github' --exclude 'node_modules' \
-                --exclude 'supabase' --exclude 'tests' --exclude '_site' ./ _site/
-
+                --exclude 'supabase' --exclude 'tests' --exclude '_site' \
+                --exclude 'scripts' --exclude 'docs' ./ _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-
       - id: deploy
         uses: actions/deploy-pages@v4

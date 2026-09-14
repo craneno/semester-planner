@@ -7,7 +7,7 @@
 // to the share sheet where there is one, saved as a PNG where there is not.
 
 import { state, classesOn, eventsOn, itemsPlannedOn, itemsDueOn, itemColor } from './store.js';
-import { parseYmd, toMin, fromMin, fmtTime, DOW, MONTHS, saveFile, hexAlpha } from './util.js';
+import { parseYmd, toMin, fromMin, fmtTime, DOW, saveFile, hexAlpha } from './util.js';
 import { packBlocks } from './timegrid.js';
 import { toast } from './ui.js';
 
