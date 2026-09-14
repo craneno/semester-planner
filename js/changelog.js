@@ -9,6 +9,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v77', date: '2026-09-14',
+    title: 'Faster, surer (v77)',
+    notes: [
+      'The checks run on every pull request, in Chromium and WebKit, and the app itself is opened on every route at phone and laptop size.',
+      'The page under the editor is drawn once the panel has been quiet, not on every word.',
+      'Undo copies only what a commit says it touched, so a note keystroke no longer clones every task.',
+      'On a phone every control is at least 24px to the finger, every box 16px, and the chart\'s rows open up for it.',
+      'The keyboard and the thumb menu are modules of their own; every view is typechecked.'
+    ]
+  },
+  {
     version: 'v76', date: '2026-09-13',
     title: 'The next class',
     notes: [

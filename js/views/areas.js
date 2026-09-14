@@ -1,3 +1,4 @@
+// @ts-check
 // views/areas.js — a category page (its areas, each with its next deadlines)
 // and the drill-down into one area's full list. Both shapes live here because
 // they render the same rows from the same data; only the scope differs.
@@ -425,11 +426,22 @@ function fullRow(t, rerender) {
 /* ---------------- create / edit ---------------- */
 
 /** The edit dialog for an area from anywhere — a class block on the week, say. */
+/**
+ * @param {string} areaId
+ * @param {() => void} navigate
+ * @param {{ focus?: string }} [opts]
+ */
 export function openAreaEditor(areaId, navigate, { focus } = {}) {
   const a = areaById(areaId);
   if (a) editArea(a, a.category, navigate, { focus });
 }
 
+/**
+ * @param {any} area
+ * @param {string} categoryId
+ * @param {() => void} navigate
+ * @param {{ focus?: string }} [opts]
+ */
 function editArea(area, categoryId, navigate, { focus } = {}) {
   const draft = area
     ? JSON.parse(JSON.stringify(area))

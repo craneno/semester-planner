@@ -72,7 +72,7 @@ function render(item) {
       const next = upsertItem({ id: targetId, ...patch });
       // keep the copy this render is holding in step with what was stored
       if (next && targetId === item.id) Object.assign(item, next);
-    }, { source: 'editor' });
+    }, { source: 'editor', touches: ['items'] });
     if (resync) syncOut(live.id);
   };
 

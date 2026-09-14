@@ -130,6 +130,43 @@ suite('Undo — the world moving clears it', async ({ check }) => {
   s.redo();
   check('...nor a redo', s.canRedo() === false && s.itemById('c2')?.title === 'mine too');
 });
+
+/* A commit may say which keys it touches, and then only those are copied:
+   a keystroke in a note need not clone every task. What has to hold: the
+   undo still puts the touched key back; a key left out is left alone; a
+   later commit in the same step adds its keys to the copy the step began
+   with; and a commit that says nothing still copies everything. */
+suite('Undo — a commit that says what it touches', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => s.upsertItem({ id: 't1', title: 'before' }));
+  const d = '2026-10-01';
+
+  s.commit(() => { s.note(d).text = 'evening'; s.touchNote(d); }, { touches: ['notes'] });
+  check('the touched key comes back', s.undo() !== null && !s.state.notes[d]?.text, JSON.stringify(s.state.notes[d]));
+  check('...and the untouched key was never copied, so redo carries only notes',
+    s.redo() !== null && s.state.notes[d].text === 'evening' && s.itemById('t1').title === 'before');
+
+  // one step, two commits: the second touches a key the first did not
+  s.commit(() => { s.note(d).text = 'later'; }, { touches: ['notes'] });   // its own step
+  s.undoSettings.coalesceMs = 800;                                          // ...and this joins it
+  s.commit(() => { s.itemById('t1').title = 'after'; }, { touches: ['items'] });
+  s.undo();
+  check('a key touched later in the step is put back too',
+    s.state.notes[d].text === 'evening' && s.itemById('t1').title === 'before',
+    `${s.state.notes[d].text} / ${s.itemById('t1').title}`);
+  s.redo();
+  check('...and comes forward again', s.state.notes[d].text === 'later' && s.itemById('t1').title === 'after');
+
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => { s.itemById('t1').title = 'plain'; });
+  s.undo();
+  check('a commit that says nothing still copies everything', s.itemById('t1').title === 'after');
+
+  // a key named that undo does not track is ignored, not copied
+  s.commit(() => { s.state.settings.hour12 = !s.state.settings.hour12; }, { touches: ['settings'] });
+  check('a key outside UNDO_KEYS makes a step with nothing in it, and undo says so', s.undo() !== null);
+});
 </script>
 </body>
 </html>

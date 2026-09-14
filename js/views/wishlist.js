@@ -1,3 +1,4 @@
+// @ts-check
 // views/wishlist.js — things wanted, and the parcels they turn into.
 //
 // One list rather than a wishlist and a separate deliveries page: wanting
@@ -47,7 +48,8 @@ export function renderWishlist(root, { navigate }) {
     }
   });
   const submit = (text) => {
-    let made;
+    /** @type {import('../types.js').Wish|null} */
+    let made = null;
     commit(() => { made = addWish(text); });
     if (!made) { toast('Give it a name first.'); return; }
     input.value = '';
@@ -205,7 +207,7 @@ function trackLine(w) {
   const hour12 = state.settings.hour12;
   const bits = [
     h('a', {
-      class: 'eyebrow', href: trackingUrl(t.carrier, t.number), target: '_blank', rel: 'noopener noreferrer',
+      class: 'eyebrow wish-track', href: trackingUrl(t.carrier, t.number), target: '_blank', rel: 'noopener noreferrer',
       title: 'Open on the carrier’s site'
     }, `${CARRIERS[t.carrier] || t.carrier} · ${t.number}`)
   ];

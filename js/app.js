@@ -1,20 +1,21 @@
 // app.js — shell, router, quick add.
 
-import { h, $, clear, fmtDate, fmtTime, today, debounce, tz, zoneLabel, fmtDuration } from './util.js';
+import { h, $, clear, fmtDate, fmtTime, today, debounce, zoneLabel, fmtDuration } from './util.js';
 import {
   state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
   reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules,
-  undo, redo, areaForNew
+  areaForNew
 } from './store.js';
-import { toast, closePeek, reorderable, modal, closeModal, modalOpen, navSlide, navSettle } from './ui.js';
+import { toast, closePeek, peekOpen, reorderable, modal, closeModal } from './ui.js';
 import { applyAppearance } from './appearance.js';
 import { openItem } from './editor.js';
+import { wireKeys } from './keys.js';
+import { wireNavSwipe } from './swipe.js';
 import { renderOverview } from './views/overview.js';
 import { renderSemester } from './views/semester.js';
 import { renderWeek, showWeekOf, weekAnchor } from './views/week.js';
 import { renderMiniMonth } from './minimonth.js';
-import { openSearch } from './search.js';
 import { renderCategory, renderArea } from './views/areas.js';
 import { renderHabits } from './views/habits.js';
 import { renderWishlist } from './views/wishlist.js';
@@ -120,7 +121,19 @@ function pageTitle() {
   return VIEWS[current.id].title();
 }
 
-window.addEventListener('hashchange', () => { closePeek(); navigate(); });
+/* The editor commits a word at a time (its boxes debounce 400ms), tagged
+   `editor`, and each one rebuilt the whole page under the panel: a title
+   typed slowly on a phone was a redraw a word. Held while the panel is open,
+   drawn once it has been quiet for REDRAW_HOLD_MS, or the moment it closes.
+   The page under the panel is a second behind the panel; nothing else waits. */
+export const REDRAW_HOLD_MS = 1000;
+// the sources a commit is redrawn for; a view's own edits repaint themselves
+const REDRAWS = new Set(['gcal', 'cloud', 'editor', 'restore', 'undo', 'redo', 'canvas', 'tracking', 'health']);
+let heldRedraw = 0;
+const redrawNow = () => { clearTimeout(heldRedraw); heldRedraw = 0; navigate(); };
+window.addEventListener('planner:peek-closed', () => { if (heldRedraw) redrawNow(); });
+
+window.addEventListener('hashchange', () => { clearTimeout(heldRedraw); heldRedraw = 0; closePeek(); navigate(); });
 
 /* ---------------- chrome ---------------- */
 
@@ -294,77 +307,6 @@ function sweep() {
   });
 }
 
-/* ---------------- the menu, by thumb ----------------
-   Drag in from the left edge to bring the sidebar out, and back to the left to
-   put it away. Kept to the edge on purpose: the week grid is a horizontal
-   scroller and the tray under it is another, so a swipe that counted anywhere
-   on the page would take the gesture away from both. A drag that is mostly
-   vertical is a scroll and is let go of at once. */
-
-const EDGE = 26;      // how far in from the left a swipe may start
-const SWIPE = 52;     // how far it must travel to count
-
-/* The menu follows the finger. Until the swipe has shown itself to be one
-   — sideways, and past a few px — nothing moves, so a scroll down the page
-   is still a scroll; after that the sidebar is dragged by the px, with its
-   transition off, and the scrim fades in step. On release it settles: past
-   halfway, or a flick past SWIPE, and the transition takes it the rest of
-   the way. */
-function wireNavSwipe() {
-  const phone = () => matchMedia('(max-width: 860px)').matches;
-  const side = $('#sidebar'), scrim = $('#nav-scrim');
-  let x0 = 0, y0 = 0, job = null, live = false, w = 0, dx = 0, stale = null;
-
-  const settle = () => {
-    clearTimeout(stale);
-    if (job && live) {
-      side.classList.remove('dragging');
-      document.body.classList.remove('nav-dragging');
-      side.style.transform = '';
-      scrim.style.opacity = '';
-      setSidebar(navSettle(job, dx, w, SWIPE));
-    }
-    job = null; live = false;
-    if (redrawHeld) { redrawHeld = false; navigate(); }
-  };
-  // the end of a touch can go missing (see navigate), so a menu left
-  // mid-way settles on the next touch, or on its own after a moment
-  const arm = () => { clearTimeout(stale); stale = setTimeout(settle, 2500); };
-
-  document.addEventListener('touchstart', (e) => {
-    if (live) settle();
-    job = null; live = false; dx = 0;
-    if (!phone() || e.touches.length !== 1) return;
-    const t = e.touches[0];
-    if (sidebarOpen()) job = 'close';
-    else if (t.clientX <= EDGE) job = 'open';
-    else return;
-    x0 = t.clientX; y0 = t.clientY;
-    w = side.getBoundingClientRect().width || Math.min(innerWidth * 0.82, 300);
-  }, { passive: true });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!job || e.touches.length !== 1) return;
-    dx = e.touches[0].clientX - x0;
-    const dy = e.touches[0].clientY - y0;
-    if (!live) {
-      // scrolling down the menu is not a swipe out of it
-      if (Math.abs(dy) > Math.abs(dx)) { job = null; return; }
-      if (Math.abs(dx) < 6) return;
-      live = true;
-      side.classList.add('dragging');
-      document.body.classList.add('nav-dragging');
-    }
-    const { x, t } = navSlide(job, dx, w);
-    side.style.transform = `translateX(${x}px)`;
-    scrim.style.opacity = String(t);
-    arm();
-  }, { passive: true });
-
-  document.addEventListener('touchend', settle, { passive: true });
-  document.addEventListener('touchcancel', settle, { passive: true });
-}
-
 /* ---------------- what's on now ----------------
    The one thing the topbar says about today, on every screen: what you are in
    the middle of, or what is coming. Small, and never a count of anything. */
@@ -484,68 +426,7 @@ function wireQuickAdd() {
   });
 }
 
-/* ---------------- keyboard ---------------- */
-
-/* One key each. None fire while typing, and none need a modifier — the
-   modifier keys are the browser's. `?` lists them. */
-const KEYS = [
-  ['n', 'New — the quick add box'],
-  ['/', 'Find a task, note, card or link'],
-  ['t', 'Today — this week on Week, Overview elsewhere'],
-  ['← →', 'Last week, next week (on Week)'],
-  ['1 2 3', 'Overview, Semester, Week'],
-  ['Ctrl+Z', 'Undo the last change — Ctrl+Shift+Z or Ctrl+Y redoes'],
-  ['Esc', 'Close the panel'],
-  ['?', 'This list']
-];
-
 const showDay = (date) => { showWeekOf(date); go('week'); };
-
-function wireKeys() {
-  window.addEventListener('keydown', (e) => {
-    const tag = (e.target.tagName || '').toLowerCase();
-    const typing = ['input', 'textarea', 'select'].includes(tag) || e.target.isContentEditable;
-    // Ctrl+Z outside a box is the app's undo; inside one it is the browser's
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !typing && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
-      e.preventDefault();
-      const back = e.key.toLowerCase() === 'z' && !e.shiftKey;
-      const label = back ? undo() : redo();
-      if (!label) toast(back ? 'Nothing to undo.' : 'Nothing to redo.');
-      else toast(`${back ? 'Undone' : 'Redone'}: ${label}.`, { action: back ? 'Redo' : 'Undo', onAction: () => (back ? redo() : undo()) });
-      return;
-    }
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === 'Escape') { closePeek(); closeModal(); return; }
-    // a dialog has the keyboard: `/` on a confirm's button must not swap it for the search
-    if (typing || modalOpen()) return;
-    switch (e.key) {
-      case 'n': e.preventDefault(); $('#quickadd-input').focus(); return;
-      case '/': e.preventDefault(); openSearch({ go, showDay }); return;
-      case 't':
-        if (current.kind === 'view' && current.id === 'week') { showWeekOf(today()); navigate(); }
-        else go('overview');
-        return;
-      case 'ArrowLeft':
-      case 'ArrowRight':
-        if (current.kind === 'view' && current.id === 'week') {
-          e.preventDefault();
-          $(`.weekbar [aria-label="${e.key === 'ArrowLeft' ? 'Previous' : 'Next'} week"]`)?.click();
-        }
-        return;
-      case '?':
-        modal({
-          title: 'Keys',
-          body: h('div', { class: 'keys' },
-            ...KEYS.flatMap(([k, what]) => [h('kbd', {}, k), h('span', {}, what)]))
-        });
-        return;
-      default: {
-        const i = +e.key - 1;
-        if (i >= 0 && i < TOP_VIEWS.length) go(TOP_VIEWS[i]);
-      }
-    }
-  });
-}
 
 /* ---------------- opened somewhere else ----------------
    A schedule imported in one zone and read in another is silently wrong by
@@ -599,11 +480,12 @@ function boot() {
   watchWindow();     // what nothing catches goes to Settings → Problems
   applyAppearance();
   wireQuickAdd();
-  wireKeys();
+  wireKeys({ go, navigate, onWeek: () => isCurrent('view', 'week'), views: TOP_VIEWS, showDay });
 
   $('#menu-btn').addEventListener('click', () => setSidebar(!sidebarOpen()));
   $('#nav-scrim').addEventListener('click', closeSidebar);
-  wireNavSwipe();
+  // a redraw that came while the finger was down (see navigate) is drawn once it lifts
+  wireNavSwipe({ setSidebar, sidebarOpen, onSettle: () => { if (redrawHeld) { redrawHeld = false; navigate(); } } });
 
   // collapsing the sidebar: the toggle lives in the topbar, so it is still
   // there to bring it back once the sidebar itself is gone
@@ -639,10 +521,9 @@ function boot() {
     // synced down, has to reach it — unless it is the box being typed in
     const nameBox = $('#sem-name');
     if (document.activeElement !== nameBox && nameBox.value !== state.semester.name) nameBox.value = state.semester.name;
-    if (meta?.external || meta?.source === 'gcal' || meta?.source === 'cloud'
-      || meta?.source === 'editor' || meta?.source === 'restore'
-      || meta?.source === 'undo' || meta?.source === 'redo'
-      || meta?.source === 'canvas' || meta?.source === 'tracking' || meta?.source === 'health') navigate();
+    if (!(meta?.external || REDRAWS.has(meta?.source))) return;
+    if (meta.source === 'editor' && peekOpen()) { clearTimeout(heldRedraw); heldRedraw = setTimeout(redrawNow, REDRAW_HOLD_MS); return; }
+    redrawNow();
   });
 
   navigate();

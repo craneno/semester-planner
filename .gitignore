@@ -8,3 +8,4 @@ node_modules/
 
 # planner backups you export from Settings
 planner-*.json
+tests/.smoke/

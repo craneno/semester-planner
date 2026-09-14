@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v76**.
+Schema **20**, service worker **planner-v77**.
 
 ## Working with me
 
@@ -17,8 +17,15 @@ This file may run to **500 lines**, kept tight; past that, cut a sentence and sa
 ## Working on it
 
 The repo *is* the site — no build, no install: `python3 -m http.server 8000`.
-Before you push, click through the app and open **`/tests/`**. The Deploy job
-runs the same page headless (`tests/run.mjs`, Playwright): a red suite is no deploy.
+Before you push, click through the app and open **`/tests/`**. The Deploy
+job's `check` runs on every pull request and again on main: `eslint`, `tsc`,
+the suite headless in Chromium **and WebKit** (`tests/run.mjs`, which also
+fails on any uncaught error in a frame), then `tests/smoke.mjs` — the app
+itself, every route at phone and laptop size: no error, no sideways scroll,
+no box under 16px, no tap target under 24px to the finger, a screenshot per
+route in the job's artifact. Red is no deploy. `tests/perf.mjs` prints what a
+term-sized planner costs (a commit, a save, a redraw of each view) — take the
+numbers before a change meant to make it faster, and after.
 **Bump `VERSION` in `sw.js` whenever a file in its `SHELL` changes**, add new
 modules to `SHELL`, **and add the release to `js/changelog.js` in the same
 commit** — `python scripts/release.py "Title" -n "note"` does the three files
@@ -56,7 +63,10 @@ would be shared by every fresh instance in the tests. Items, notes, areas'
 edits, the selectors over items and the sync rows stay in `store.js`. Use the
 selectors that are already there (`itemById`, `itemsDueOn`, `upcoming`,
 `classesOn`, `dayTimeline`, …) instead of filtering by hand again.
-`commit(fn, { source })` — `app.js` redraws only for `external`, `gcal`,
+`commit(fn, { source, touches })` — `touches: ['notes']` names the keys the
+commit changes, and undo copies those alone (a note keystroke need not clone
+every task); a commit that says nothing copies everything, and a later commit
+in the same step adds its keys to the copy. `app.js` redraws only for `external`, `gcal`,
 `cloud`, `editor`, `restore`, `undo`, `redo`, `canvas`; tag one made from a
 floating panel, or the view under it will not repaint (`set()` in the editor
 and `tickItem` are). `modal()` focuses the first control in its *body*, never
@@ -67,7 +77,10 @@ the ✕.
 [js/cloud.js](js/cloud.js) hashes every row from `snapshotRows()` against the
 last good sync. Changed rows push, rows that went away leave a tombstone, and a
 clash goes to whoever wrote last, row by row (`updated_at` decides, `synced_at`
-is the pull cursor). **No book-keeping per change** — never add dirty flags or
+is the pull cursor). `pull()` pages by (`synced_at`, `kind`, `id`) through an
+`or` filter built by hand, checked against supabase-js and not against a live
+PostgREST: a page that does not move on breaks the loop, and that guard is
+what stands in for the check. **No book-keeping per change** — never add dirty flags or
 `markChanged()`.
 
 **Back from the background, ask for the session first** (`resume()`): an iOS
@@ -308,14 +321,19 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
   width, `LAP` running all but the last under its neighbour; begun apart the
   later sits over the earlier, set in by `CASCADE`, so both titles show.
   `applyLanes()` writes it as `--lane-x/w/z`.
+- **The page under the editor waits.** An `editor` commit while the panel is
+  open is drawn `REDRAW_HOLD_MS` after the last one, or the moment the panel
+  closes (`planner:peek-closed`) — a title typed slowly on a phone was a
+  rebuild of Overview a word. The keyboard is `js/keys.js`, the thumb menu
+  `js/swipe.js`; both are wired once from `boot()`.
 - Capture's **Enter must stay the shortest way out** — an unfiled note, never a
   question. There is no Notes page: `unfiledQueue()` on Overview, `noteCard()`
   on the area's page; delete either and captures have nowhere to show.
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1586 checks,
-left out of the deploy; CI opens the same page in Chromium. A file reports to
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1617 checks,
+left out of the deploy; CI opens the same page in Chromium and WebKit. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.
 
@@ -329,7 +347,11 @@ signed in, which leaves a cloud or Google key behind. `store.js` reads
 pokes state *and* calls any other module must use `sharedStoreWith()` —
 once per page, since `import()` caches. A view is drawn with
 `renderInto(render)`: a stage, the hosts a panel writes to, and a `go` that
-remembers where it was sent.
+remembers where it was sent. `leaks.test.html` draws each view once and then
+ten times more, counting listeners on `window`/`document` and intervals: the
+ten must add nothing. Every view carries `// @ts-check`; a destructured
+options bag needs a JSDoc `@param` on the callee, or every caller that leaves
+a key out fails the typecheck.
 
 ## House rules
 

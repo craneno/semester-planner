@@ -211,6 +211,9 @@ export function resizeBottom(startMin, mins, { min = SNAP, dayEnd = DAY } = {}) 
  * picks it up. Until the hold is out the gesture still belongs to the
  * scroller, and any real movement hands it back — you cannot pick up a block
  * you were only scrolling past.
+ * @param {HTMLElement} el
+ * @param {{ date: string, start: string, mins: number }} plan
+ * @param {{ hit: Function, hourH: number, origin?: number, edge?: Function, over?: Function, onDrop?: Function, onEnd?: Function, onClick?: Function, dayEnd?: number }} opts
  */
 export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, over, onDrop, onEnd, onClick, dayEnd = DAY }) {
   const startMin = toMin(plan.start);
@@ -371,6 +374,8 @@ export function edgeScroll(scroller, ev, margin = 44) {
  * The date and the column are taken once, at the press: a range that spans
  * two days is not a thing either grid can draw, and following the pointer
  * sideways into tomorrow would silently move the block you are drawing.
+ * @param {HTMLElement} host
+ * @param {{ only?: string, hit: Function, hourH: number, origin?: number, onPick: Function, onClick?: Function, edge?: Function }} opts
  */
 export function dragCreate(host, { only, hit, hourH, origin = 0, onPick, onClick, edge }) {
   host.addEventListener('pointerdown', (ev) => {
@@ -491,6 +496,9 @@ const TYPE_LABEL = {
  * there with a name box in it, the way a calendar does. Enter makes it,
  * Escape or an empty name takes it away, and leaving the box with a name in
  * it makes it too. The full form is one Edit away, in the toast.
+ * @param {HTMLElement} col
+ * @param {{ date: string, start: string, mins?: number }} at
+ * @param {{ hourH: number, origin?: number, onDone?: Function }} [opts]
  */
 export function inlineCreate(col, { date, start, mins = 60 }, { hourH, origin = 0, onDone } = {}) {
   col.closest('.week-body, .day-body')?.querySelector('.blk.is-new')?.remove();   // one at a time
@@ -532,6 +540,10 @@ export function inlineCreate(col, { date, start, mins = 60 }, { hourH, origin = 
   return el;
 }
 
+/**
+ * @param {{ date: string, start?: string|null, mins?: number, allDay?: boolean }} range
+ * @param {{ onDone?: Function }} [opts]
+ */
 export function newBlockPrompt({ date, start, mins, allDay = !start }, { onDone } = {}) {
   const hour12 = state.settings.hour12;
   // a tap at 23:30 asks for an hour; the day has half of one left

@@ -5,7 +5,7 @@
 
 import { uid, today, addDays, toMin, fromMin, tz, zoneShift, zoneLabel } from './util.js';
 import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js';
-import { SCHEMA_VERSION, AREA_CATEGORIES, CATEGORY_IDS, ITEM_TYPES, AREA_COLORS, areaCategory } from './store/constants.js';
+import { AREA_CATEGORIES, AREA_COLORS, areaCategory } from './store/constants.js';
 import { migrate, normalItem } from './store/migrate.js';
 import { keepBackups } from './store/backups.js';
 import * as A from './store/areas.js';
@@ -151,18 +151,30 @@ export function commit(fn, meta = {}) {
 const UNDO_KEYS = ['semester', 'calendar', 'areas', 'items', 'notes', 'cards', 'links', 'wishlist', 'sprints', 'habits', 'habitLog', 'habitLogAt'];
 const FOREIGN = new Set(['cloud', 'gcal', 'restore', 'carry', 'zone', 'canvas', 'tracking', 'health']);
 export const undoSettings = { max: 10, coalesceMs: 800 };
-let undoStack = [], redoStack = [], lastLocalAt = 0;
+const undoStack = [], redoStack = [];
+let lastLocalAt = 0;
 
-const snapshot = () => structuredClone(Object.fromEntries(UNDO_KEYS.map((k) => [k, state[k]])));
+const snapshot = (keys = UNDO_KEYS) => structuredClone(Object.fromEntries(keys.map((k) => [k, state[k]])));
+/** The keys a commit says it touches (`{ touches: ['notes'] }`), or all of them.
+ *  A note keystroke need not copy every task; a commit that says nothing copies everything. */
+const touched = (meta) => (Array.isArray(meta.touches) ? UNDO_KEYS.filter((k) => meta.touches.includes(k)) : UNDO_KEYS);
 
 function remember(meta) {
   const at = Date.now();
   // an edit after an undo is a new future, coalesced or not: what redo held
   // would put back a world without this edit in it
   redoStack.length = 0;
-  if (undoStack.length && at - lastLocalAt < undoSettings.coalesceMs) { lastLocalAt = at; return; }
+  const keys = touched(meta);
+  if (undoStack.length && at - lastLocalAt < undoSettings.coalesceMs) {
+    lastLocalAt = at;
+    // a later commit in the step may touch a key the first did not: copied
+    // now, before this commit runs, it is still what the step began with
+    const top = undoStack[undoStack.length - 1];
+    for (const k of keys) if (!(k in top.copy)) top.copy[k] = structuredClone(state[k]);
+    return;
+  }
   lastLocalAt = at;
-  undoStack.push({ label: meta.label || '', copy: snapshot() });
+  undoStack.push({ label: meta.label || '', copy: snapshot(keys) });
   if (undoStack.length > undoSettings.max) undoStack.shift();
 }
 
@@ -188,7 +200,7 @@ function stampRow(kind, id, now) {
 function swap(from, to, source) {
   const step = from.pop();
   if (!step) return null;
-  to.push({ label: step.label, copy: snapshot() });
+  to.push({ label: step.label, copy: snapshot(Object.keys(step.copy)) });
   const was = new Map(snapshotRows().map((r) => [r.kind + ':' + r.id, JSON.stringify(r.data)]));
   Object.assign(state, structuredClone(step.copy));
   const now = new Date().toISOString();

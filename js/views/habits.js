@@ -1,3 +1,4 @@
+// @ts-check
 // views/habits.js — a week of habits, ticked a day at a time.
 //
 // Habits belong to no area on purpose: they are about the person, not the
@@ -143,7 +144,7 @@ export function renderHabits(root, { navigate }) {
 
 const commitTick = (date, id) => {
   let on;
-  commit(() => { on = toggleHabit(date, id); });
+  commit(() => { on = toggleHabit(date, id); }, { touches: ['items', 'habitLog', 'habitLogAt'] });
   return on;
 };
 

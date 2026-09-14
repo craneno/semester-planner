@@ -1,10 +1,11 @@
+// @ts-check
 // views/week.js — the calendar. Owned blocks are filled, borrowed ones are outlined.
 
 import {
   h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx
 } from '../util.js';
 import {
-  state, commit, upsertItem, areaColor, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor, scheduleDrift, itemColor
+  state, commit, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor, scheduleDrift, itemColor
 } from '../store.js';
 import { draggable, toast } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -54,6 +55,10 @@ let showExternal = true;
 const COMPACT_H = 42;          // below this a block gets one line, not two
 
 
+/**
+ * @param {HTMLElement} root
+ * @param {{ navigate?: () => void }} [ctx]
+ */
 export function renderWeek(root, { navigate } = {}) {
   clear(root);
   if (follows) anchor = today();
@@ -385,10 +390,10 @@ const TURN_MS = 550, TURN_ZONE = 18;
 function pageTurner({ body, days, title, head, rail, headFor, cellFor, dress, fillCol }) {
   let timer = null, dir = 0, from = null;
   const hot = (d) => {
-    for (const b of document.querySelectorAll('.weekbar [data-turn]')) b.classList.toggle('is-hot', Number(b.dataset.turn) === d);
+    for (const b of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.weekbar [data-turn]'))) b.classList.toggle('is-hot', Number(b.dataset.turn) === d);
   };
   const zone = (ev) => {
-    const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-turn]');
+    const over = /** @type {HTMLElement|null} */ (document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-turn]'));
     if (over) return Number(over.dataset.turn);
     const r = body.closest('.week-scroll')?.getBoundingClientRect();
     if (!r || ev.clientY < r.top || ev.clientY > r.bottom) return 0;

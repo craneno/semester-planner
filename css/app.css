@@ -33,6 +33,7 @@
   --sidebar-w: 216px;
   --peek-w: 400px;
   --hour-h: 52px;
+  --lane-h: 20px; --band-h: 24px;   /* the chart's rows; js/views/semester.js reads them */
   --gutter-w: 54px;
   --shadow-1: 0 1px 2px rgba(20, 22, 26, .05);
   --shadow-2: 0 8px 28px rgba(20, 22, 26, .12), 0 1px 3px rgba(20, 22, 26, .06);
@@ -611,7 +612,7 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
 .nav-scrim { display: none; }   /* the sidebar is always there on a desktop */
 
 @media (max-width: 860px) {
-  :root { --hour-h: 46px; --gutter-w: 42px; }
+  :root { --hour-h: 46px; --gutter-w: 42px; --lane-h: 26px; }
   #app { grid-template-columns: 1fr; }
   /* Always there, parked just off the left edge, so a swipe has something to
      drag: the menu follows the finger, and on release it slides the rest of
@@ -635,15 +636,34 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
   /* iOS zooms the page to any box smaller than 16px when it is focused, and
      the zoom pans the parked sidebar into view beside the keyboard. Every
      box is 16px on a phone, and none of them zoom. */
-  input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select { font-size: 16px; }
-  .topbar { padding: 10px 12px; gap: 8px; }
+  input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select { font-size: 16px !important; }
+  /* !important because a box's own rule (.capture-box, .journal-box, .wish-status)
+     is more specific than `textarea` or `select`, and zoomed. tests/smoke.mjs checks. */
+  /* Every control a finger lands on is at least 24px each way (WCAG 2.5.8),
+     drawn no bigger: a padded ::before takes the tap where the shape stays
+     small. tests/smoke.mjs measures the hit box, not the shape. */
+  .check::before { content: ''; position: absolute; inset: -6px; }
+  .gantt-item::before, .gantt-span::before { content: ''; position: absolute; inset: -5px 0; }
+  .mm-day { height: 24px; }
+  .mm-turn, .drag-handle { min-width: 24px; min-height: 24px; }
+  .drag-handle { display: inline-flex; align-items: center; justify-content: center; }
+  .rail-caret { width: 24px; height: 24px; }
+  button.crumb { padding: 4px 0 6px; }
+  .push-btn { min-width: 24px; min-height: 24px; }
+  .wish-name .title, .wish-track { padding-block: 2px; }
+  .wish-track { display: inline-block; min-height: 24px; box-sizing: border-box; }
+  .area-h .area-name { min-height: 24px; }
+  .btn.sm { min-width: 28px; min-height: 24px; }
+  /* under the notch in landscape (viewport-fit=cover): the chrome keeps clear of it */
+  .topbar { padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); gap: 8px; }
   .topbar h1 { font-size: calc(17px * var(--scale)); }
   /* the bar is already title plus quick add on a phone; the day itself is one
      tap away on Overview, drawn at full size */
   .nextup { display: none; }
-  .pad { padding: 14px 12px 28px; }
+  .pad { padding: 14px max(12px, env(safe-area-inset-right)) 28px max(12px, env(safe-area-inset-left)); }
   .peek { width: 100vw; border-left: 0; top: auto; height: 92dvh; border-radius: var(--r-lg) var(--r-lg) 0 0; transform: translateY(101%); }
   .peek.open { transform: none; }
+  .peek-b { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
   .weekbar { padding: 8px 12px; flex-wrap: nowrap; overflow: hidden; }
   .weekbar h2 { font-size: calc(15px * var(--scale)); white-space: nowrap; }
   .weekbar .eyebrow { display: none; }   /* the counts live on Overview */
@@ -655,7 +675,7 @@ body.is-sweeping-x, body.is-sweeping-x * { cursor: ew-resize; }
     display: grid; grid-template-columns: repeat(5, 1fr);
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
     background: var(--surface); border-top: 1px solid var(--rule);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
   .tabbar button {
     border: 0; background: transparent; padding: 7px 0 8px; cursor: pointer;

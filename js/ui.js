@@ -30,6 +30,10 @@ export function navSettle(job, dx, w, min) {
  *  in a row wall off the page behind them. */
 const TOASTS_MAX = 3;
 
+/**
+ * @param {string} msg
+ * @param {{ action?: string, onAction?: () => void, ms?: number }} [opts]
+ */
 export function toast(msg, { action, onAction, ms = 3200 } = {}) {
   const host = $('#toasts');
   // the same words twice are one toast, said again
@@ -50,6 +54,9 @@ let openModal = null;
  *  of the tap that opened the dialog, and is not an answer to it. */
 const SCRIM_GRACE_MS = 400;
 
+/**
+ * @param {{ title?: any, body?: any, footer?: any, onClose?: () => void, wide?: boolean }} opts
+ */
 export function modal({ title, body, footer, onClose, wide = false }) {
   closeModal();
   const openedAt = Date.now();
@@ -115,14 +122,19 @@ export function peek(node, { onClose } = {}) {
   document.body.style.overflow = 'hidden';
 }
 
+export const peekOpen = () => !!$('#peek')?.classList.contains('open');
+
 export function closePeek() {
   const panel = $('#peek'), scrim = $('#peek-scrim');
-  if (!panel.classList.contains('open')) return;
+  // a page with no panel — a test page, say — has nothing to close
+  if (!panel || !scrim || !panel.classList.contains('open')) return;
   panel.classList.remove('open');
   scrim.classList.remove('open');
   document.body.style.overflow = '';
   peekCloser?.();
   peekCloser = null;
+  // app.js draws the page under the panel once it is gone, not on every keystroke in it
+  window.dispatchEvent(new CustomEvent('planner:peek-closed'));
   setTimeout(() => { if (!panel.classList.contains('open')) clear(panel); }, 240);
 }
 

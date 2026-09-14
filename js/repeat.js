@@ -56,7 +56,6 @@ function* points(rep, anchor) {
 
   if (rep.freq === 'daily') {
     for (let k = 0; ; k++) yield addDays(anchor, k * every);
-    return;
   }
 
   if (rep.freq === 'weekly') {
