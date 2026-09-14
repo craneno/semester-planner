@@ -87,6 +87,7 @@ jobs:
           name: smoke-screenshots
           path: tests/.smoke/
           if-no-files-found: ignore
+          include-hidden-files: true   # .smoke is a dot-directory
 
   deploy:
     needs: check
