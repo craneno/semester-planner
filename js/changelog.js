@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v78', date: '2026-09-14',
+    title: 'A zero from the phone (v78)',
+    notes: [
+      'The health-steps function refuses a steps value it cannot read as a number and says what it got, instead of writing a day of 0.',
+      'Settings names a day of 0 for what it nearly always is, the Shortcut summing nothing, and says how to fix it; Read now shows the number it read.'
+    ]
+  },
+  {
     version: 'v77', date: '2026-09-14',
     title: 'Faster, surer (v77)',
     notes: [

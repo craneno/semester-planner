@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v77**.
+Schema **20**, service worker **planner-v78**.
 
 ## Working with me
 
@@ -332,7 +332,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1617 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1619 checks,
 left out of the deploy; CI opens the same page in Chromium and WebKit. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

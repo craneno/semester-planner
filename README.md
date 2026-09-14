@@ -224,6 +224,14 @@ posts `{ "date": "yyyy-MM-dd", "steps": <sum> }` to the URL shown, with the
 token in an `x-planner-token` header. `--no-verify-jwt` is needed because
 the caller is a Shortcut, not a signed-in session; the token is the proof.
 
+**A day that reads 0** is the Shortcut summing nothing: Health has to let
+Shortcuts read Steps (Health app → your picture → Apps → Shortcuts), and
+`steps` has to be the Sum from “Calculate Statistics” as a Number field —
+the samples themselves, or text, are refused with a message that says what
+arrived. The app reads the table once an hour per device, and on every
+return to the foreground once that hour is up; **Read now** in Settings
+reads at once.
+
 ## Putting it on GitHub
 
 The repo *is* the site — no build step, so the workflow is just edit, commit, push.

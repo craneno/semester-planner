@@ -23,6 +23,23 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
+/** What Shortcuts sends for a sum: 8420, "8420", "8,420", "8420 count", or a
+ *  measurement dictionary like { value: 8420, unit: "count" }. A list is the
+ *  samples themselves, not their sum, and is refused. Null when no number is in it. */
+function readSteps(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
+  if (Array.isArray(v)) return null;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    for (const k of ['value', 'magnitude', 'quantity', 'steps', 'sum', 'count']) if (k in o) return readSteps(o[k]);
+    return null;
+  }
+  // digits, with thousands separators taken out; "8420 count" is 8420
+  const m = String(v ?? '').replace(/[,\s\u00a0]/g, '').match(/\d+(\.\d+)?/);
+  return m ? Math.round(Number(m[0])) : null;
+}
+const shown = (v: unknown) => { try { return JSON.stringify(v)?.slice(0, 80) ?? String(v); } catch { return String(v); } };
+
 const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8' } });
 
@@ -36,10 +53,16 @@ Deno.serve(async (req) => {
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return reply(400, { error: 'Send JSON: {"date":"YYYY-MM-DD","steps":8420}' }); }
   const date = String(body.date ?? '').slice(0, 10);
-  // Shortcuts may send "8,420" or "8420 count": the digits are the number
-  const steps = Math.round(Number(String(body.steps ?? '').replace(/[^\d.]/g, '')));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return reply(400, { error: 'date must be YYYY-MM-DD' });
-  if (!Number.isFinite(steps) || steps < 0 || steps > 500000) return reply(400, { error: 'steps must be a number of steps' });
+  const steps = readSteps(body.steps);
+  // Refused, not written as 0: a 0 that was really "[object Object]" sat in
+  // the app as a day with no steps, and nothing said why
+  if (steps === null) {
+    return reply(400, {
+      error: `steps was not a number: ${shown(body.steps)}. Send the Sum from “Calculate Statistics” as a Number field.`
+    });
+  }
+  if (steps > 500000) return reply(400, { error: 'steps must be a number of steps' });
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const { data: who, error: whoErr } = await admin

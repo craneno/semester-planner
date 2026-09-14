@@ -73,6 +73,19 @@ suite('Steps — once an hour, and by a fetch handed in', async ({ check }) => {
   s.state.settings.healthAt = null;
   s.state.health = {};
 });
+
+/* The card names a zero for what it is. The post got through — a row is
+   there — so the wiring is fine, and the Shortcut summed nothing. */
+suite('Steps — the card says what a zero means', async ({ check }) => {
+  const { renderSteps, ZERO_HELP } = await import('../js/views/settings/steps.js');
+  s.state.health = { [today()]: 0 };
+  let card = renderSteps();
+  check('a day of 0 gets the hint', card.querySelector('.zero-steps')?.textContent === ZERO_HELP);
+  s.state.health = { [today()]: 8420 };
+  card = renderSteps();
+  check('a real number does not', !card.querySelector('.zero-steps') && /8,420 steps/.test(card.textContent));
+  s.state.health = {};
+});
 </script>
 </body>
 </html>
