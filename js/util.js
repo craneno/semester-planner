@@ -125,6 +125,20 @@ export function toMin(hhmm) {
   const [h_, m] = hhmm.split(':').map(Number);
   return h_ * 60 + (m || 0);
 }
+/** The five-minute step every time box keeps to. */
+export const TIME_STEP = 5;
+/**
+ * 'HH:MM' rounded to the nearest TIME_STEP minutes; '' stays ''. Past the
+ * last step of the day it is that step, never tomorrow: '23:59' is '23:55'.
+ * @param {string} hhmm
+ * @param {number} [step]
+ */
+export function snapTime(hhmm, step = TIME_STEP) {
+  if (!hhmm) return hhmm;
+  const m = Math.round(toMin(hhmm) / step) * step;
+  return fromMin(Math.min(m, 24 * 60 - step));
+}
+
 export function fromMin(min) {
   min = Math.max(0, Math.min(24 * 60 - 1, Math.round(min)));
   return `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;

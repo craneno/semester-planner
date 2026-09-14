@@ -10,7 +10,7 @@
 
 import { h, toMin, fromMin, fmtDate, fmtTime } from './util.js';
 import { state, commit, areaById, setClassDay } from './store.js';
-import { modal, closeModal, confirmDialog, toast } from './ui.js';
+import { modal, closeModal, confirmDialog, toast, timeInput } from './ui.js';
 import { editEvent, removeEvent, canEditEvents } from './gcal.js';
 import { openAreaEditor } from './views/areas.js';
 
@@ -43,8 +43,8 @@ export function openEvent(id, { after } = {}) {
 
   const title = h('input', { type: 'text', value: draft.title, oninput: (ev) => { draft.title = ev.target.value; } });
   const date = h('input', { type: 'date', value: draft.date, onchange: (ev) => { draft.date = ev.target.value; } });
-  const start = h('input', { type: 'time', value: draft.start, onchange: (ev) => { draft.start = ev.target.value; } });
-  const end = h('input', { type: 'time', value: draft.end, onchange: (ev) => { draft.end = ev.target.value; } });
+  const start = timeInput({ value: draft.start, onchange: (ev) => { draft.start = ev.target.value; } });
+  const end = timeInput({ value: draft.end, onchange: (ev) => { draft.end = ev.target.value; } });
   const times = grid(field('Start', start), field('End', end));
   times.hidden = draft.allDay;
   const allDayBox = h('input', {
@@ -137,8 +137,8 @@ export function openClass(c, date, { navigate } = {}) {
   const hour12 = state.settings.hour12;
   const usual = `${fmtTime(slot.start, hour12)}–${fmtTime(slot.end, hour12)}${slot.location ? ' · ' + slot.location : ''}`;
 
-  const start = h('input', { type: 'time', value: draft.start, onchange: (ev) => { draft.start = ev.target.value; } });
-  const end = h('input', { type: 'time', value: draft.end, onchange: (ev) => { draft.end = ev.target.value; } });
+  const start = timeInput({ value: draft.start, onchange: (ev) => { draft.start = ev.target.value; } });
+  const end = timeInput({ value: draft.end, onchange: (ev) => { draft.end = ev.target.value; } });
   const room = h('input', { type: 'text', value: draft.location, placeholder: slot.location || area.location || 'Room', onchange: (ev) => { draft.location = ev.target.value; } });
 
   const put = (value, said) => {

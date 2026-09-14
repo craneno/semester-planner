@@ -5,7 +5,7 @@ import {
   state, commit, itemById, upsertItem, deleteItem, ITEM_TYPES, progress,
   repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved, areaColor, AREA_COLORS, activeHabits
 } from './store.js';
-import { peek, closePeek, confirmDialog, modal, closeModal, toast } from './ui.js';
+import { peek, closePeek, confirmDialog, modal, closeModal, toast, timeInput } from './ui.js';
 import { pushItem, forgetItem } from './gcal.js';
 import { tickItem, pushForward, pushLabel, canPush } from './actions.js';
 
@@ -234,16 +234,16 @@ function render(item) {
       })));
     props.append(prop('From',
       h('div', { class: 'pair', style: { alignItems: 'center' } },
-        h('input', {
-          type: 'time', value: plan.start || '', style: { maxWidth: '110px' },
+        timeInput({
+          value: plan.start || '', style: { maxWidth: '110px' },
           onchange: (e) => {
             set({ plan: { ...plan, start: e.target.value || '09:00' } }, { resync: true });
             rerender();
           }
         }),
         h('span', { class: 'eyebrow' }, 'to'),
-        h('input', {
-          type: 'time', value: endOf(plan), style: { maxWidth: '110px' },
+        timeInput({
+          value: endOf(plan), style: { maxWidth: '110px' },
           onchange: (e) => {
             // stored as a duration; an end before the start is the next morning
             let mins = toMin(e.target.value) - toMin(plan.start || '09:00');
@@ -257,7 +257,7 @@ function render(item) {
     props.append(prop('Due',
       h('div', { class: 'pair' },
         h('input', { type: 'date', value: item.due || '', onchange: (e) => set({ due: e.target.value || null }, { resync: true }) }),
-        h('input', { type: 'time', value: item.dueTime || '', style: { maxWidth: '110px' }, onchange: (e) => set({ dueTime: e.target.value || null }) }))));
+        timeInput({ value: item.dueTime || '', style: { maxWidth: '110px' }, onchange: (e) => set({ dueTime: e.target.value || null }) }))));
 
     props.append(prop('Estimate',
       h('div', { class: 'pair', style: { alignItems: 'center' } },

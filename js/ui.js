@@ -1,6 +1,6 @@
 // ui.js — shared chrome: toasts, modals, the peek panel, pointer drag.
 
-import { h, $, clear, hexAlpha, fmtDate, diffDays, today } from './util.js';
+import { h, $, clear, hexAlpha, fmtDate, diffDays, today, snapTime, TIME_STEP } from './util.js';
 import { areaById } from './store.js';
 
 /* ---------------- the sidebar swipe ----------------
@@ -136,6 +136,27 @@ export function closePeek() {
   // app.js draws the page under the panel once it is gone, not on every keystroke in it
   window.dispatchEvent(new CustomEvent('planner:peek-closed'));
   setTimeout(() => { if (!panel.classList.contains('open')) clear(panel); }, 240);
+}
+
+/* ---------------- a time box ---------------- */
+
+/**
+ * A time input that moves in five-minute steps. `step` gives the phone's
+ * wheel five-minute stops; a minute typed on a keyboard is rounded before
+ * `onchange` sees it, so 9:07 becomes 9:05 and nothing downstream has to.
+ * @param {Object} attrs  as for h(), `type` and `step` set here
+ */
+export function timeInput(attrs = {}) {
+  const { onchange, ...rest } = attrs;
+  return h('input', {
+    ...rest, type: 'time', step: String(TIME_STEP * 60),
+    onchange: (e) => {
+      const box = /** @type {HTMLInputElement} */ (e.target);
+      const snapped = snapTime(box.value);
+      if (snapped !== box.value) box.value = snapped;
+      onchange?.(e);
+    }
+  });
 }
 
 /* ---------------- item chrome ---------------- */

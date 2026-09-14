@@ -344,6 +344,23 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
    arithmetic on starts and lengths, so it is testable without a grid — and it
    is the arithmetic that is easy to get subtly wrong: which blocks belong to
    the same cluster, and how many columns that cluster is worth. */
+/* Every time box keeps to five minutes: the phone's wheel by `step`, a
+   keyboard by rounding before anything reads the value. */
+suite('Time boxes — five minutes at a time', async ({ check }) => {
+  const { snapTime } = await import('../js/util.js');
+  const { timeInput } = await import('../js/ui.js');
+  check('a minute rounds to the nearest five', snapTime('09:07') === '09:05' && snapTime('09:08') === '09:10' && snapTime('09:05') === '09:05');
+  check('up over the hour', snapTime('09:58') === '10:00');
+  check('never into tomorrow', snapTime('23:59') === '23:55');
+  check('nothing stays nothing', snapTime('') === '');
+  let seen = null;
+  const box = timeInput({ value: '13:00', onchange: (e) => { seen = e.target.value; } });
+  check('the box steps by five minutes', box.type === 'time' && box.getAttribute('step') === '300');
+  box.value = '13:07';
+  box.dispatchEvent(new Event('change'));
+  check('a typed minute is rounded before onchange reads it', seen === '13:05' && box.value === '13:05', seen);
+});
+
 suite('Time grid — two things at once', async ({ check }) => {
   const { packBlocks, LAP, CASCADE } = await import('../js/timegrid.js');
   const at = (h, mins) => ({ start: h * 60, mins });

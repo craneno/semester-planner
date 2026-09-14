@@ -13,7 +13,7 @@ import { h, fmtDate, fmtTime, fmtDuration, toMin, fromMin, clamp } from './util.
 import {
   state, commit, upsertItem, ITEM_TYPES, AREA_CATEGORIES, areasInCategory, areaForNew
 } from './store.js';
-import { modal, closeModal, toast } from './ui.js';
+import { modal, closeModal, toast, timeInput } from './ui.js';
 import { openItem } from './editor.js';
 import { pushItem } from './gcal.js';
 
@@ -562,16 +562,16 @@ export function newBlockPrompt({ date, start, mins, allDay = !start }, { onDone 
     oninput: (e) => { draft.title = e.target.value; },
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); create(); } }
   });
-  const startIn = allDay ? null : h('input', {
-    type: 'time', value: start, 'aria-label': 'Starts',
+  const startIn = allDay ? null : timeInput({
+    value: start, 'aria-label': 'Starts',
     onchange: (e) => {
       draft.start = e.target.value || draft.start;
       draft.mins = spanBetween(draft.start, draft.end);
       span.textContent = fmtDuration(draft.mins);
     }
   });
-  const endIn = allDay ? null : h('input', {
-    type: 'time', value: draft.end, 'aria-label': 'Ends',
+  const endIn = allDay ? null : timeInput({
+    value: draft.end, 'aria-label': 'Ends',
     onchange: (e) => {
       draft.end = e.target.value || draft.end;
       draft.mins = spanBetween(draft.start, draft.end);

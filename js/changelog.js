@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v79', date: '2026-09-14',
+    title: 'Five minutes at a time (v79)',
+    notes: [
+      'Every time box — a block\'s start and end, a due time, a class meeting, a Google event — moves in five-minute steps, on the phone\'s wheel and from the keyboard.'
+    ]
+  },
+  {
     version: 'v78', date: '2026-09-14',
     title: 'A zero from the phone (v78)',
     notes: [
