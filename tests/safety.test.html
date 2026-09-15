@@ -18,7 +18,7 @@
      a row must carry the time it was really edited, not the time it was sent,
      and there must be a copy on this device that no sync can reach. */
 import { suite, storeWith } from './harness.js';
-import { today } from '../js/util.js';
+import { today, addDays } from '../js/util.js';
 
 const base = (over = {}) => ({
   version: 20,
@@ -149,18 +149,31 @@ suite('Safety — a copy this device keeps', async ({ check }) => {
   }
 
   {
+    // a copy is kept a week: one taken seven days ago goes today, and the
+    // upgrade copy is read by the stamp inside it
     clear();
-    for (const d of ['2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30']) {
+    for (const n of [1, 2, 3, 6, 7, 8, 30]) {
+      const d = addDays(today(), -n);
       localStorage.setItem(BAK + d, JSON.stringify({ day: d }));
     }
+    localStorage.setItem(BAK + 'before-v9', JSON.stringify({ backedUpAt: new Date(Date.now() - 30 * 86400000).toISOString() }));
+    localStorage.setItem(BAK + 'before-v19', JSON.stringify({ backedUpAt: new Date(Date.now() - 2 * 86400000).toISOString() }));
+    localStorage.setItem(BAK + 'before-v3', JSON.stringify({ old: true }));
     const s = await storeWith(base());
-    const dailies = s.listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label)).map((b) => b.label);
-    check('old copies are dropped rather than piling up for ever', dailies.length === 5,
-      String(dailies.length));
-    // six seeded and today's makes seven; the two oldest go, by name
-    check('...and the newest are the ones kept',
-      dailies.join() === [today(), '2026-08-30', '2026-08-29', '2026-08-28', '2026-08-27'].join(),
-      dailies.join());
+    const labels = s.listBackups().map((b) => b.label);
+    const dailies = labels.filter((l) => /^\d{4}-\d{2}-\d{2}$/.test(l));
+    check('a daily a week old is gone, the younger ones kept',
+      dailies.join() === [today(), ...[1, 2, 3, 6].map((n) => addDays(today(), -n))].join(), dailies.join());
+    check('an upgrade copy a month old is gone, one from this week kept',
+      !labels.includes('before-v9') && labels.includes('before-v19'), labels.join());
+    check('an upgrade copy with no stamp at all is older than any, and goes', !labels.includes('before-v3'));
+
+    // a tab open across the reset: the first draw of the new day takes its copy
+    const tmw = addDays(today(), 1);
+    check('the day has not turned: no copy', s.backupIfNewDay(today()) === false && !localStorage.getItem(BAK + tmw));
+    check('the day turns: a copy from the live state', s.backupIfNewDay(tmw) === true && !!localStorage.getItem(BAK + tmw));
+    check('...once', s.backupIfNewDay(tmw) === false);
+    check('...holding the state as it is now', JSON.parse(localStorage.getItem(BAK + tmw)).semester.name === s.state.semester.name);
     clear();
   }
 });

@@ -73,6 +73,27 @@ suite('Problems — the last twenty, kept on the device', async ({ check }) => {
   P.clearProblems();
   check('cleared', P.problems().length === 0 && localStorage.getItem('semesterPlanner.problems') === '[]');
 });
+
+/* The Google card says which kind of sign-in the device holds: one that
+   renews itself, or an hour at a time and what to do about it. */
+suite('Settings — the Google card says whether the sign-in keeps', async ({ check }) => {
+  const G = await import('../js/gcal.js');
+  const { renderSettings } = await import('../js/views/settings.js');
+  const had = { token: G.gcal.token, status: G.gcal.status, clientId: s.state.settings.gcal.clientId };
+  s.state.settings.gcal.clientId = 'test-client';
+  const line = () => [...renderInto(renderSettings).stage.querySelectorAll('.card')].find((c) => c.querySelector('h2')?.textContent === 'Google Calendar')?.querySelector('.eyebrow')?.textContent || '';
+  try {
+    G.gcal.token = { access_token: 'a', expires_at: Date.now() + 3600000 };
+    G.gcal.status = 'ready';
+    check('an hour at a time is said, with the way out', /an hour at a time/.test(line()) && /cloud sync/.test(line()), line());
+    G.gcal.token = { access_token: 'a', expires_at: Date.now() + 3600000, refresh_token: 'r' };
+    check('a grant that keeps is said', /keeps itself signed in/.test(line()), line());
+    G.gcal.token = null; G.gcal.status = 'signed-out';
+    check('signed out says neither', !/hour|keeps/.test(line()), line());
+  } finally {
+    G.gcal.token = had.token; G.gcal.status = had.status; s.state.settings.gcal.clientId = had.clientId;
+  }
+});
 </script>
 </body>
 </html>

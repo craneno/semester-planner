@@ -4,17 +4,18 @@
 // and an upsert writes over what was there. So before any of that, the state
 // as it was found is kept here, on this device, under keys of its own.
 //
-// Two kinds. One per day, the last few days kept, so a slow leak is caught.
-// And one taken the moment a schema upgrade is about to run, because that is
-// when the shape of every row changes at once and the damage is widest. The
-// Google mirror and the outbox are dropped from both: they are rebuilt from
-// Google on the next sync, and they are most of the bytes.
+// Two kinds. One per day, so a slow leak is caught. And one taken the
+// moment a schema upgrade is about to run, because that is when the shape
+// of every row changes at once and the damage is widest. Either is kept a
+// week, then dropped: a copy older than that is one you would not put
+// back. The Google mirror and the outbox are dropped from both: they are
+// rebuilt from Google on the next sync, and they are most of the bytes.
 
-import { today } from '../util.js';
+import { today, addDays } from '../util.js';
 import { SCHEMA_VERSION } from './constants.js';
 
 const BAK = 'semesterPlanner.bak.';
-const KEEP_DAYS = 5;
+const KEEP_DAYS = 7;
 
 /** Everything worth keeping, minus what a sync can fetch again. */
 const backupOf = (raw) => {
@@ -33,8 +34,19 @@ export function listBackups() {
 
 export const readBackup = (key) => localStorage.getItem(key);
 
-/** Keep today's copy and the pre-upgrade one, and drop the oldest dailies. */
-export function keepBackups(raw) {
+/** The day a copy was taken: a daily by its name, an upgrade copy by the
+ *  stamp inside it (none, and it is older than stamps: gone). */
+function dayOf(b) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(b.label)) return b.label;
+  try {
+    const at = JSON.parse(localStorage.getItem(b.key) || '{}').backedUpAt;
+    return at ? today(new Date(at)) : '';
+  } catch { return ''; }
+}
+
+/** Keep today's copy and the pre-upgrade one; drop any a week old, and the
+ *  oldest dailies past the count. */
+export function keepBackups(raw, day = today()) {
   if (!raw || typeof raw !== 'object') return;
   const put = (name) => {
     if (localStorage.getItem(BAK + name)) return;   // already have this one
@@ -46,14 +58,18 @@ export function keepBackups(raw) {
     }
   };
   const prune = (hard = false) => {
-    const dailies = listBackups().filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label));
-    for (const b of dailies.slice(hard ? KEEP_DAYS - 2 : KEEP_DAYS)) {
+    const oldest = addDays(today(), -KEEP_DAYS);      // a week old today: gone
+    const all = listBackups();
+    const drop = all.filter((b) => dayOf(b) <= oldest);
+    const dailies = all.filter((b) => /^\d{4}-\d{2}-\d{2}$/.test(b.label));
+    drop.push(...dailies.slice(hard ? KEEP_DAYS - 2 : KEEP_DAYS));
+    for (const b of drop) {
       try { localStorage.removeItem(b.key); } catch { /* nothing else to try */ }
     }
   };
   // the one that matters most: the shape about to be rewritten
   const from = raw.version || 0;
   if (from && from < SCHEMA_VERSION) put(`before-v${SCHEMA_VERSION}`);
-  put(today());
+  put(day);
   prune();
 }

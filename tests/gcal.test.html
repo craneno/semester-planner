@@ -559,13 +559,15 @@ suite('Calendar — a sign-in that keeps', async ({ check }) => {
     await G.signIn(false).catch(() => {});
     await G.sync();
     check('the quiet way that failed is not tried again by itself', popups === 1 && G.gcal.status === 'signed-out', `${popups} popups, ${G.gcal.status}`);
+    check('...and Problems says the sign-in lasts an hour, and why', (await import('../js/problems.js')).problems().some((x) => x.tag === 'google sign-in' && /lasts an hour/.test(x.text)));
+    check('the device knows it holds no grant that keeps', !G.keepsSignIn());
 
     // Connect, with cloud sync signed in: the code way, and a refresh token comes back
     calls.length = 0;
     answer = (c) => c.url.includes('google-token') ? { status: 200, json: { access_token: 'via-code', expires_in: 3600, refresh_token: 'r2' } } : { status: 200, json: {} };
     await G.signIn(true);
     check('Connect goes the code way when cloud sync is signed in', toks().length === 1 && toks()[0].body.grant === 'code' && toks()[0].body.code === 'code-1' && toks()[0].body.redirect_uri === 'postmessage', JSON.stringify(toks()[0]?.body));
-    check('...and comes back signed in for good', G.gcal.token.access_token === 'via-code' && G.gcal.token.refresh_token === 'r2' && G.isSignedIn());
+    check('...and comes back signed in for good', G.gcal.token.access_token === 'via-code' && G.gcal.token.refresh_token === 'r2' && G.isSignedIn() && G.keepsSignIn());
 
     // the function not deployed: said plainly, not a hung Connecting…
     G.gcal.token = null;

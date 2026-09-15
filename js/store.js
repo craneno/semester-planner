@@ -111,6 +111,17 @@ function loadRaw() {
 
 const raw = loadRaw();
 try { keepBackups(raw); } catch (e) { warn('planner: backup failed', e); }
+
+/* A tab left open across the day reset takes no copy at load, and a laptop
+   can sit open for a week. So every draw asks whether the day has turned,
+   and the first draw of a new day takes its copy from the live state. */
+let backupDay = today();
+export function backupIfNewDay(day = today()) {
+  if (day === backupDay) return false;
+  backupDay = day;
+  try { keepBackups(state, day); } catch (e) { warn('planner: backup failed', e); }
+  return true;
+}
 export const state = migrate(raw);
 
 let saveTimer = null;

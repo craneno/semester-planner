@@ -46,6 +46,9 @@ function setStatus(s, msg = '') { gcal.status = s; gcal.message = msg; emit(); }
 const cfg = () => state.settings.gcal;
 export const isConfigured = () => !!cfg().clientId;
 export const isSignedIn = () => !!(gcal.token && gcal.token.expires_at > Date.now() + 30000);
+/** Whether the sign-in on this device can renew itself: a refresh token beside the hour's. */
+export const keepsSignIn = () => !!gcal.token?.refresh_token;
+const HOUR_ONLY = 'This Google sign-in lasts an hour: there is no grant that keeps on this device. Sign in to cloud sync, then Disconnect and Connect Google again.';
 
 // the browser's globals tsc does not know: Google's script, iOS's flag
 const win = /** @type {any} */ (window);
@@ -233,8 +236,14 @@ export async function signIn(interactive = true) {
     setStatus('signed-out', 'Sign in to sync.');
     throw Object.assign(new Error('Sign in to Google.'), { code: 'auth' });
   }
+  // the hour is up and nothing here can buy the next: said once, in
+  // Problems, so "why does it keep asking" has an answer
+  if (!interactive) warn('google sign-in', HOUR_ONLY);
 
   const keep = interactive && await keeps();
+  // a sign-in made now, with no cloud session to ask google-token as, is
+  // the browser-only kind: an hour, and this is the moment to say so
+  if (interactive && !keep) warn('google sign-in', HOUR_ONLY);
   if (standalone() && interactive) { redirectSignIn({ keep }); return null; }
 
   await loadGis();

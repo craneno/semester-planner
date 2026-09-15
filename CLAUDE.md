@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v79**.
+Schema **20**, service worker **planner-v80**.
 
 ## Working with me
 
@@ -121,8 +121,9 @@ sorted first, as jsonb comes back sorted), held in memory as well as
 localStorage. `AGREED` is schema *and* hash shape, so an old one goes too.
 
 **Sync is fan-out, not safety.** `keepBackups()` copies the raw state *before
-`migrate()` reads it* — one a day, five kept, plus `before-v<n>` as an upgrade
-runs, under their own keys, out of sync's reach.
+`migrate()` reads it* — one a day, plus `before-v<n>` as an upgrade runs,
+under their own keys, out of sync's reach, each kept a week (`dayOf`);
+`backupIfNewDay()` on every draw takes the day's copy in a tab left open.
 
 **Never sync device credentials** — no Google tokens, no Supabase URL or anon
 key, no cursors in `snapshotRows()`. Settings sync by list (`SYNCED_SETTINGS`);
@@ -332,7 +333,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1625 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1635 checks,
 left out of the deploy; CI opens the same page in Chromium and WebKit. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

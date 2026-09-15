@@ -25,8 +25,14 @@ export function renderGoogle({ navigate }) {
       syncing: 'Syncing…', error: 'Error: ' + G.gcal.message, offline: 'Offline — changes queued',
       waiting: G.gcal.message
     };
-    statusLine.textContent = map[G.gcal.status] || G.gcal.status;
-    statusLine.style.color = G.gcal.status === 'error' ? 'var(--danger)' : 'var(--ink-3)';
+    // which kind of sign-in this device holds: one that renews itself, or
+    // an hour at a time — the difference between "why does it keep asking"
+    // and a sign-in that keeps
+    const kind = !G.gcal.token ? ''
+      : G.keepsSignIn() ? ' · keeps itself signed in'
+        : ' · an hour at a time — sign in to cloud sync, then Disconnect and Connect again';
+    statusLine.textContent = (map[G.gcal.status] || G.gcal.status) + (G.gcal.status === 'off' ? '' : kind);
+    statusLine.style.color = G.gcal.status === 'error' || (G.gcal.token && !G.keepsSignIn()) ? 'var(--danger)' : 'var(--ink-3)';
 
     clear(calPicker);
     const cals = G.gcal.calendars.length ? G.gcal.calendars : [{ id: 'primary', name: 'Primary calendar', writable: true }];

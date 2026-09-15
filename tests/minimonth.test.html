@@ -79,6 +79,9 @@ suite('Mini month — a drag over it', async ({ check }) => {
   const M = await import('../js/minimonth.js');
   const stage = document.createElement('div');
   stage.id = 'stage';
+  // elementFromPoint sees only the viewport: the stage sits at the top,
+  // over the log, or a short pane finds nothing under the day
+  stage.style.cssText = 'position:fixed;top:0;left:0;z-index:9999;background:#fff';
   document.body.append(stage);
   try {
     M.renderMiniMonth(stage, { shown: '2026-09-16', onPick: () => {} });

@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v80', date: '2026-09-14',
+    title: 'Which kind of sign-in',
+    notes: [
+      'The Google card says whether this device\'s sign-in keeps itself signed in, or lasts an hour at a time and what to do about it; Problems says the same the moment an hour runs out with nothing to renew it.',
+      'The copies a device keeps of its own data last a week, then go — the daily ones and the one taken before an upgrade alike. A tab left open across the day reset takes the new day\'s copy too; before, only a fresh load did.'
+    ]
+  },
+  {
     version: 'v79', date: '2026-09-14',
     title: 'Five minutes at a time (v79)',
     notes: [

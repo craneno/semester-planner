@@ -100,7 +100,7 @@ function backupList() {
   return h('div', { style: { marginTop: '6px' } },
     h('div', { class: 'eyebrow', style: { marginBottom: '4px' } }, 'Copies kept on this device'),
     h('p', { class: 'help', style: { margin: '0 0 6px' } },
-      'Taken before anything is read, so a bad sync cannot reach them. Save one, '
+      'Taken before anything is read, so a bad sync cannot reach them, and kept a week. Save one, '
       + 'then Restore from file to put it back.'),
     ...rows, room);
 }

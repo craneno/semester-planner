@@ -2,7 +2,7 @@
 
 import { h, $, clear, fmtDate, fmtTime, today, debounce, zoneLabel, fmtDuration } from './util.js';
 import {
-  state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone,
+  state, commit, subscribe, parseQuickAdd, upsertItem, nowNext, doneBefore, sweepDone, backupIfNewDay,
   AREA_CATEGORIES, CATEGORY_IDS, categoryById, areasInCategory, areaById,
   reorderAreas, parseLinkAdd, addLink, scheduleDrift, shiftSchedules, stampSchedules,
   areaForNew
@@ -81,6 +81,7 @@ const isCurrent = (kind, id) => current.kind === kind && current.id === id;
 let redrawHeld = false;
 export function navigate() {
   if (document.body.classList.contains('nav-dragging')) { redrawHeld = true; return; }
+  backupIfNewDay();
   sweep();
   current = route();
   // an area deleted while its page was open: the hash still named it, so
