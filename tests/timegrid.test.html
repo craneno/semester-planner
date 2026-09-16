@@ -344,21 +344,37 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
    arithmetic on starts and lengths, so it is testable without a grid — and it
    is the arithmetic that is easy to get subtly wrong: which blocks belong to
    the same cluster, and how many columns that cluster is worth. */
-/* Every time box keeps to five minutes: the phone's wheel by `step`, a
-   keyboard by rounding before anything reads the value. */
+/* Every time box is three wheels that move in five minutes: iOS gives an
+   <input type=time> no step, so the step is built. */
 suite('Time boxes — five minutes at a time', async ({ check }) => {
-  const { snapTime } = await import('../js/util.js');
   const { timeInput } = await import('../js/ui.js');
-  check('a minute rounds to the nearest five', snapTime('09:07') === '09:05' && snapTime('09:08') === '09:10' && snapTime('09:05') === '09:05');
-  check('up over the hour', snapTime('09:58') === '10:00');
-  check('never into tomorrow', snapTime('23:59') === '23:55');
-  check('nothing stays nothing', snapTime('') === '');
+  const { state } = await import('../js/store.js');
+  const was = state.settings.hour12;
+  state.settings.hour12 = false;
   let seen = null;
-  const box = timeInput({ value: '13:00', onchange: (e) => { seen = e.target.value; } });
-  check('the box steps by five minutes', box.type === 'time' && box.getAttribute('step') === '300');
-  box.value = '13:07';
-  box.dispatchEvent(new Event('change'));
-  check('a typed minute is rounded before onchange reads it', seen === '13:05' && box.value === '13:05', seen);
+  const box = timeInput({ value: '13:00', 'aria-label': 'Starts', onchange: (e) => { seen = e.target.value; } });
+  const mins = [...box.querySelector('.tb-m').options].map((o) => o.value);
+  check('the minute wheel has twelve stops', mins.join(',') === '00,05,10,15,20,25,30,35,40,45,50,55', mins.join(','));
+  check('it reads as HH:MM', box.value === '13:00' && !box.querySelector('.tb-ap'));
+  box.querySelector('.tb-m').value = '05';
+  box.querySelector('.tb-m').dispatchEvent(new Event('change', { bubbles: true }));
+  check('a wheel turned is a change of the box, with the whole time', seen === '13:05' && box.value === '13:05', seen);
+  box.value = '09:07';
+  check('a minute between the stops is kept until touched', box.value === '09:07' && [...box.querySelector('.tb-m').options].some((o) => o.value === '07'));
+  const due = timeInput({ value: '', blank: true });
+  check('no time is a dash, and reads as nothing', due.value === '' && due.querySelector('.tb-m').disabled);
+  due.querySelector('.tb-h').value = '17';
+  due.querySelector('.tb-h').dispatchEvent(new Event('change', { bubbles: true }));
+  check('an hour picked from nothing is on the hour', due.value === '17:00' && !due.querySelector('.tb-m').disabled);
+  state.settings.hour12 = true;
+  const pm = timeInput({ value: '13:00' });
+  check('a 12-hour clock has an AM/PM wheel and reads 1 PM back as 13:00', pm.querySelector('.tb-ap')?.value === 'PM' && pm.querySelector('.tb-h').value === '1' && pm.value === '13:00');
+  pm.querySelector('.tb-ap').value = 'AM';
+  pm.querySelector('.tb-ap').dispatchEvent(new Event('change', { bubbles: true }));
+  check('...and AM turns it to 01:00', pm.value === '01:00');
+  const noon = timeInput({ value: '00:30' });
+  check('midnight is 12 AM', noon.querySelector('.tb-h').value === '12' && noon.querySelector('.tb-ap').value === 'AM' && noon.value === '00:30');
+  state.settings.hour12 = was;
 });
 
 suite('Time grid — two things at once', async ({ check }) => {

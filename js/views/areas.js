@@ -468,8 +468,8 @@ function editArea(area, categoryId, navigate, { focus } = {}) {
               e.target.setAttribute('aria-pressed', String(m.days.includes(d)));
             }
           }, label[0]))),
-        timeInput({ value: m.start || '', style: { maxWidth: '120px' }, onchange: (e) => { m.start = e.target.value; } }),
-        timeInput({ value: m.end || '', style: { maxWidth: '120px' }, onchange: (e) => { m.end = e.target.value; } }),
+        timeInput({ value: m.start || '', onchange: (e) => { m.start = e.target.value; } }),
+        timeInput({ value: m.end || '', onchange: (e) => { m.end = e.target.value; } }),
         h('input', { type: 'text', placeholder: 'Room', value: m.location || '', style: { maxWidth: '130px' }, onchange: (e) => { m.location = e.target.value; } }),
         h('button', { class: 'btn ghost sm', onclick: () => { draft.schedule.splice(i, 1); drawMeetings(); } }, '✕')));
     });

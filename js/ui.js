@@ -1,7 +1,7 @@
 // ui.js — shared chrome: toasts, modals, the peek panel, pointer drag.
 
-import { h, $, clear, hexAlpha, fmtDate, diffDays, today, snapTime, TIME_STEP } from './util.js';
-import { areaById } from './store.js';
+import { h, $, clear, hexAlpha, fmtDate, diffDays, today, TIME_STEP } from './util.js';
+import { state, areaById } from './store.js';
 
 /* ---------------- the sidebar swipe ----------------
    Where the menu should be while a finger drags it. Pure, so it can be
@@ -138,25 +138,62 @@ export function closePeek() {
   setTimeout(() => { if (!panel.classList.contains('open')) clear(panel); }, 240);
 }
 
-/* ---------------- a time box ---------------- */
+/* ---------------- a time box ----------------
+   iOS ignores `step` on <input type=time>: its wheel is every minute, so a
+   five-minute step has to be built — an hour wheel, a minute wheel with
+   twelve stops, and AM/PM under a 12-hour clock. The box has a `value` of
+   'HH:MM' ('' for none) like the input it stands in for, and `onchange`
+   gets an event whose target is the box. A minute between the stops — 9:07
+   from before — stays on offer until touched, so nothing moves by itself. */
+
+const pad2 = (n) => String(n).padStart(2, '0');
 
 /**
- * A time input that moves in five-minute steps. `step` gives the phone's
- * wheel five-minute stops; a minute typed on a keyboard is rounded before
- * `onchange` sees it, so 9:07 becomes 9:05 and nothing downstream has to.
- * @param {Object} attrs  as for h(), `type` and `step` set here
+ * @param {Object} attrs  as for h(): `value`, `onchange`, `aria-label`;
+ *   `blank: true` offers "—" (a value of '') even once a time is set
  */
 export function timeInput(attrs = {}) {
-  const { onchange, ...rest } = attrs;
-  return h('input', {
-    ...rest, type: 'time', step: String(TIME_STEP * 60),
-    onchange: (e) => {
-      const box = /** @type {HTMLInputElement} */ (e.target);
-      const snapped = snapTime(box.value);
-      if (snapped !== box.value) box.value = snapped;
-      onchange?.(e);
-    }
-  });
+  const { onchange, value = '', blank = false, ...rest } = attrs;
+  const hour12 = !!state.settings.hour12;
+  const label = rest['aria-label'] || 'Time';
+  const hourIn = h('select', { class: 'tb-h', 'aria-label': label + ' hour' });
+  const minIn = h('select', { class: 'tb-m', 'aria-label': label + ' minutes' });
+  const ampmIn = hour12 ? h('select', { class: 'tb-ap', 'aria-label': label + ' AM or PM' }, h('option', { value: 'AM' }, 'AM'), h('option', { value: 'PM' }, 'PM')) : null;
+  const box = h('span', { class: 'timebox', ...rest, onchange }, hourIn, minIn, ampmIn);
+
+  const fill = (v) => {
+    const [hh, mm] = v ? v.split(':').map(Number) : [null, null];
+    const none = v === '' || hh == null;
+    clear(hourIn); clear(minIn);
+    if (blank || none) hourIn.append(h('option', { value: '', selected: none }, '—'));
+    const hours = hour12 ? [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] : [...Array(24).keys()];
+    const h12 = hh == null ? null : (hh % 12 || 12);
+    for (const x of hours) hourIn.append(h('option', { value: String(x), selected: !none && (hour12 ? x === h12 : x === hh) }, hour12 ? String(x) : pad2(x)));
+    const mins = [...Array(60 / TIME_STEP).keys()].map((k) => k * TIME_STEP);
+    if (mm != null && !mins.includes(mm)) mins.push(mm);   // the minute it holds now, off the grid
+    mins.sort((p, q) => p - q);
+    for (const m of mins) minIn.append(h('option', { value: pad2(m), selected: mm != null ? m === mm : m === 0 }, pad2(m)));
+    if (ampmIn) ampmIn.value = hh != null && hh >= 12 ? 'PM' : 'AM';
+    minIn.disabled = none; if (ampmIn) ampmIn.disabled = none;
+  };
+  const read = () => {
+    if (hourIn.value === '') return '';
+    let hh = Number(hourIn.value);
+    if (hour12) hh = (hh % 12) + (ampmIn.value === 'PM' ? 12 : 0);
+    return `${pad2(hh)}:${minIn.value}`;
+  };
+  Object.defineProperty(box, 'value', { get: read, set: fill });
+  fill(value);
+  for (const sel of [hourIn, minIn, ampmIn]) {
+    if (!sel) continue;
+    sel.addEventListener('change', (e) => {
+      e.stopPropagation();   // a wheel is not the box; the box says when it has a whole time
+      const v = read();
+      minIn.disabled = v === ''; if (ampmIn) ampmIn.disabled = v === '';
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  return box;
 }
 
 /* ---------------- item chrome ---------------- */

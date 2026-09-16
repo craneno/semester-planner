@@ -2,7 +2,7 @@
 
 import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
 import {
-  state, commit, itemById, upsertItem, deleteItem, ITEM_TYPES, progress,
+  state, commit, itemById, upsertItem, deleteItem, progress,
   repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved, areaColor, AREA_COLORS, activeHabits
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast, timeInput } from './ui.js';
@@ -85,7 +85,7 @@ function render(item) {
       'aria-label': 'Mark complete',
       onchange: (e) => tickItem(item.id, e.target.checked, { after: rerender })
     }),
-    h('span', { class: 'eyebrow' }, item.done ? 'Done' : item.type),
+    item.done ? h('span', { class: 'eyebrow' }, 'Done') : null,
     h('div', { style: { flex: 1 } }),
     (item.gcalId || live.gcalIds) && h('span', { class: 'eyebrow', title: 'On your Google Calendar' }, 'GCAL'),
     live.canvasId && h('span', { class: 'eyebrow', title: 'From your Canvas feed' + (live.canvasCourse ? ' · ' + live.canvasCourse : '') }, 'CANVAS'),
@@ -167,10 +167,6 @@ function render(item) {
     ...state.areas.filter((a) => !a.archived).map((a) =>
       h('option', { value: a.id, selected: a.id === item.areaId }, a.name)))));
 
-  props.append(prop('Type',
-    h('select', { onchange: (e) => set({ type: e.target.value }) },
-      ...ITEM_TYPES.map((t) => h('option', { value: t, selected: t === item.type }, t[0].toUpperCase() + t.slice(1))))));
-
   /* Scheduled or Deadline, never both. A scheduled item owns a start and an
      end and is what reaches Google Calendar; a deadline item is owed by a
      time and carries an estimate instead. Which one it is is read off the
@@ -235,7 +231,7 @@ function render(item) {
     props.append(prop('From',
       h('div', { class: 'pair', style: { alignItems: 'center' } },
         timeInput({
-          value: plan.start || '', style: { maxWidth: '110px' },
+          value: plan.start || '',
           onchange: (e) => {
             set({ plan: { ...plan, start: e.target.value || '09:00' } }, { resync: true });
             rerender();
@@ -243,7 +239,7 @@ function render(item) {
         }),
         h('span', { class: 'eyebrow' }, 'to'),
         timeInput({
-          value: endOf(plan), style: { maxWidth: '110px' },
+          value: endOf(plan),
           onchange: (e) => {
             // stored as a duration; an end before the start is the next morning
             let mins = toMin(e.target.value) - toMin(plan.start || '09:00');
@@ -257,7 +253,7 @@ function render(item) {
     props.append(prop('Due',
       h('div', { class: 'pair' },
         h('input', { type: 'date', value: item.due || '', onchange: (e) => set({ due: e.target.value || null }, { resync: true }) }),
-        timeInput({ value: item.dueTime || '', style: { maxWidth: '110px' }, onchange: (e) => set({ dueTime: e.target.value || null }) }))));
+        timeInput({ value: item.dueTime || '', blank: true, 'aria-label': 'Due at', onchange: (e) => set({ dueTime: e.target.value || null }) }))));
 
     props.append(prop('Estimate',
       h('div', { class: 'pair', style: { alignItems: 'center' } },

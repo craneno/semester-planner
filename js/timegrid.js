@@ -11,7 +11,7 @@
 
 import { h, fmtDate, fmtTime, fmtDuration, toMin, fromMin, clamp } from './util.js';
 import {
-  state, commit, upsertItem, ITEM_TYPES, AREA_CATEGORIES, areasInCategory, areaForNew
+  state, commit, upsertItem, AREA_CATEGORIES, areasInCategory, areaForNew
 } from './store.js';
 import { modal, closeModal, toast, timeInput } from './ui.js';
 import { openItem } from './editor.js';
@@ -478,9 +478,6 @@ export function tapCreate(host, { only, hit, onPick }) {
   }, { passive: false });
 }
 
-const TYPE_LABEL = {
-  event: 'Event', meeting: 'Meeting', task: 'Work block', homework: 'Homework'
-};
 
 /**
  * Name what goes in the range just swept out. Deliberately small: a title, the
@@ -591,9 +588,6 @@ export function newBlockPrompt({ date, start, mins, allDay = !start }, { onDone 
         : null;
     }));
 
-  const typeIn = h('select', { 'aria-label': 'Kind', onchange: (e) => { draft.type = e.target.value; } },
-    ...ITEM_TYPES.map((t) => h('option', { value: t, selected: t === draft.type }, TYPE_LABEL[t] || t)));
-
   function create() {
     const title = draft.title.trim();
     if (!title) { toast('Give it a name first.'); return; }
@@ -619,9 +613,7 @@ export function newBlockPrompt({ date, start, mins, allDay = !start }, { onDone 
       h('div', { class: 'field' },
         h('label', {}, 'When'),
         allDay ? span : h('div', { class: 'time-range' }, startIn, h('span', {}, '→'), endIn, span)),
-      h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' } },
-        h('div', { class: 'field' }, h('label', {}, 'Area'), areaIn),
-        h('div', { class: 'field' }, h('label', {}, 'Kind'), typeIn))),
+      h('div', { class: 'field' }, h('label', {}, 'Area'), areaIn)),
     footer: [
       h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
       h('button', { class: 'btn primary', onclick: create }, 'Create')

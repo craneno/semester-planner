@@ -9,6 +9,14 @@
 
 export const CHANGELOG = [
   {
+    version: 'v81', date: '2026-09-16',
+    title: 'One kind of event, and a time in five-minute wheels (v81)',
+    notes: [
+      'A time is picked on three wheels — hour, minute in fives, AM/PM — since the phone\'s own time picker ignores the step and scrolled every minute.',
+      'Event, work block, meeting and homework are gone from the screens: a thing on the calendar is an event. Nothing changes in the data.'
+    ]
+  },
+  {
     version: 'v80', date: '2026-09-14',
     title: 'Which kind of sign-in',
     notes: [

@@ -19,7 +19,7 @@ import {
   parseYmd, startOfWeek, today, clamp, MONTHS, cssPx
 } from '../util.js';
 import {
-  state, commit, toggleItem, upsertArea, ITEM_TYPES, progress, chartAreas,
+  state, commit, toggleItem, upsertArea, progress, chartAreas,
   areasInCategory, AREA_CATEGORIES, sprintsForArea, sprintProgress, repeatLabel, itemColor
 } from '../store.js';
 import { isRepeat, repeatDates } from '../repeat.js';
@@ -28,7 +28,7 @@ import { openItem } from '../editor.js';
 import { openSprint } from '../sprint.js';
 import { pushItem } from '../gcal.js';
 
-const filters = { area: '', type: '', status: 'open', q: '' };
+const filters = { area: '', status: 'open', q: '' };
 
 /** All three survive a re-render, the way the week view's anchor date does —
  *  the picker especially, since toggling an area redraws the page and a panel
@@ -558,7 +558,6 @@ function renderList(pad, { navigate }) {
   pad.append(h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '4px' } },
     select(filters.status, [['open', 'Open'], ['all', 'All'], ['done', 'Done']], (v) => { filters.status = v; navigate(); }),
     select(filters.area, [['', 'All areas'], ...state.areas.filter((a) => !a.archived).map((a) => [a.id, a.name])], (v) => { filters.area = v; navigate(); }),
-    select(filters.type, [['', 'All types'], ...ITEM_TYPES.map((t) => [t, t[0].toUpperCase() + t.slice(1)])], (v) => { filters.type = v; navigate(); }),
     h('input', {
       type: 'text', placeholder: 'Filter by name…', value: filters.q, style: { maxWidth: '200px' },
       oninput: (e) => { filters.q = e.target.value; draw(); }
@@ -575,7 +574,6 @@ function renderList(pad, { navigate }) {
     if (filters.status === 'open') items = items.filter((t) => !t.done);
     if (filters.status === 'done') items = items.filter((t) => t.done);
     if (filters.area) items = items.filter((t) => t.areaId === filters.area);
-    if (filters.type) items = items.filter((t) => t.type === filters.type);
     if (filters.q) {
       const q = filters.q.toLowerCase();
       items = items.filter((t) => t.title.toLowerCase().includes(q) || (t.notes || '').toLowerCase().includes(q));

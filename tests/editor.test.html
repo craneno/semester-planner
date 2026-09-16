@@ -37,7 +37,7 @@ suite('Editor — the panel on a task', async ({ check }) => {
     check('on the task, by name', $('.peek-title')?.value === 'Late show');
     const modes = $$('.mode-toggle .mode');
     check('three ways of being when, Scheduled on', modes.length === 3 && modes[0].classList.contains('on'), modes.map((m) => m.textContent).join());
-    const times = $$('input[type=time]');
+    const times = $$('.timebox');
     check('from and to', times.length === 2 && times[0].value === '22:00' && times[1].value === '23:00', times.map((t) => t.value).join());
 
     change(times[1], '01:00');

@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v80**.
+Schema **20**, service worker **planner-v81**.
 
 ## Working with me
 
@@ -170,8 +170,11 @@ first, a 401 spends the hour not the grant (`expireToken`), and
 `signIn(false)` throws `retry` (status `waiting`) and the minute timer tries
 again, never Google's window — that window once a minute *was* the "sign
 in again" — and the quiet way is tried once per spell (`quietTried`). Under
-a consent screen in Testing Google ends a grant after seven days. `ITEM_TYPES` is `event`, `task`, `meeting`,
-`homework`; no area puts it in General. `eventsOn` drops a Google event that **shadows a class** on the
+a consent screen in Testing Google ends a grant after seven days. On the
+calendar everything is an event: `type` stays on the row (`ITEM_TYPES`, set
+by quick add and the imports) but no screen shows or asks it. A time is
+`timeInput()` in `js/ui.js`, three wheels in five-minute steps — iOS gives an
+`<input type=time>` no `step`. `eventsOn` drops a Google event that **shadows a class** on the
 schedule that day (same start, and same end or a shared word), since a
 schedule read off Google is on Google still. The Canvas import keeps to the term (`inTerm`, two weeks'
 slack): the feed carries every course still enrolled in. Each *seed*
@@ -333,7 +336,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1635 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1638 checks,
 left out of the deploy; CI opens the same page in Chromium and WebKit. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

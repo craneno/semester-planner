@@ -259,6 +259,10 @@ input[type="text"], input[type="date"], input[type="time"], input[type="number"]
   color: var(--ink);
 }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* a time is three wheels (js/ui.js timeInput): iOS gives <input type=time> no step */
+.timebox { display: inline-flex; gap: 4px; align-items: center; max-width: 100%; }
+.timebox select { width: auto; min-width: 0; padding: 6px 4px 6px 7px; font-variant-numeric: tabular-nums; }
+.timebox select:disabled { opacity: .45; }
 textarea { resize: vertical; min-height: 72px; line-height: 1.55; }
 
 .card {

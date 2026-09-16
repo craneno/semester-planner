@@ -1,7 +1,7 @@
 // syllabus.js — pull dates out of a syllabus, then make you approve every one.
 
 import { h, clear, pad } from './util.js';
-import { state, commit, upsertItem, ITEM_TYPES } from './store.js';
+import { state, commit, upsertItem } from './store.js';
 import { modal, closeModal, toast } from './ui.js';
 
 const PDFJS_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
@@ -156,13 +156,11 @@ export function openSyllabusImport(navigate, presetAreaId = null) {
     results.append(h('div', { class: 'eyebrow', style: { margin: '14px 0 4px' } }, 'Review'));
     found.forEach((f, i) => {
       results.append(h('div', {
-        style: { display: 'grid', gridTemplateColumns: '22px minmax(0,1fr) 130px 120px', gap: '8px', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }
+        style: { display: 'grid', gridTemplateColumns: '22px minmax(0,1fr) 130px', gap: '8px', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid var(--rule-soft)' }
       },
       h('input', { type: 'checkbox', class: 'check', checked: f.keep, onchange: (e) => { f.keep = e.target.checked; } }),
       h('input', { type: 'text', value: f.title, onchange: (e) => { f.title = e.target.value; } }),
-      h('input', { type: 'date', value: f.due, onchange: (e) => { f.due = e.target.value; } }),
-      h('select', { onchange: (e) => { f.type = e.target.value; } },
-        ...ITEM_TYPES.map((t) => h('option', { value: t, selected: t === f.type }, t)))));
+      h('input', { type: 'date', value: f.due, onchange: (e) => { f.due = e.target.value; } })));
     });
   }
 
