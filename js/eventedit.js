@@ -23,7 +23,8 @@ function scopeRow(scope, onPick) {
     class: 'mode' + (scope === key ? ' on' : ''), type: 'button', 'aria-pressed': String(scope === key),
     onclick: () => onPick(key)
   }, label);
-  return h('div', { class: 'modes', style: { display: 'flex', gap: '6px' } }, btn('one', 'Only this day'), btn('all', 'Every time'));
+  // the same toggle the task page has, so the one picked is filled in
+  return h('div', { class: 'mode-toggle' }, btn('one', 'Only this day'), btn('all', 'Every time'));
 }
 
 /* ---------------- one of Google's events ---------------- */

@@ -1064,7 +1064,9 @@ body.is-reordering { cursor: grabbing; user-select: none; }
 }
 .mode-toggle .mode + .mode { border-left: 1px solid var(--rule); }
 .mode-toggle .mode:hover { background: var(--rule-soft); color: var(--ink); }
-.mode-toggle .mode.on { background: var(--accent-soft); color: var(--ink); font-weight: 550; }
+/* the one picked is filled in, the rest plain: a tint alone read as two of a kind */
+.mode-toggle .mode.on { background: var(--accent); color: var(--accent-ink); font-weight: 550; }
+.mode-toggle .mode.on:hover { background: var(--accent); color: var(--accent-ink); filter: brightness(1.08); }
 
 
 /* ---------- repeating: the weekday picker ----------

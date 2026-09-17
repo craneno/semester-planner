@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v82', date: '2026-09-17',
+    title: 'The one picked',
+    notes: [
+      'In the Google event dialog and every other two-way switch, the choice picked is filled in and the rest are plain; before, the two looked alike, and the event dialog had no styling on them at all.'
+    ]
+  },
+  {
     version: 'v81', date: '2026-09-16',
     title: 'One kind of event, and a time in five-minute wheels (v81)',
     notes: [
