@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v83**.
+Schema **20**, service worker **planner-v84**.
 
 ## Working with me
 
@@ -66,7 +66,9 @@ selectors that are already there (`itemById`, `itemsDueOn`, `upcoming`,
 `commit(fn, { source, touches })` — `touches: ['notes']` names the keys the
 commit changes, and undo copies those alone (a note keystroke need not clone
 every task); a commit that says nothing copies everything, and a later commit
-in the same step adds its keys to the copy. `app.js` redraws only for `external`, `gcal`,
+in the same step adds its keys to the copy. **A commit that changes nothing
+undo keeps is no step** (`settle()` drops it and puts redo back), and an
+undo closes the 800ms merge window. `app.js` redraws only for `external`, `gcal`,
 `cloud`, `editor`, `restore`, `undo`, `redo`, `canvas`; tag one made from a
 floating panel, or the view under it will not repaint (`set()` in the editor
 and `tickItem` are). `modal()` focuses the first control in its *body*, never
@@ -80,7 +82,13 @@ clash goes to whoever wrote last, row by row (`updated_at` decides, `synced_at`
 is the pull cursor). `pull()` pages by (`synced_at`, `kind`, `id`) through an
 `or` filter built by hand, checked against supabase-js and not against a live
 PostgREST: a page that does not move on breaks the loop, and that guard is
-what stands in for the check. **No book-keeping per change** — never add dirty flags or
+what stands in for the check. Each pull starts `overlapMs` (30s) behind the
+cursor, since `synced_at` is a transaction's *start* and a slow write can
+land behind it; a row pulled twice hashes equal and is dropped.
+`resetLocalSyncState()` bumps a generation, and a sync begun under an older
+one writes no baseline, schema or cursor. **A restore is the truth**:
+`importJson` stamps every row now and keeps this device's `DEVICE_SETTINGS`,
+events, outbox and health. **No book-keeping per change** — never add dirty flags or
 `markChanged()`.
 
 **Back from the background, ask for the session first** (`resume()`): an iOS
@@ -276,8 +284,15 @@ so (a `commit()` with no check would sync a row every visit), tagged
 **Every note writer calls `touchNote(date)`**, or the note has no clock and
 an old copy beats a new one. **The day starts at 3am** — `DAY_RESET_HOUR` and
 `today(now)` in `js/util.js`, the one place that decides it — so an entry
-written at 1am files under the day it is about. `sweepDone()` deletes work
-ticked off *before* that reset, behind an Undo from `navigate()`.
+written at 1am files under the day it is about. **What is happening at this
+clock time** — reminders, the now line, the next class, `nowNext()` — asks
+`clockDate()`, the real date, never `today()`. `sweepDone()` deletes work
+ticked off *before* that reset, behind an Undo from `navigate()` and never as
+an undo step; **it never takes a series**, and `toggleItem` on a series'
+plain id ticks today's occurrence, else the next — never the rule. A
+deadline occurrence keeps its tick for `LOOKBACK` days, or `overdue()` lists
+it again. A Google event's length is `eventMins()` (its `endDate` counted),
+never end minus start.
 
 **Semester is a chart, with the list behind a switch.** Bands are the three
 categories, lanes are areas, and `area.onChart` (missing reads as true) picks
@@ -340,7 +355,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1648 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1899 checks,
 left out of the deploy; CI opens the same page in Chromium and WebKit. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

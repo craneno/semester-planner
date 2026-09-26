@@ -7,7 +7,7 @@
 // to the share sheet where there is one, saved as a PNG where there is not.
 
 import { state, classesOn, eventsOn, itemsPlannedOn, itemsDueOn, itemColor } from './store.js';
-import { parseYmd, toMin, fromMin, fmtTime, DOW, saveFile, hexAlpha } from './util.js';
+import { parseYmd, toMin, fromMin, fmtTime, DOW, saveFile, hexAlpha, eventMins } from './util.js';
 import { packBlocks } from './timegrid.js';
 import { toast } from './ui.js';
 
@@ -25,8 +25,8 @@ export function layoutWeek(days, { width = 1400, hourH = 44, pad = 28, headH = 7
     for (const e of eventsOn(d)) {
       if (e.allDay || !e.start) continue;
       const s = toMin(e.start);
-      let en = e.end ? toMin(e.end) : s + 60;
-      if (en <= s) en = 24 * 60;
+      // its true length, drawn to midnight at most; a zero-length one gets a sliver, not the rest of the day
+      const en = Math.min(24 * 60, s + (eventMins(e) || 15));
       list.push({ kind: 'event', title: e.title, start: s, end: en, color: null });
     }
     for (const t of itemsPlannedOn(d)) {

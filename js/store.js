@@ -3,7 +3,7 @@
 
 /** @typedef {import('./types.js').Item} Item */
 
-import { uid, today, addDays, diffDays, toMin, fromMin, tz, zoneShift, zoneLabel } from './util.js';
+import { uid, today, clockDate, eventMins, addDays, diffDays, toMin, fromMin, tz, zoneShift, zoneLabel } from './util.js';
 import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js';
 import { AREA_CATEGORIES, AREA_COLORS, areaCategory } from './store/constants.js';
 import { migrate, normalItem } from './store/migrate.js';
@@ -732,7 +732,9 @@ export function dayTimeline(date = today()) {
   }
   for (const e of eventsOn(date)) {
     if (e.allDay || !e.start) continue;
-    out.push({ kind: 'event', title: e.title, start: e.start, end: e.end || fromMin(toMin(e.start) + 60) });
+    // to midnight at most, the way a block is: an end of 01:00 read as-is made
+    // an event past midnight never "on now"
+    out.push({ kind: 'event', title: e.title, start: e.start, end: fromMin(Math.min(24 * 60, toMin(e.start) + eventMins(e))) });
   }
   for (const t of itemsPlannedOn(date)) {
     if (!t.plan.start || t.done) continue;
@@ -743,9 +745,6 @@ export function dayTimeline(date = today()) {
   }
   return out.sort((a, b) => toMin(a.start) - toMin(b.start));
 }
-
-// the clock's date, for nowNext below (its one reader here)
-import { clockDate } from './util.js';
 
 /**
  * What is happening right now, or failing that what is next — null if the day

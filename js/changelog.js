@@ -9,6 +9,17 @@
 
 export const CHANGELOG = [
   {
+    version: 'v84', date: '2026-09-26',
+    title: 'Fifty-eight fixes',
+    notes: [
+      'Repeating tasks: ticking one from a list ticks that day, never the whole series, and the morning cleanup never deletes a series. All of them no longer moves a series start. Ticks on repeating deadlines stay, so they stop coming back as overdue. This and after keeps its own subtasks, follows a moved weekday, and keeps typing in the panel.',
+      'Google Calendar: blocks past midnight, multi-day and zero-length events keep their true length when pulled, edited, dragged or drawn. A block made repeating drops its old event. Repeating all-day stretches, all-day switches and old daily series reach Google. Queued changes go out once the sign-in is back.',
+      'Sync and backup: Restore from file wins over the cloud and keeps this device sign-ins. A restore or erase during a sync can no longer delete newer rows, erase stays erased, a pull cannot skip a slow write, and an update never runs half cached.',
+      'Between midnight and 3am, reminders, the now line, the next class and the top bar follow the clock. Undo skips steps that changed nothing. Quick add no longer reads mark 20 or decide 3 as dates, or cuts plan and work from titles.',
+      'Imports and settings: calendar files keep moved and cancelled days, odd time zones, and UTC repeat rules; syllabus dates must exist; prices like 1,299 read right; the steps goal cannot fall to 1; archived areas, bands and the area editor sync and save correctly; open sections stay open.'
+    ]
+  },
+  {
     version: 'v83', date: '2026-09-26',
     title: 'Cleared stays cleared',
     notes: [
