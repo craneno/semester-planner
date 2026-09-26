@@ -69,7 +69,16 @@ suite('Push forward — today from behind, else tomorrow', async ({ check }) => 
   check('a thing with no day gets tomorrow, all day', p4.plan?.date === TM && p4.plan.start === null && !p4.due);
   undoLast();
   check('...and Undo takes the day away again', s.itemById('p4').plan === null, JSON.stringify(s.itemById('p4').plan));
-  for (const id of ['p1', 'p2', 'p3', 'p4']) s.deleteItem(id);
+
+  // a stretch of days moves whole, its last day with its first
+  s.upsertItem({ id: 'p5', title: 'a stretch', plan: { date: Y, start: null, mins: 0, end: addDays(Y, 2) } });
+  A.pushForward('p5');
+  const p5 = s.itemById('p5').plan;
+  check('a stretch of days pushed keeps its length', p5.date === T && p5.end === addDays(T, 2), JSON.stringify(p5));
+  undoLast();
+  const p5back = s.itemById('p5').plan;
+  check('...and Undo puts both ends back', p5back.date === Y && p5back.end === addDays(Y, 2), JSON.stringify(p5back));
+  for (const id of ['p1', 'p2', 'p3', 'p4', 'p5']) s.deleteItem(id);
 });
 
 suite('Small edits — tick, move, and what a push may touch', async ({ check }) => {

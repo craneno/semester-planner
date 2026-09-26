@@ -17,7 +17,7 @@ import {
   state, commit, itemById, areaById, upsertItem, seriesById, splitOccurrence,
   repeats, occurrencesBetween
 } from './store.js';
-import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays, today } from './util.js';
+import { toRfc3339, fromRfc3339, toMin, fromMin, tz, addDays, diffDays, today, eventMins } from './util.js';
 import * as C from './cloud.js';
 import { warn } from './problems.js';
 
@@ -131,10 +131,19 @@ function loadGis() {
     const s = document.createElement('script');
     s.src = GIS_SRC; s.async = true; s.defer = true;
     s.onload = res;
-    s.onerror = () => rej(new Error('Google sign-in script did not load. Check your connection.'));
+    // a failed load is not kept for the session: the next try loads it again
+    s.onerror = () => { gisPromise = null; s.remove(); rej(new Error('Google sign-in script did not load. Check your connection.')); };
     document.head.append(s);
   });
   return gisPromise;
+}
+
+/* Signed in again: whatever waited in the outbox for it goes now, not at
+   the next edit. Only a queue with no send timed for it — one that is
+   timed is waiting out `wait` on purpose. A timer, so a sign-in made from
+   inside a send (a 401) does not start a second send inside the first. */
+function flushSoon() {
+  if (state.outbox.length && !flushTimer && !flushing) scheduleFlush(0);
 }
 
 let tokenClient = null;
@@ -166,6 +175,7 @@ function codeSignIn() {
           if (!gcal.token.refresh_token) warn('google sign-in', 'Google sent no refresh token: this sign-in lasts an hour. Disconnect, then Connect again.');
           quietTried = false;
           setStatus('ready', 'Connected.');
+          flushSoon();
           resolve(gcal.token);
         } catch (e) { fail(e.message); }
       },
@@ -222,7 +232,7 @@ export async function signIn(interactive = true) {
   setStatus('connecting');
 
   // the quiet way in first: a refresh token asks for the hour, no popup
-  if (await refresh()) { setStatus('ready', 'Connected.'); return gcal.token; }
+  if (await refresh()) { setStatus('ready', 'Connected.'); flushSoon(); return gcal.token; }
   // The grant is still held, so the refresh failed for a reason of the day —
   // no cloud session yet, a dropped network on waking. Asking Google's
   // window instead is what put a sign-in in front of you every hour: the
@@ -246,7 +256,11 @@ export async function signIn(interactive = true) {
   if (interactive && !keep) warn('google sign-in', HOUR_ONLY);
   if (standalone() && interactive) { redirectSignIn({ keep }); return null; }
 
-  await loadGis();
+  try { await loadGis(); } catch (e) {
+    // said, not left at Connecting… for the rest of the session
+    setStatus('signed-out', e.message);
+    throw e;
+  }
   if (keep) return codeSignIn();
   const client = ensureTokenClient();
   return new Promise((resolve, reject) => {
@@ -260,6 +274,7 @@ export async function signIn(interactive = true) {
       storeToken(resp.access_token, resp.expires_in);
       quietTried = false;
       setStatus('ready', 'Connected.');
+      flushSoon();
       resolve(gcal.token);
     };
     // a popup that was blocked, or closed, never reaches `callback`; without
@@ -481,6 +496,9 @@ export async function sync({ full = false } = {}) {
   // only worth it when the calendar actually said something
   commit(null, changed ? { source: 'gcal' } : undefined);
   setStatus('ready');
+  // a read that went through is a sign-in that holds: a send that found the
+  // hour lapsed, and returned with the queue still full, goes now
+  flushSoon();
 }
 
 /**
@@ -514,13 +532,33 @@ function applyIncoming(raw, { replace, win }) {
       // occurrence's own and `upsertItem` files it as an exception rather than
       // rewriting the rule for every other week.
       const item = itemById(n.plannerItemId);
+      const cut = item ? splitOccurrence(item.id) : null;
+      /* The event a block had before it became a series, left behind: the
+         series' own events carry an occurrence's id. It is not the series'
+         when — taken as one it moved every week to it — and not its event,
+         so it goes, and nothing here is changed by it. */
+      if (item && !cut && repeats(item)) {
+        if (!Object.values(item.gcalIds || {}).includes(n.id) && cfg().pushPlans) {
+          queue({ kind: 'event-delete', itemId: `event:${n.id}`, eventId: n.id, ids: [n.id] });
+          scheduleFlush();
+        }
+        continue;
+      }
       if (item && n.date && (n.allDay || n.start)) {
-        const mins = n.allDay ? 0 : Math.max(15, (toMin(n.end) || toMin(n.start) + 60) - toMin(n.start));
+        // the length from the day and time it ends, so a block past midnight
+        // keeps its hours and one ending at 00:00 is not an hour long
+        const mins = n.allDay ? 0 : Math.max(15, eventMins(n));
         const start = n.allDay ? null : n.start;
+        // an all-day stretch: Google's end is the morning after its last day.
+        // One occurrence of a series has no end of its own to keep.
+        const end = n.allDay && !cut && n.endDate > addDays(n.date, 1) ? addDays(n.endDate, -1) : null;
         const changed = !item.plan || item.plan.date !== n.date
-          || (item.plan.start || null) !== start || (item.plan.mins || 0) !== mins;
-        if (changed) { upsertItem({ id: item.id, plan: { date: n.date, start, mins } }); touched = true; }
-        const cut = splitOccurrence(item.id);
+          || (item.plan.start || null) !== start || (item.plan.mins || 0) !== mins
+          || (!cut && (item.plan.end > item.plan.date ? item.plan.end : null) !== end);
+        if (changed) {
+          upsertItem({ id: item.id, plan: { date: n.date, start, mins, ...(end ? { end } : {}) } });
+          touched = true;
+        }
         if (cut) {
           const series = seriesById(item.id);
           if (series && (series.gcalIds || {})[cut.on] !== n.id) {
@@ -612,19 +650,58 @@ export function eventBodyOf(e) {
   return { ...when, summary: e.title };
 }
 
+/**
+ * A body made ready for a PATCH. Google merges a PATCH into what it holds,
+ * nested objects too, so a timed event made all-day kept its old
+ * `dateTime` beside the new `date` (and the other way round) and was
+ * refused. The kind not meant is sent as null, which clears it.
+ */
+export function patchBody(body) {
+  const fix = (w) => (!w ? w : w.date ? { ...w, dateTime: null } : { ...w, date: null });
+  return { ...body, start: fix(body.start), end: fix(body.end) };
+}
+
 /** What a change to every time of a repeating event does to one of its days:
  *  the name and the time of day; the day and all-day are each one's own. */
 function seriesPatch(x, patch) {
   if (patch.title != null) x.title = patch.title;
   if (x.allDay) return;
+  const was = { ...x };
   if (patch.start) x.start = patch.start;
   if (patch.end) x.end = patch.end;
-  if (x.start && x.end) x.endDate = toMin(x.end) <= toMin(x.start) ? addDays(x.date, 1) : x.date;
+  if (x.start && x.end) x.endDate = endDateFor(was, x, {});
+}
+
+/**
+ * The day an edited event ends on. Given (`fields.endDate`, as a drag or an
+ * Undo knows it), it is kept. Otherwise the event keeps the days it ran
+ * across: a five-day trip renamed or moved is still five days, and Mon
+ * 09:00 to Wed 17:00 given a new end time still ends on the Wednesday. A
+ * timed end at or before its start is the next morning's — past the days
+ * it already ran on.
+ */
+function endDateFor(e, next, fields) {
+  const days = (a, b) => Math.max(0, diffDays(a, b || a));
+  if (next.allDay) {
+    const end = fields.endDate;
+    if (end && end > next.date) return end;
+    // a stretch of days stays one; a timed event made all day is one day
+    return addDays(next.date, e.allDay ? Math.max(1, days(e.date, e.endDate)) : 1);
+  }
+  if (fields.endDate) return fields.endDate >= next.date ? fields.endDate : next.date;
+  // the times as they were: the span is kept exactly, a zero-length one too
+  if (!e.allDay && next.start === e.start && next.end === e.end) return addDays(next.date, days(e.date, e.endDate));
+  // new times: the whole days beyond the night it ran past, then the night
+  const wrapped = (x) => (toMin(x.end) <= toMin(x.start) ? 1 : 0);
+  const extra = e.allDay ? 0 : Math.max(0, days(e.date, e.endDate) - wrapped(e));
+  return addDays(next.date, extra + wrapped(next));
 }
 
 /**
  * Change one of Google's events: any of `title`, `date`, `start`, `end`,
- * `allDay`. A timed end at or before its start is the next morning's. With
+ * `allDay`, `endDate`. Left out, `endDate` keeps the days the event ran
+ * across (`endDateFor`). A timed end at or before its start is the next
+ * morning's. With
  * `all`, one day of a repeating event stands for every day of it, and the
  * change goes to the rule itself — the name and the time of day.
  * @returns {boolean} false when there is no such event, or two-way sync is off
@@ -646,8 +723,8 @@ export function editEvent(id, fields, { all = false } = {}) {
     return true;
   }
   const next = { ...e, ...fields };
-  if (next.allDay) { next.start = null; next.end = null; next.endDate = addDays(next.date, 1); }
-  else next.endDate = toMin(next.end) <= toMin(next.start) ? addDays(next.date, 1) : next.date;
+  next.endDate = endDateFor(e, next, fields);
+  if (next.allDay) { next.start = null; next.end = null; }
   const patch = { title: next.title, date: next.date, start: next.start, end: next.end, allDay: !!next.allDay, endDate: next.endDate };
   commit(() => Object.assign(e, patch), { source: 'editor' });
   const key = `event:${id}`;
@@ -708,7 +785,7 @@ async function pushEvent(op) {
   if (!navigator.onLine || !isSignedIn()) { queue(op); return; }
   const calId = encodeURIComponent(cfg().calendarId || 'primary');
   try {
-    await api(`/calendars/${calId}/events/${encodeURIComponent(e.id)}`, { method: 'PATCH', body: eventBodyOf(e) });
+    await api(`/calendars/${calId}/events/${encodeURIComponent(e.id)}`, { method: 'PATCH', body: patchBody(eventBodyOf(e)) });
   } catch (err) {
     // Google no longer has it: nothing to change, and nothing to show
     if (gone(err)) { state.events = state.events.filter((x) => x.id !== e.id); commit(null, { source: 'gcal' }); return; }
@@ -730,6 +807,7 @@ async function pushEvent(op) {
    the network. */
 export const pushSettings = { wait: 30000, maxWait: 90000, backoff: 60000, backoffMax: 900000 };
 let flushTimer = null;
+let flushing = false;
 let firstQueuedAt = 0;
 let backoff = 0;
 
@@ -770,25 +848,42 @@ function pauseAfter(err) {
    standing for it, and a push is a reconciliation — create what is missing,
    patch what has changed, delete what should no longer be there.
 
-   Bounded by the term, because a repeat with no end has no last occurrence and
-   something has to decide how much calendar to fill. */
+   Bounded by the pull window, and by HORIZON occurrences from today, because
+   a repeat with no end has no last occurrence and something has to decide
+   how much calendar to fill. */
 
 const HORIZON = 250;
 
 const windowStart = () => pullWindow().start;
 const windowEnd = () => pullWindow().end;
 
-/** What a series should have on the calendar: day the rule named -> body. */
-function wantedFor(item) {
-  const want = new Map();
-  if (item.done) return want;
+/**
+ * What a series should have on the calendar: `want`, day the rule named ->
+ * body, and `past`, the days gone by already on Google, left as they are.
+ * The cap counts from today, not from the day the calendar began, or an
+ * old daily series filled it with the past and stopped reaching ahead. A
+ * day gone by that never went up is not sent now.
+ * @param {any} item  the series
+ * @param {string} [now]  today
+ */
+export function wantedFor(item, now = today()) {
+  const want = new Map(), past = new Set();
+  if (item.done) return { want, past };
+  const have = item.gcalIds || {};
   const from = windowStart(), to = windowEnd();
+  // an all-day stretch: each occurrence runs as many days from its own date
+  // as the series does from its first, not to the series' own last day
+  const span = item.plan && !item.plan.start && item.plan.end ? diffDays(item.plan.date, item.plan.end) : 0;
   for (const o of occurrencesBetween(from, to, (t) => t.id === item.id)) {
     if (o.done || !o.plan || !o.plan.date) continue;
+    if (o.plan.date < now) { if (have[o.occurrence]) past.add(o.occurrence); continue; }
     if (want.size >= HORIZON) break;
-    want.set(o.occurrence, eventBodyFor(o));
+    const plan = o.plan.end && !o.plan.start
+      ? { ...o.plan, end: span > 0 ? addDays(o.plan.date, span) : null }
+      : o.plan;
+    want.set(o.occurrence, eventBodyFor({ ...o, plan }));
   }
-  return want;
+  return { want, past };
 }
 
 /**
@@ -799,7 +894,15 @@ function wantedFor(item) {
  * rather than a calendar with both the old shape and the new one on it.
  */
 async function pushSeries(item, calId) {
-  const want = wantedFor(item);
+  // the one event it had before it repeated goes first: the series makes
+  // its own for every day, the first included, and the old one left there
+  // was that day twice
+  if (item.gcalId) {
+    try { await api(`/calendars/${calId}/events/${encodeURIComponent(item.gcalId)}`, { method: 'DELETE' }); }
+    catch (err) { if (!gone(err)) throw err; }
+    item.gcalId = null;
+  }
+  const { want, past } = wantedFor(item);
   const have = item.gcalIds || {};
   const ids = { ...have };
   // written to the item after every step, not once at the end: a rate limit
@@ -809,7 +912,7 @@ async function pushSeries(item, calId) {
   const keep = () => { item.gcalIds = Object.keys(ids).length ? ids : null; };
 
   for (const [key, id] of Object.entries(have)) {
-    if (want.has(key)) continue;
+    if (want.has(key) || past.has(key)) continue;
     try { await api(`/calendars/${calId}/events/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
     catch (err) { if (!gone(err)) throw err; }
     delete ids[key];
@@ -818,7 +921,7 @@ async function pushSeries(item, calId) {
   for (const [key, body] of want) {
     if (ids[key]) {
       try {
-        await api(`/calendars/${calId}/events/${encodeURIComponent(ids[key])}`, { method: 'PATCH', body });
+        await api(`/calendars/${calId}/events/${encodeURIComponent(ids[key])}`, { method: 'PATCH', body: patchBody(body) });
         continue;
       } catch (err) {
         // gone from Google's side: fall through and make it again
@@ -832,9 +935,6 @@ async function pushSeries(item, calId) {
     keep();
   }
   keep();
-  // a series has no single event of its own; the one it had before it repeated
-  // is now the first occurrence's
-  item.gcalId = null;
 }
 
 /**
@@ -939,7 +1039,7 @@ async function pushNow(op) {
       await api(`/calendars/${calId}/events/${encodeURIComponent(item.gcalId)}`, { method: 'DELETE' });
       item.gcalId = null;
     } else if (item.gcalId) {
-      await api(`/calendars/${calId}/events/${encodeURIComponent(item.gcalId)}`, { method: 'PATCH', body: eventBodyFor(item) });
+      await api(`/calendars/${calId}/events/${encodeURIComponent(item.gcalId)}`, { method: 'PATCH', body: patchBody(eventBodyFor(item)) });
     } else {
       const ev = await api(`/calendars/${calId}/events`, { method: 'POST', body: eventBodyFor(item) });
       item.gcalId = ev.id;
@@ -965,11 +1065,14 @@ export async function flushOutbox() {
   const pending = state.outbox.splice(0, state.outbox.length);
   commit();
   let paused = false;
-  for (const op of pending) {
-    if (paused) { queue(op); continue; }   // back in line, behind the one that hit the limit
-    await pushNow(op);
-    if (gcal.backoffUntil > Date.now()) paused = true;
-  }
+  flushing = true;
+  try {
+    for (const op of pending) {
+      if (paused) { queue(op); continue; }   // back in line, behind the one that hit the limit
+      await pushNow(op);
+      if (gcal.backoffUntil > Date.now()) paused = true;
+    }
+  } finally { flushing = false; }
   if (!paused) {
     backoff = 0;
     gcal.backoffUntil = 0;

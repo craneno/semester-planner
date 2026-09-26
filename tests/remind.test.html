@@ -54,6 +54,29 @@ suite('Reminders — a tick', async ({ check }) => {
   s.state.settings.remindLead = 0;
   localStorage.removeItem('semesterPlanner.reminded');
 });
+
+/* Between midnight and the 3am reset the planner day is still yesterday,
+   but the clock's minutes are today's: "what is on at this minute" asks
+   the clock's date. */
+suite('Reminders — after midnight', async ({ check }) => {
+  const R = await import('../js/remind.js');
+  const { clockDate, today } = await import('../js/util.js');
+  const oneThirty = new Date(2026, 8, 15, 1, 30);
+  check('at 1:30am the clock is on the new date', clockDate(oneThirty) === '2026-09-15', clockDate(oneThirty));
+  check('...while the planner day is still yesterday', today(oneThirty) === '2026-09-14', today(oneThirty));
+  check('...and after the reset they agree', clockDate(new Date(2026, 8, 15, 9, 0)) === today(new Date(2026, 8, 15, 9, 0)));
+  s.upsertItem({ id: 'b', title: 'Night bus', areaId: 'gen', plan: { date: '2026-09-15', start: '00:50', mins: 20 } });
+  s.state.settings.remindLead = 15;
+  localStorage.removeItem('semesterPlanner.reminded');
+  try {
+    const said = R.tick(40, clockDate(new Date(2026, 8, 15, 0, 40)));
+    check('at 00:40, the 00:50 block on the clock’s date is due', R.permission() === 'granted' ? said.map((e) => e.title).join() === 'Night bus' : said.length === 0, JSON.stringify(said));
+  } finally {
+    s.state.settings.remindLead = 0;
+    s.deleteItem('b');
+    localStorage.removeItem('semesterPlanner.reminded');
+  }
+});
 </script>
 </body>
 </html>

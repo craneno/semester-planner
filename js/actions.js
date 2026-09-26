@@ -9,7 +9,7 @@
 import { state, commit, upsertItem, toggleItem, itemById, seriesById, splitOccurrence } from './store.js';
 import { pushItem } from './gcal.js';
 import { toast } from './ui.js';
-import { addDays, today, fmtDate, fmtTime } from './util.js';
+import { addDays, diffDays, today, fmtDate, fmtTime } from './util.js';
 
 /** What an item's when looks like right now, ready to be put back. */
 function whenOf(item) {
@@ -85,7 +85,8 @@ export function pushForward(id, { after } = {}) {
   const before = whenOf(item);
   const day = pushTarget(item);
   let patch;
-  if (item.plan?.date) patch = { plan: { ...item.plan, date: day } };
+  // a stretch of days moves whole: its last day by as many days as its first
+  if (item.plan?.date) patch = { plan: { ...item.plan, date: day, ...(item.plan.end ? { end: addDays(item.plan.end, diffDays(item.plan.date, day)) } : {}) } };
   else if (item.due) patch = { due: day };
   else patch = { plan: { date: day, start: null, mins: 0 }, due: null, dueTime: null };
   commit(() => upsertItem({ id, ...patch }), { touches: ['items'] });

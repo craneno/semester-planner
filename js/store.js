@@ -702,13 +702,17 @@ export function dayTimeline(date = today()) {
   return out.sort((a, b) => toMin(a.start) - toMin(b.start));
 }
 
+// the clock's date, for nowNext below (its one reader here)
+import { clockDate } from './util.js';
+
 /**
  * What is happening right now, or failing that what is next — null if the day
  * holds nothing else. Something in progress wins over something later: at
  * 9:30 in a 9–10 lecture the useful answer is the lecture, not the next thing
- * after it.
+ * after it. The day is the clock's, to go with the clock's minutes: from
+ * midnight to the 3am reset `today()` is still yesterday.
  */
-export function nowNext(date = today(), mins = minsNow()) {
+export function nowNext(date = clockDate(), mins = minsNow()) {
   const list = dayTimeline(date);
   const live = list.find((e) => toMin(e.start) <= mins && mins < toMin(e.end));
   if (live) return { ...live, live: true };

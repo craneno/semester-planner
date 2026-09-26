@@ -203,6 +203,79 @@ suite('Week — tails, stretches and colours', async ({ check }) => {
     for (const id of ['late', 'trip', 'red']) if (s.itemById(id)) s.deleteItem(id);
   }
 });
+
+/* Google's own events, drawn as long as they are. What has to hold: one
+   past midnight is drawn to midnight with its tail on the next day; one
+   ending at 00:00 is as long as it is, with no tail; start and end the
+   same is a sliver, not the whole day; one over several days is on each
+   of them; and dragged, it keeps its whole length and its end day, and
+   its Undo puts both back. */
+suite('Week — Google events, as long as they are', async ({ check }) => {
+  const W = await import('../js/views/week.js');
+  const stage = document.createElement('div');
+  stage.id = 'stage';
+  document.body.append(stage);
+  const navigate = () => W.renderWeek(stage, { navigate });
+  const g = s.state.settings.gcal;
+  const hadG = { ...g }, hadWeekStart = s.state.settings.weekStart;
+  const ev = (o) => ({ allDay: false, location: '', title: o.id, ...o });
+  const hgt = (el) => Math.round(parseFloat(el?.style.height));
+  try {
+    s.state.settings.weekStart = 0;
+    s.state.events = [
+      ev({ id: 'late', date: '2026-09-08', start: '23:00', end: '01:00', endDate: '2026-09-09' }),
+      ev({ id: 'mid', date: '2026-09-10', start: '22:00', end: '00:00', endDate: '2026-09-11' }),
+      ev({ id: 'zero', date: '2026-09-10', start: '10:00', end: '10:00', endDate: '2026-09-10' }),
+      ev({ id: 'conf', date: '2026-09-07', start: '09:00', end: '17:00', endDate: '2026-09-09' })
+    ];
+    W.showWeekOf('2026-09-09');
+    W.renderWeek(stage, { navigate });
+    const cols = [...stage.querySelectorAll('.daycol')];     // Sun 6 … Sat 12
+    const blk = (i, id) => cols[i].querySelector(`.blk.ext[data-eid="${id}"]`);
+    const tail = (i, id) => cols[i].querySelector(`.blk.is-tail[data-tail-eid="${id}"]`);
+
+    check('past midnight: drawn to midnight', hgt(blk(2, 'late')) === 50, blk(2, 'late')?.style.height);
+    check('...its tail on the next day, as tall as what ran over', hgt(tail(3, 'late')) === 50 && tail(3, 'late').style.top === '0px', tail(3, 'late')?.style.height);
+    check('ending at 00:00: as long as it is, two hours', hgt(blk(4, 'mid')) === 102, blk(4, 'mid')?.style.height);
+    check('...and no tail on the day after', !tail(5, 'mid'));
+    check('start and end the same: a sliver, not the day', hgt(blk(4, 'zero')) === 18 && !tail(5, 'zero'), blk(4, 'zero')?.style.height);
+    check('over several days: on the first from its start', hgt(blk(1, 'conf')) === 15 * 52 - 2, blk(1, 'conf')?.style.height);
+    check('...the whole of a day in the middle', hgt(tail(2, 'conf')) === 24 * 52 - 2, tail(2, 'conf')?.style.height);
+    check('...and the last to where it ends', hgt(tail(3, 'conf')) === 17 * 52 - 2 && !tail(4, 'conf'), tail(3, 'conf')?.style.height);
+
+    check('a block as an event: past midnight the end is on the next day',
+      JSON.stringify(W.endsAt({ date: '2026-09-08', start: '23:00', mins: 120 })) === JSON.stringify({ start: '23:00', end: '01:00', endDate: '2026-09-09' }));
+    check('...no length is no length', W.endsAt({ date: '2026-09-08', start: '10:00', mins: 0 }).endDate === '2026-09-08');
+
+    // dragged, with two-way sync on
+    Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary' });
+    W.renderWeek(stage, { navigate });
+    // its top in the middle of the scroller, so the drag is not near an
+    // edge that scrolls the grid under it
+    stage.querySelector('.week-scroll').scrollTop = 400;
+    const el = stage.querySelectorAll('.daycol')[1].querySelector('.blk.ext[data-eid="conf"]');
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + 60;
+    const pt = (type, py, target) => (target || window).dispatchEvent(new PointerEvent(type,
+      { bubbles: true, button: 0, pointerId: 9, pointerType: 'mouse', clientX: x, clientY: py }));
+    pt('pointerdown', y, el);
+    pt('pointermove', y + 12);
+    pt('pointermove', y + 52);
+    pt('pointerup', y + 52);
+    const conf = () => s.state.events.find((e) => e.id === 'conf');
+    check('dragged an hour on, it keeps its days: ends on the Wednesday', conf().start === '10:00' && conf().end === '18:00' && conf().endDate === '2026-09-09' && conf().date === '2026-09-07', JSON.stringify(conf()));
+    const undo = [...document.querySelectorAll('#toasts .toast button')].pop();
+    undo?.click();
+    check('...and its Undo puts the end day back too', conf().start === '09:00' && conf().end === '17:00' && conf().endDate === '2026-09-09', JSON.stringify(conf()));
+  } finally {
+    stage.remove();
+    W.showWeekOf();
+    Object.assign(g, hadG);
+    s.state.settings.weekStart = hadWeekStart;
+    s.state.events = [];
+    s.state.outbox.length = 0;
+  }
+});
 </script>
 </body>
 </html>
