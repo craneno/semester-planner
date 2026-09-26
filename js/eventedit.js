@@ -75,7 +75,8 @@ export function openEvent(id, { after } = {}) {
     if (!draft.date) { toast('It needs a day.'); return; }
     if (!draft.allDay && (!draft.start || !draft.end)) { toast('It needs a start and an end.'); return; }
     const all = repeating && scope === 'all';
-    const before = { title: e.title, date: e.date, start: e.start, end: e.end, allDay: !!e.allDay };
+    // the end day too, or an Undo of a stretch of days, or of a night, put back one day
+    const before = { title: e.title, date: e.date, start: e.start, end: e.end, allDay: !!e.allDay, endDate: e.endDate };
     const fields = all
       ? { title: draft.title.trim(), start: draft.start, end: draft.end }
       : draft.allDay

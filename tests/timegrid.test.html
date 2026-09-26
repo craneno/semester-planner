@@ -115,11 +115,16 @@ suite('Time grid — sweeping out a range', async ({ check }) => {
     check('...and snapping to the quarter', moveBlock(607, 60).start === 600);
     check('a block carried off the top of the day stops at midnight',
       moveBlock(-90, 60).start === 0);
-    check('a block carried off the bottom stops with its end at midnight',
-      (() => { const r = moveBlock(23 * 60 + 45, 60); return r.start + r.mins === 24 * 60; })(),
-      'the whole block stays in the day, rather than its tail being cut off');
-    check('a block longer than the grid still lands somewhere',
-      moveBlock(600, 26 * 60).start === 0);
+    // the grid draws a block past midnight to midnight and its tail on the
+    // next day, so a move may run one past it; only the start stays in the day
+    check('a block carried late runs past midnight, where it was put',
+      (() => { const r = moveBlock(23 * 60 + 30, 60); return r.start === 23 * 60 + 30 && r.mins === 60; })(),
+      'held to end by midnight, a block that ran past it jumped an hour earlier at a touch');
+    check('...its start still in the day', moveBlock(24 * 60 + 90, 60).start === 24 * 60 - 15);
+    check('a block that already ran past midnight keeps its start when nudged',
+      (() => { const r = moveBlock(23 * 60 + 15, 120); return r.start === 23 * 60 + 15 && r.mins === 120; })());
+    check('a block longer than the grid lands where it is put',
+      moveBlock(600, 26 * 60).start === 600 && moveBlock(600, 26 * 60).mins === 26 * 60);
   }
 
   /* ---- stretching one by an edge ---- */

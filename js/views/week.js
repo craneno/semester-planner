@@ -2,7 +2,8 @@
 // views/week.js — the calendar. Owned blocks are filled, borrowed ones are outlined.
 
 import {
-  h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx
+  h, clear, today, addDays, startOfWeek, weekDays, fmtDate, fmtTime, fmtDuration, DOW, toMin, fromMin, clamp, hexAlpha, MONTHS, parseYmd, fmtHours, tz, tzLabel, cssPx,
+  clockDate, diffDays, eventMins
 } from '../util.js';
 import {
   state, commit, classesOn, eventsOn, itemsDueOn, itemsPlannedOn, workloadFor, scheduleDrift, itemColor
@@ -39,7 +40,8 @@ function placeNowLine(col, dayStart, hourH) {
     const d = new Date();
     const mins = d.getHours() * 60 + d.getMinutes();
     line.style.top = ((mins - dayStart * 60) / 60) * hourH + 'px';
-    line.hidden = mins < dayStart * 60;
+    // past midnight the clock is on the next column: this one's line goes
+    line.hidden = mins < dayStart * 60 || col.dataset.date !== clockDate(d);
   };
   // placed now, while the column is still being built and not yet in the
   // document — the isConnected check belongs to the ticks, not the first draw
@@ -201,9 +203,9 @@ export function renderWeek(root, { navigate } = {}) {
     if (showExternal) {
       for (const e of eventsOn(d).filter((x) => !x.allDay && x.start)) {
         if (held?.dataset.eid === e.id) continue;
-        const s = toMin(e.start);
-        let en = toMin(e.end) || s + 60;
-        if (en <= s) en += 24 * 60;      // past midnight: drawn to it, the rest on the next day
+        // the true length, to the day it ends: past midnight it is drawn to
+        // midnight, the rest on the days after; start and end the same is no length
+        const s = toMin(e.start), en = s + eventMins(e);
         const hgt = Math.max(18, (until(s, en) / 60) * hourH - 2);
         const el = h('div', {
           class: 'blk ext' + (hgt < COMPACT_H ? ' compact' : ''),
@@ -265,15 +267,20 @@ export function renderWeek(root, { navigate } = {}) {
         `${t.title} · from ${fmtTime(t.plan.start, hour12)} the day before`, () => openItem(t.id));
       el.dataset.tail = t.id;
     }
+    // a Google event can run on for days: the part of it on this one, the
+    // whole day for a day in the middle
     if (showExternal) {
-      for (const e of eventsOn(prev).filter((x) => !x.allDay && x.start && x.end && toMin(x.end) <= toMin(x.start))) {
-        tail(toMin(e.end), 'ext', null, e.title, `${e.title} · from ${fmtTime(e.start, hour12)} the day before (Google Calendar)`, () => openEvent(e.id, { after: navigate }));
+      for (const { e, over } of runningInto(d)) {
+        const from = diffDays(e.date, d) > 1 ? `from ${fmtDate(e.date)} ${fmtTime(e.start, hour12)}` : `from ${fmtTime(e.start, hour12)} the day before`;
+        const el = tail(over, 'ext', null, e.title, `${e.title} · ${from} (Google Calendar)`, () => openEvent(e.id, { after: navigate }));
+        el.dataset.tailEid = e.id;
       }
     }
 
     // and now the widths, which only the whole day knows
     applyLanes(col.querySelectorAll('.blk:not(.dragging)'), packBlocks(laid));
-    if (d === today()) placeNowLine(col, dayStart, hourH);
+    // the clock's date, not the planner day: at 1am the line is on the new day
+    if (d === clockDate()) placeNowLine(col, dayStart, hourH);
   };
 
   const turner = pageTurner({ body, days, title, head, rail, headFor, cellFor, dress, fillCol });
@@ -361,6 +368,25 @@ function spanFor(days) {
   return first.getMonth() === last.getMonth()
     ? `${MONTHS[first.getMonth()]} ${first.getDate()}–${last.getDate()}`
     : `${MONTHS[first.getMonth()].slice(0, 3)} ${first.getDate()} – ${MONTHS[last.getMonth()].slice(0, 3)} ${last.getDate()}`;
+}
+
+/**
+ * Google's timed events begun on an earlier day that run into `d`, each with
+ * how much of `d` it covers, in minutes from its top — a whole day at most.
+ * @param {string} d
+ * @returns {Array<{ e: any, over: number }>}
+ */
+export function runningInto(d) {
+  const out = [];
+  for (const e of state.events) {
+    if (e.allDay || !e.start || e.date >= d || (e.endDate && e.endDate < d)) continue;
+    const over = toMin(e.start) + eventMins(e) - diffDays(e.date, d) * 24 * 60;
+    if (over <= 0) continue;
+    // one that shadows a class is drawn as the class, and not after it either
+    if (!eventsOn(e.date).includes(e)) continue;
+    out.push({ e, over: Math.min(over, 24 * 60) });
+  }
+  return out;
 }
 
 /** How tall an hour is drawn, straight from the stylesheet that draws it. */
@@ -488,19 +514,28 @@ function wireBlock(el, item, body, days, dayStart, dayEnd, hourH, navigate, turn
   });
 }
 
+/** A block's `{ date, start, mins }` as an event's start, end and the day it
+ *  ends — past midnight, or days on, the end is on the day it falls.
+ * @param {{ date: string, start: string, mins: number }} plan */
+export function endsAt({ date, start, mins }) {
+  const until = toMin(start) + mins;
+  return { start, end: fromMin(until % (24 * 60)), endDate: addDays(date, Math.floor(until / (24 * 60))) };
+}
+
 /* A Google event moves like a block, and the move goes to Google — with
    an Undo, since `events` is not the store's to remember. */
 function wireEvent(el, e, body, days, dayStart, dayEnd, hourH, navigate, turner) {
-  const s = toMin(e.start), en = toMin(e.end) || s + 60;
-  dragBlock(el, { date: e.date, start: e.start, mins: en - s }, {
+  // its whole length, days and a night included; no length stays none
+  const mins = eventMins(e);
+  dragBlock(el, { date: e.date, start: e.start, mins }, {
     hit: (ev) => hit(ev, body, days, dayStart, hourH, dayEnd),
     hourH, origin: dayStart * 60, dayEnd: dayEnd * 60,
     edge: (ev) => { edgeScroll(ev, body); turner.at(ev); MM.dragOver(ev); },
-    over: () => { const day = MM.dragDay(); return day ? { date: day, start: e.start, mins: en - s } : null; },
+    over: () => { const day = MM.dragDay(); return day ? { date: day, start: e.start, mins } : null; },
     onEnd: (dropped) => { MM.dragEnd(); if (turner.end(dropped)) navigate(); },
     onDrop: (plan) => {
-      const before = { date: e.date, start: e.start, end: e.end, allDay: false };
-      editEvent(e.id, { date: plan.date, start: plan.start, end: fromMin(toMin(plan.start) + plan.mins), allDay: false });
+      const before = { date: e.date, start: e.start, end: e.end, endDate: e.endDate, allDay: false };
+      editEvent(e.id, { date: plan.date, allDay: false, ...endsAt(plan) });
       navigate();
       toast(`Moved to ${fmtDate(plan.date)} ${fmtTime(plan.start, state.settings.hour12)}, on Google too`, {
         action: 'Undo', onAction: () => { editEvent(e.id, before); navigate(); }

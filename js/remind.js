@@ -9,7 +9,7 @@
 // a reload does not say it twice.
 
 import { state, dayTimeline, minsNow } from './store.js';
-import { today, toMin, fmtTime } from './util.js';
+import { clockDate, toMin, fmtTime } from './util.js';
 import { warn } from './problems.js';
 
 export const LEADS = [0, 5, 10, 15, 30, 60];
@@ -27,14 +27,14 @@ export function dueReminders(list, now, lead, said = new Set()) {
   });
 }
 
-function loadSaid() {
+function loadSaid(date) {
   try {
     const j = JSON.parse(localStorage.getItem(KEY) || 'null');
-    return j && j.date === today() ? new Set(j.keys) : new Set();
+    return j && j.date === date ? new Set(j.keys) : new Set();
   } catch { return new Set(); }
 }
-function saveSaid(set) {
-  try { localStorage.setItem(KEY, JSON.stringify({ date: today(), keys: [...set] })); } catch { /* full */ }
+function saveSaid(set, date) {
+  try { localStorage.setItem(KEY, JSON.stringify({ date, keys: [...set] })); } catch { /* full */ }
 }
 
 export const lead = () => Number(state.settings.remindLead) || 0;
@@ -56,11 +56,13 @@ async function show(title, body, tag) {
   } catch (e) { warn('remind', e); }
 }
 
-/** One look at the clock. Returns what it said. */
-export function tick(now = minsNow(), date = today()) {
+/** One look at the clock. Returns what it said. The day is the clock's, to
+ *  go with its minutes: at 00:40 a block at 00:50 is today's, though the
+ *  planner day (`today()`) is still yesterday until the 3am reset. */
+export function tick(now = minsNow(), date = clockDate()) {
   const l = lead();
   if (!l || permission() !== 'granted') return [];
-  const said = loadSaid();
+  const said = loadSaid(date);
   const due = dueReminders(dayTimeline(date), now, l, said);
   const hour12 = state.settings.hour12;
   for (const e of due) {
@@ -70,7 +72,7 @@ export function tick(now = minsNow(), date = today()) {
       keyOf(e));
     said.add(keyOf(e));
   }
-  if (due.length) saveSaid(said);
+  if (due.length) saveSaid(said, date);
   return due;
 }
 

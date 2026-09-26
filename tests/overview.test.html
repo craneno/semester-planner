@@ -15,9 +15,12 @@
    top three has today's work, and tomorrow's peek names what tomorrow
    starts with and opens the Week when clicked. */
 import { suite, sharedStoreWith, renderInto } from './harness.js';
-import { today, addDays } from '../js/util.js';
+import { today, addDays, clockDate } from '../js/util.js';
 
 const day = today(), tmw = addDays(day, 1);
+// the next-class card reads the clock's date, which from midnight to the
+// 3am reset is a day on from the planner's
+const clockTmw = addDays(clockDate(), 1);
 const dow = (d) => new Date(d + 'T12:00:00').getDay();
 // the term runs around today, whenever the suite runs, so the classes count
 const term = { name: 'Term', start: addDays(day, -30), end: addDays(day, 60) };
@@ -28,7 +31,7 @@ const s = await sharedStoreWith({
     { id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' },
     // one class tomorrow at 9:30, none today: the card must say so
     { id: 'th', name: 'Thermo', category: 'course', order: 1, color: '#8F3C3C',
-      schedule: [{ days: [dow(tmw)], start: '09:30', end: '10:45', location: 'Snell 108' }] }
+      schedule: [{ days: [dow(clockTmw)], start: '09:30', end: '10:45', location: 'Snell 108' }] }
   ],
   items: [
     { id: 'blk', title: 'Write the lab', areaId: 'gen', plan: { date: day, start: '10:00', mins: 90 }, due: null },
@@ -59,7 +62,7 @@ suite('Overview — the day on one page', async ({ check }) => {
     peek.click();
     check('...and opens the Week', v.went.includes('week'));
     const W = await import('../js/views/week.js');
-    check('...on that day', W.weekAnchor() === tmw, W.weekAnchor());
+    check('...on that day', W.weekAnchor() === clockTmw, W.weekAnchor());
     W.showWeekOf();
   } finally {
     v.done();
@@ -105,6 +108,31 @@ suite('Overview — the next class moves on', async ({ check }) => {
   check('a day with none is skipped', skip.ahead === 2 && skip.date === twoDays && skip.list[0].start === '11:00', JSON.stringify(skip));
   s.state.areas[1].schedule = [];
   check('no classes at all is null', nextClass(day, at(15)) === null);
+});
+
+/* Past midnight on the day clock, as the Week draws it. What has to hold:
+   a block from yesterday that ran past midnight shows its tail at the top
+   of today, opening the same task; and a Google event from 23:00 to 01:00
+   is drawn to midnight, an hour tall, not a sliver. */
+suite('Overview — what runs past midnight', async ({ check }) => {
+  const { renderOverview } = await import('../js/views/overview.js');
+  const hh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--day-hour-h')) || 34;
+  s.upsertItem({ id: 'nite', title: 'Night shift', areaId: 'gen', plan: { date: addDays(day, -1), start: '23:00', mins: 120 } });
+  s.state.events = [
+    { id: 'gl', title: 'Late call', date: day, start: '23:00', end: '01:00', endDate: tmw, allDay: false, location: '' }
+  ];
+  const v = renderInto(renderOverview);
+  try {
+    const tail = v.stage.querySelector('.today-col .blk.is-tail[data-tail="nite"]');
+    check('yesterday’s block past midnight has its tail at the top of today', !!tail && parseFloat(tail.style.top) === 0);
+    check('...as tall as what ran over: an hour', Math.round(parseFloat(tail.style.height)) === Math.round(hh - 2), tail?.style.height);
+    const late = [...v.stage.querySelectorAll('.today-col .blk.ext')].find((b) => b.textContent.includes('Late call') && !b.classList.contains('is-tail'));
+    check('a Google event from 23:00 to 01:00 is an hour to midnight, not a sliver', !!late && Math.round(parseFloat(late.style.height)) === Math.round(hh - 2), late?.style.height);
+  } finally {
+    v.done();
+    s.state.events = [];
+    if (s.itemById('nite')) s.deleteItem('nite');
+  }
 });
 </script>
 </body>

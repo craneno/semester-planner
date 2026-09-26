@@ -74,6 +74,16 @@ export function today(now = new Date()) {
   return ymd(d);
 }
 
+/**
+ * The calendar date the clock is on, midnight to midnight — for "what is
+ * happening at this minute", which pairs with the clock's minutes. Not the
+ * planner day: at 1am `today()` is still yesterday, but a block at 00:50 is
+ * on this date, and so is the now line.
+ */
+export function clockDate(now = new Date()) {
+  return ymd(new Date(now));
+}
+
 export function addDays(s, n) {
   const d = parseYmd(s) || new Date();
   d.setDate(d.getDate() + n);
@@ -125,6 +135,23 @@ export function toMin(hhmm) {
   const [h_, m] = hhmm.split(':').map(Number);
   return h_ * 60 + (m || 0);
 }
+/**
+ * How long a timed event runs, in minutes: from `date` at `start` to
+ * `endDate` at `end` — so 23:00 to 01:00 is two hours, an end at 00:00 is
+ * midnight, and Mon 09:00 to Wed 17:00 is all of it. Start and end the same
+ * on one day is zero, not a day. No end at all is an hour.
+ * @param {{ date?: string, start?: string|null, end?: string|null, endDate?: string|null }} e
+ */
+export function eventMins(e) {
+  const s = toMin(e.start), en = toMin(e.end);
+  if (s == null) return 0;
+  if (en == null) return 60;
+  const days = e.endDate && e.date ? diffDays(e.date, e.endDate) : (en < s ? 1 : 0);
+  const m = days * 24 * 60 + en - s;
+  // an end before its start with no day to say so is the next morning's
+  return m < 0 ? m + 24 * 60 : m;
+}
+
 /** The five-minute step every time box moves in. */
 export const TIME_STEP = 5;
 

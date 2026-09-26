@@ -130,8 +130,9 @@ export function applyLanes(els, lanes) {
   });
 }
 
+// past midnight, the time it ends the next morning
 const label = (mins, hour12) =>
-  (mins >= DAY ? 'midnight' : fmtTime(fromMin(mins), hour12));
+  (mins === DAY ? 'midnight' : fmtTime(fromMin(mins % DAY), hour12));
 
 /* ---------------- moving and resizing a block ----------------
    The other half of the calendar gesture: take hold of a block that is already
@@ -169,9 +170,14 @@ export function grabMode(rect, clientY, edge = EDGE) {
  * `mins` is already the would-be start — the caller subtracts wherever in the
  * block it was picked up, so a block grabbed by its middle keeps that grip
  * instead of snapping its top under the pointer.
+ *
+ * The start stays in the day; the end may run past midnight, the way a
+ * block already does — the grid draws it to midnight and its tail on the
+ * next day. Held to end by midnight, a block that ran past it jumped an
+ * hour earlier at the lightest touch.
  */
 export function moveBlock(mins, dur, { dayEnd = DAY } = {}) {
-  return { start: clamp(snapMins(mins), 0, Math.max(0, dayEnd - dur)), mins: dur };
+  return { start: clamp(snapMins(mins), 0, Math.max(0, dayEnd - SNAP)), mins: dur };
 }
 
 /** The top edge moves the start; the end stays where it was put. */
@@ -270,7 +276,8 @@ export function dragBlock(el, plan, { hit, hourH, origin = 0, edge, over, onDrop
       if (!ghost) ghost = h('div', { class: 'drop-ghost is-new' }, h('span', { class: 'ghost-t' }));
       if (ghost.parentElement !== col) col.append(ghost);
       ghost.style.top = ((range.start - origin) / 60 * hourH) + 'px';
-      ghost.style.height = Math.max(11, range.mins / 60 * hourH - 2) + 'px';
+      // drawn to the end of the grid, as the block will be; the label says the rest
+      ghost.style.height = Math.max(11, Math.min(range.mins, dayEnd - range.start) / 60 * hourH - 2) + 'px';
       ghost.firstChild.textContent =
         `${label(range.start, hour12)} – ${label(range.start + range.mins, hour12)}`;
     };

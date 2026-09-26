@@ -7,7 +7,7 @@
 
 import {
   h, clear, today, fmtDate, fmtTime, fmtHours, fmtDuration,
-  toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce, addDays
+  toMin, fromMin, hexAlpha, DOW_LONG, MONTHS, parseYmd, debounce, addDays, clockDate, eventMins
 } from '../util.js';
 import {
   state, commit, upsertItem, upcoming, overdue,
@@ -16,7 +16,7 @@ import {
 } from '../store.js';
 import { areaTag, dueChip, meta } from '../ui.js';
 import { openItem } from '../editor.js';
-import { showWeekOf } from './week.js';
+import { showWeekOf, runningInto } from './week.js';
 import { openEvent, openClass } from '../eventedit.js';
 import { captureStrip, unfiledQueue } from '../capture.js';
 import { dragCreate, tapCreate, dragBlock, newBlockPrompt, snapMins, edgeScroll, packBlocks, applyLanes } from '../timegrid.js';
@@ -130,9 +130,9 @@ function todayColumn(day, { navigate, go }) {
      another; the widths are settled once the whole day is gathered. */
   const laid = [];
   /**
-   * @param {{ start: number, mins: number, cls?: string, color?: string|null, title: string, sub?: string, onclick?: () => void, done?: boolean }} b
+   * @param {{ start: number, mins: number, cls?: string, color?: string|null, title: string, sub?: string, onclick?: () => void, done?: boolean, label?: string }} b
    */
-  const block = ({ start, mins, cls, color, title, sub, onclick, done }) => {
+  const block = ({ start, mins, cls, color, title, sub, onclick, done, label }) => {
     laid.push({ start, mins });
     // to midnight at most: the clock ends there
     const height = Math.max(16, (Math.min(mins, HOURS * 60 - start) / 60) * hourH - 2);
@@ -146,7 +146,7 @@ function todayColumn(day, { navigate, go }) {
       title: sub ? `${title} · ${sub}` : title,
       onclick
     },
-    h('div', { class: 't' }, fmtTime(fromMin(start), hour12)),
+    h('div', { class: 't' }, label ?? fmtTime(fromMin(start), hour12)),
     h('div', { class: 'n' }, title));
   };
 
@@ -158,12 +158,33 @@ function todayColumn(day, { navigate, go }) {
     }));
   }
   for (const e of eventsOn(day).filter((x) => !x.allDay && x.start)) {
-    const s = toMin(e.start), en = toMin(e.end) || s + 60;
+    // to the day and time it ends: 23:00 to 01:00 is two hours, drawn to midnight
     lanes.append(block({
-      start: s, mins: en - s, cls: 'ext', color: null,
+      start: toMin(e.start), mins: eventMins(e), cls: 'ext', color: null,
       title: e.title, sub: e.location || 'Google Calendar',
       onclick: () => openEvent(e.id, { after: navigate })
     }));
+  }
+  /* What ran past midnight into this day, as the Week draws it: a tail at
+     the top, to where it ended, opening the thing itself. Not dragged — the
+     block on the day it began is the one to move. */
+  const tailAt = (over) => `… ${fmtTime(fromMin(Math.min(over, 24 * 60 - 1)), hour12)}`;
+  for (const t of itemsPlannedOn(addDays(day, -1)).filter((x) => x.plan.start)) {
+    const over = toMin(t.plan.start) + (t.plan.mins || t.estMins || 60) - 24 * 60;
+    if (over <= 0) continue;
+    const el = lanes.appendChild(block({
+      start: 0, mins: Math.min(over, 24 * 60), cls: 'plan is-tail', color: itemColor(t), label: tailAt(over),
+      title: t.title, sub: `from ${fmtTime(t.plan.start, hour12)} the day before`, done: t.done,
+      onclick: () => openItem(t.id)
+    }));
+    el.dataset.tail = t.id;
+  }
+  for (const { e, over } of runningInto(day)) {
+    const el = lanes.appendChild(block({
+      start: 0, mins: over, cls: 'ext is-tail', color: null, label: tailAt(over),
+      title: e.title, sub: 'Google Calendar', onclick: () => openEvent(e.id, { after: navigate })
+    }));
+    el.dataset.tailEid = e.id;
   }
   /* Planned work is the only thing here that can be taken hold of: a class
      comes from an area's recurring schedule and a Google event is a mirror, so
@@ -184,7 +205,9 @@ function todayColumn(day, { navigate, go }) {
 
   applyLanes(lanes.children, packBlocks(laid));
 
-  if (day === today()) {
+  // the clock's date, not the planner day: from midnight to the 3am reset
+  // the day drawn here is yesterday, and the clock is not on it
+  if (day === clockDate()) {
     const now = new Date();
     lanes.append(h('div', {
       class: 'nowline', style: { top: top(now.getHours() * 60 + now.getMinutes()) + 'px' }
@@ -245,8 +268,10 @@ function todayColumn(day, { navigate, go }) {
  * tomorrow's first, then the first on the next day that has any, up to two
  * weeks out. Classes only — a planned block is not somewhere to be. It opens
  * that week, and redraws itself each minute so a class that ends moves it on.
+ * The day is the clock's, as the minutes are: at 1am yesterday's classes are
+ * over, not still ahead.
  */
-export function nextClass(day = today(), mins = minsNow()) {
+export function nextClass(day = clockDate(), mins = minsNow()) {
   const left = classesOn(day).filter((c) => toMin(c.end) > mins);
   if (left.length) return { date: day, list: left, ahead: 0, now: toMin(left[0].start) <= mins };
   for (let n = 1; n <= 14; n++) {
@@ -258,7 +283,7 @@ export function nextClass(day = today(), mins = minsNow()) {
 }
 
 function nextClassPeek(day, go) {
-  const next = nextClass(day);
+  const next = nextClass();
   const card = h('button', {
     class: 'card next-class', type: 'button', title: next ? 'Open that week' : 'Open the week',
     onclick: () => { showWeekOf(next ? next.date : day); go('week'); }

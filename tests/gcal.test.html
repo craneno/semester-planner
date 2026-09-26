@@ -406,10 +406,13 @@ suite('Calendar — Google\'s own events, edited in place', async ({ check }) =>
     G.editEvent('heads', { allDay: true });
     await tick(450);
     check('all day goes as dates, the end the morning after', writes()[1].body.start.date === '2026-09-09' && writes()[1].body.end.date === '2026-09-10' && heads().start === null, JSON.stringify(writes()[1]?.body));
+    // a PATCH is merged into what Google holds: the time it had must be cleared
+    check('...clearing the time it had', writes()[1].body.start.dateTime === null && writes()[1].body.end.dateTime === null, JSON.stringify(writes()[1]?.body));
 
     G.editEvent('heads', { allDay: false, start: '23:00', end: '00:30' });
     await tick(450);
     check('an end before its start is the next morning', /^2026-09-10T00:30/.test(writes()[2].body.end.dateTime), JSON.stringify(writes()[2]?.body));
+    check('...and back to a time clears the date', writes()[2].body.start.date === null && writes()[2].body.end.date === null, JSON.stringify(writes()[2]?.body));
 
     // Google no longer has it
     answer = () => ({ ok: false, status: 404, text: async () => 'gone' });
@@ -592,6 +595,189 @@ suite('Calendar — a sign-in that keeps', async ({ check }) => {
     Object.assign(cl, had.cl);
     C._setClient(null);
     C.cloud.userId = null;
+  }
+});
+
+/* How long a thing is, read from the day it ends as well as the time. What
+   has to hold: our own block moved in Google to run past midnight, or to
+   end at 00:00, comes back as long as it is, and a stretch of days keeps
+   its last day; a queue left waiting on a sign-in goes out after a sync
+   that worked; a block made a series takes its old event off Google, and
+   that old event coming down never moves the series or becomes its event;
+   each time of a repeating stretch runs from its own day; the cap on a
+   series counts from today; and an edit to Google's own event keeps the
+   days it runs across. */
+suite('Calendar — lengths, stretches, and a block that became a series', async ({ check }) => {
+  const G = await import('../js/gcal.js');
+  const { eventMins, toRfc3339, today, addDays } = await import('../js/util.js');
+  const hop = () => new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = () => r(); c.port2.postMessage(0); });
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms)).then(hop);
+  const T = today();
+
+  check('23:00 to 01:00 the next day is two hours', eventMins({ date: '2026-09-08', start: '23:00', end: '01:00', endDate: '2026-09-09' }) === 120);
+  check('an end at 00:00 is midnight, not an hour', eventMins({ date: '2026-09-08', start: '22:00', end: '00:00', endDate: '2026-09-09' }) === 120);
+  check('start and end the same is no length, not a day', eventMins({ date: '2026-09-08', start: '10:00', end: '10:00', endDate: '2026-09-08' }) === 0);
+  check('Mon 09:00 to Wed 17:00 is all of it', eventMins({ date: '2026-09-07', start: '09:00', end: '17:00', endDate: '2026-09-09' }) === 2 * 24 * 60 + 8 * 60);
+  check('no end is an hour', eventMins({ date: '2026-09-08', start: '10:00', end: null }) === 60);
+
+  const pa = G.patchBody(G.eventBodyOf({ title: 'x', date: '2026-09-08', endDate: '2026-09-09', allDay: true }));
+  check('an all-day PATCH clears the time', pa.start.dateTime === null && pa.end.dateTime === null && pa.start.date === '2026-09-08', JSON.stringify(pa));
+  const pt = G.patchBody(G.eventBodyOf({ title: 'x', date: '2026-09-08', start: '09:00', end: '10:00', endDate: '2026-09-08', allDay: false }));
+  check('a timed PATCH clears the date', pt.start.date === null && pt.end.date === null && !!pt.start.dateTime, JSON.stringify(pt));
+
+  const real = globalThis.fetch;
+  const calls = [];
+  let incoming = [];
+  let posts = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    calls.push({ method, url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    const body = method === 'GET' ? { items: incoming, nextSyncToken: 'tok-len' } : method === 'POST' ? { id: 'new-' + (++posts) } : { id: 'x' };
+    return { ok: true, status: method === 'DELETE' ? 204 : 200, json: async () => body, text: async () => '' };
+  };
+  const g = s.state.settings.gcal;
+  const had = { settings: { ...G.pushSettings }, g: { ...g }, status: G.gcal.status, lastError: G.gcal.lastError, backoffUntil: G.gcal.backoffUntil };
+  const cal0 = s.state.calendar.start;
+  s.state.calendar.start = '2026-08-01';
+  Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary', syncToken: 'tok-len', window: G.pullWindow() });
+  G.gcal.token = { access_token: 'tok', expires_at: Date.now() + 3600e3 };
+  Object.assign(G.pushSettings, { wait: 300, maxWait: 600, backoff: 1200, backoffMax: 3000 });
+  s.state.outbox.length = 0;
+  const own = (id, itemId, start, end) => ({ id, summary: 'x', start, end, extendedProperties: { private: { plannerItemId: itemId } }, updated: 'u' });
+  const ids = ['nite', 'mid', 'trip', 'fl', 'gym', 'yoga', 'camp', 'old'];
+
+  try {
+    // our own blocks, changed in Google
+    s.upsertItem({ id: 'nite', title: 'Night shift', plan: { date: '2026-09-10', start: '20:00', mins: 60 }, gcalId: 'g-nite' });
+    s.upsertItem({ id: 'mid', title: 'To midnight', plan: { date: '2026-09-10', start: '09:00', mins: 60 }, gcalId: 'g-mid' });
+    s.upsertItem({ id: 'trip', title: 'Trip', plan: { date: '2026-09-12', start: null, mins: 0, end: '2026-09-13' }, gcalId: 'g-trip' });
+    incoming = [
+      own('g-nite', 'nite', { dateTime: toRfc3339('2026-09-10', '23:00') }, { dateTime: toRfc3339('2026-09-11', '01:00') }),
+      own('g-mid', 'mid', { dateTime: toRfc3339('2026-09-10', '22:00') }, { dateTime: toRfc3339('2026-09-11', '00:00') }),
+      own('g-trip', 'trip', { date: '2026-09-19' }, { date: '2026-09-22' })
+    ];
+    await G.sync();
+    const nite = s.itemById('nite').plan, mid = s.itemById('mid').plan, trip = s.itemById('trip').plan;
+    check('a block moved in Google to run past midnight keeps its two hours', nite.start === '23:00' && nite.mins === 120, JSON.stringify(nite));
+    check('...and one ending at 00:00 is as long as it is, not an hour', mid.start === '22:00' && mid.mins === 120, JSON.stringify(mid));
+    check('an all-day stretch moved in Google keeps its last day', trip.date === '2026-09-19' && trip.end === '2026-09-21' && !trip.start, JSON.stringify(trip));
+
+    // a queue that waited on a sign-in: no send timed for it, and a sync that
+    // worked is the sign-in holding, so it goes
+    incoming = [];
+    s.upsertItem({ id: 'fl', title: 'Stranded', plan: { date: T, start: '09:00', mins: 60 } });
+    s.state.outbox.push({ kind: 'upsert', itemId: 'fl', at: Date.now() });
+    await G.sync();
+    await tick(150);
+    check('a queue left waiting goes out after a sync that worked', calls.some((c) => c.method === 'POST' && c.body?.extendedProperties?.private?.plannerItemId === 'fl') && s.state.outbox.length === 0,
+      JSON.stringify(calls.filter((c) => c.method !== 'GET').map((c) => c.method)));
+
+    // the event a block had before it repeated, come down in a pull
+    s.upsertItem({ id: 'gym', title: 'Gym', plan: { date: '2026-09-14', start: '07:00', mins: 60 }, gcalIds: { '2026-09-14': 'g-gym-1' },
+      repeat: { freq: 'daily', every: 1, days: [], until: null, count: 3, ex: {} } });
+    incoming = [own('g-gym-old', 'gym', { dateTime: toRfc3339('2026-09-14', '18:00') }, { dateTime: toRfc3339('2026-09-14', '19:00') })];
+    await G.sync();
+    const gym = s.itemById('gym');
+    check('the old event of a block made a series does not move the series', gym.plan.start === '07:00' && gym.plan.date === '2026-09-14' && gym.plan.mins === 60, JSON.stringify(gym.plan));
+    check('...is not taken for its event', !gym.gcalId && Object.values(gym.gcalIds).join() === 'g-gym-1', JSON.stringify([gym.gcalId, gym.gcalIds]));
+    check('...and is queued to go', s.state.outbox.some((o) => o.kind === 'event-delete' && o.eventId === 'g-gym-old'), JSON.stringify(s.state.outbox));
+    incoming = [];
+    await tick(450);
+    check('...and goes', calls.some((c) => c.method === 'DELETE' && /\/events\/g-gym-old$/.test(c.url)) && s.state.outbox.length === 0);
+
+    // a block on Google made a series
+    s.upsertItem({ id: 'yoga', title: 'Yoga', plan: { date: T, start: '07:00', mins: 60 }, gcalId: 'g-yoga-single' });
+    s.upsertItem({ id: 'yoga', repeat: { freq: 'daily', every: 1, days: [], until: null, count: 2, ex: {} } });
+    await G.pushItem('yoga');
+    await tick(450);
+    const yoga = s.itemById('yoga');
+    check('a block made a series takes its old event off Google', calls.some((c) => c.method === 'DELETE' && /\/events\/g-yoga-single$/.test(c.url)));
+    check('...and makes one for each day, the first included', !yoga.gcalId && Object.keys(yoga.gcalIds || {}).length === 2
+      && calls.filter((c) => c.method === 'POST' && /^yoga@/.test(c.body?.extendedProperties?.private?.plannerItemId || '')).length === 2, JSON.stringify([yoga.gcalId, yoga.gcalIds]));
+
+    // a repeating stretch of days: each time runs as long from its own day
+    s.upsertItem({ id: 'camp', title: 'Camp', plan: { date: T, start: null, mins: 0, end: addDays(T, 2) },
+      repeat: { freq: 'weekly', every: 1, days: [], until: null, count: 3, ex: {} } });
+    const camp = [...G.wantedFor(s.itemById('camp')).want.entries()];
+    check('each time of a repeating stretch runs from its own day', camp.length === 3 && camp.every(([k, b]) => b.start.date === k && b.end.date === addDays(k, 3)),
+      JSON.stringify(camp.map(([k, b]) => [k, b.start.date, b.end.date])));
+
+    // an old daily series: the cap counts from today
+    s.state.calendar.start = addDays(T, -300);
+    s.upsertItem({ id: 'old', title: 'Walk', plan: { date: addDays(T, -300), start: '08:00', mins: 30 },
+      gcalIds: { [addDays(T, -2)]: 'g-old-a', [addDays(T, -1)]: 'g-old-b' },
+      repeat: { freq: 'daily', every: 1, days: [], until: null, count: null, ex: {} } });
+    const { want, past } = G.wantedFor(s.itemById('old'));
+    const keys = [...want.keys()];
+    check('an old daily series still reaches ahead: the cap counts from today', keys.length === 250 && keys[0] === T && keys[249] === addDays(T, 249), `${keys.length} from ${keys[0]} to ${keys[keys.length - 1]}`);
+    check('...the days gone by already on Google are kept as they are', past.size === 2 && past.has(addDays(T, -1)) && !want.has(addDays(T, -1)), JSON.stringify([...past]));
+    s.state.calendar.start = '2026-08-01';
+
+    // Google's own events keep the days they run across
+    s.state.events = [
+      ev({ id: 'long', title: 'Trip', date: '2026-09-14', endDate: '2026-09-19', allDay: true, start: null, end: null }),
+      ev({ id: 'span', title: 'Conference', date: '2026-09-14', start: '09:00', end: '17:00', endDate: '2026-09-16' }),
+      ev({ id: 'nil', title: 'Reminder', date: '2026-09-15', start: '10:00', end: '10:00', endDate: '2026-09-15' })
+    ];
+    const evOf = (id) => s.state.events.find((x) => x.id === id);
+    G.editEvent('long', { title: 'Trip, renamed' });
+    check('a five-day trip renamed is still five days', evOf('long').endDate === '2026-09-19', evOf('long').endDate);
+    G.editEvent('long', { title: 'Trip, renamed', date: '2026-09-21', allDay: true });
+    check('...and moved, five days from its new first', evOf('long').endDate === '2026-09-26', evOf('long').endDate);
+    G.editEvent('span', { title: 'Conference, renamed', start: '09:00', end: '17:00' });
+    check('Mon 09:00 to Wed 17:00 renamed still ends on the Wednesday', evOf('span').endDate === '2026-09-16' && evOf('span').end === '17:00', JSON.stringify(evOf('span')));
+    G.editEvent('span', { start: '09:00', end: '18:00' });
+    check('...given a new end time, still on the Wednesday', evOf('span').endDate === '2026-09-16' && evOf('span').end === '18:00', evOf('span').endDate);
+    G.editEvent('span', { date: '2026-09-21' });
+    check('...moved, the same days on', evOf('span').endDate === '2026-09-23', evOf('span').endDate);
+    G.editEvent('nil', { title: 'Reminder, renamed', start: '10:00', end: '10:00' });
+    check('no length renamed is still no length, not a day', evOf('nil').endDate === '2026-09-15' && eventMins(evOf('nil')) === 0, evOf('nil').endDate);
+    G.editEvent('nil', { start: '23:00', end: '01:00', endDate: '2026-09-16' });
+    check('an end day given is the one kept', evOf('nil').endDate === '2026-09-16' && eventMins(evOf('nil')) === 120, evOf('nil').endDate);
+    await tick(450);
+    const sent = calls.filter((c) => c.method === 'PATCH' && /\/events\/long$/.test(c.url)).pop();
+    check('...and Google is told the whole run', sent?.body.start.date === '2026-09-21' && sent.body.end.date === '2026-09-26', JSON.stringify(sent?.body));
+  } finally {
+    globalThis.fetch = real;
+    G.gcal.token = null;
+    Object.assign(g, had.g);
+    Object.assign(G.pushSettings, had.settings);
+    Object.assign(G.gcal, { status: had.status, lastError: had.lastError, backoffUntil: had.backoffUntil });
+    s.state.calendar.start = cal0;
+    s.state.outbox.length = 0;
+    s.state.events = [];
+    for (const id of ids) if (s.state.items.some((t) => t.id === id)) s.deleteItem(id);
+  }
+});
+
+/* Google's sign-in script that did not load: said, and tried again next
+   time, not kept as a failure for the session with the status stuck at
+   Connecting…. The script is stood in for: its tag fails as it is added. */
+suite('Calendar — the sign-in script that did not load', async ({ check }) => {
+  const G = await import('../js/gcal.js');
+  const g = s.state.settings.gcal;
+  const had = { g: { ...g }, google: window.google, token: G.gcal.token, status: G.gcal.status };
+  let tries = 0;
+  document.head.append = function (...nodes) {
+    for (const n of nodes) {
+      if (String(n.src || '').includes('accounts.google.com')) { tries++; setTimeout(() => n.onerror?.()); return; }
+    }
+    return Element.prototype.append.apply(this, nodes);
+  };
+  try {
+    window.google = undefined;
+    G.gcal.token = null;
+    Object.assign(g, { enabled: true, pushPlans: true, clientId: 'test-client', calendarId: 'primary' });
+    const e1 = await G.signIn(false).then(() => null, (e) => e);
+    check('a quiet sign-in with no script says why', /did not load/.test(e1?.message || '') && G.gcal.status === 'signed-out' && /did not load/.test(G.gcal.message), `${G.gcal.status}: ${G.gcal.message}`);
+    const e2 = await G.signIn(false).then(() => null, (e) => e);
+    check('...and the next try loads it again, not the old failure', tries === 2 && /did not load/.test(e2?.message || ''), `${tries} tries`);
+  } finally {
+    delete document.head.append;
+    window.google = had.google;
+    G.gcal.token = had.token;
+    G.gcal.status = had.status;
+    Object.assign(g, had.g);
   }
 });
 </script>
