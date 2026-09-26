@@ -403,6 +403,31 @@ suite('Repeat — occurrences', async ({ check }) => {
     check('...carrying its exceptions with it',
       Object.keys(rows[0].data.repeat.ex).sort().join() === '2026-09-07,2026-09-09');
   }
+
+  /* ---- one week owed at another time ---- */
+
+  {
+    // a Friday reading owed at five; one Friday it is owed at nine instead
+    s.state.items.length = 0;
+    const item = s.upsertItem({
+      id: 'owed', title: 'Reading', areaId: 'c1', due: '2026-09-11', dueTime: '17:00', plan: null,
+      repeat: { freq: 'weekly', every: 1, days: [5], until: null, count: null, ex: {} }
+    });
+    s.upsertItem({ id: 'owed@2026-09-18', dueTime: '09:00' });
+    check('a time set on one occurrence of a deadline series is that one’s',
+      s.itemById('owed@2026-09-18').dueTime === '09:00', String(s.itemById('owed@2026-09-18').dueTime));
+    check('...and not every week’s', item.dueTime === '17:00' && s.itemById('owed@2026-09-25').dueTime === '17:00',
+      `${item.dueTime} / ${s.itemById('owed@2026-09-25').dueTime}`);
+
+    // the editor's shape: the whole when, with the plan cleared
+    s.upsertItem({ id: 'owed@2026-10-02', plan: null, due: '2026-10-02', dueTime: '08:00' });
+    check('...said the editor’s way too', s.itemById('owed@2026-10-02').dueTime === '08:00' && item.dueTime === '17:00',
+      `${s.itemById('owed@2026-10-02').dueTime} / ${item.dueTime}`);
+
+    s.upsertItem({ id: 'owed@2026-09-18', dueTime: '17:00' });
+    check('the series’ own time is no exception at all', !item.repeat.ex['2026-09-18'],
+      JSON.stringify(item.repeat.ex));
+  }
 });
 </script>
 </body>

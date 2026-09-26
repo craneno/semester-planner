@@ -361,6 +361,41 @@ suite('Quick add — what the bug hunt found', async ({ check }) => {
     JSON.stringify(p('Thus we begin')));
   check('"next monitor" is not next Monday', p('next monitor').due === null);
 
+  /* ---- words that hide a month ---- */
+
+  for (const str of ['mark 20 exams', 'decide 3 options', 'maybe 2 tickets', 'junk 4 boxes', 'augment 5 tests', 'octopus 3 legs']) {
+    const r = p(str);
+    check(`"${str}" is not a date`, r.due === null && r.plan === null && r.title === str, JSON.stringify([r.due, r.title]));
+  }
+  for (const [str, day] of [['exam march 20', '2027-03-20'], ['exam mar 20', '2027-03-20'], ['exam Sept. 12th', '2026-09-12'],
+    ['exam september 12', '2026-09-12'], ['exam dec 3', '2026-12-03'], ['exam may 2', '2027-05-02'], ['exam june 4', '2027-06-04']]) {
+    check(`"${str}" still is`, p(str).due === day, String(p(str).due));
+  }
+  {
+    const r = p('mark 3-5');
+    check('"mark 3-5" is a range of hours, not days of March', r.plan?.start === '15:00' && r.title === 'mark', JSON.stringify(r));
+  }
+
+  /* ---- "plan", "work" and "start" are words too ---- */
+
+  {
+    const r = p('Lesson plan due fri');
+    check('"plan" with no when after it stays in the title', r.title === 'Lesson plan', `got "${r.title}"`);
+    check('...and the line is still due Friday', r.due === '2026-09-11' && r.plan === null, JSON.stringify([r.due, r.plan]));
+  }
+  check('"Plan party" keeps its Plan', p('Plan party').title === 'Plan party', `got "${p('Plan party').title}"`);
+  check('"start" too', p('start line fri').title === 'start line' && p('start line fri').due === '2026-09-11',
+    JSON.stringify(p('start line fri')));
+  check('"Homework" is not "work"', p('Homework 3 fri').title === 'Homework 3', `got "${p('Homework 3 fri').title}"`);
+  {
+    const r = p('essay plan tue');
+    check('"plan" followed by a when still plans', r.plan?.date === '2026-09-15' && r.title === 'essay', JSON.stringify(r));
+  }
+  {
+    const r = p('study plan 2-4');
+    check('...and so does "plan" followed by a range', r.plan?.start === '14:00' && r.title === 'study', JSON.stringify(r));
+  }
+
   /* ---- ranges that are not hours ---- */
 
   {

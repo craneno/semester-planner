@@ -163,9 +163,53 @@ suite('Undo — a commit that says what it touches', async ({ check }) => {
   s.undo();
   check('a commit that says nothing still copies everything', s.itemById('t1').title === 'after');
 
-  // a key named that undo does not track is ignored, not copied
+  // a commit that names only keys undo does not keep is no step at all: an
+  // undo that changes nothing, and a redo wiped for it, were the bug
+  check('(the undo above left a redo)', s.canRedo());
   s.commit(() => { s.state.settings.hour12 = !s.state.settings.hour12; }, { touches: ['settings'] });
-  check('a key outside UNDO_KEYS makes a step with nothing in it, and undo says so', s.undo() !== null);
+  check('a commit touching only keys outside UNDO_KEYS makes no step, and keeps the redo',
+    s.canRedo() && s.redo() !== null && s.itemById('t1').title === 'plain', s.itemById('t1').title);
+});
+
+/* A commit that says nothing of what it touches is copied whole; if it then
+   changed nothing undo keeps, it is no step either. What has to hold: no
+   step, the redo kept, and the next undo is the last real change — even with
+   the stack full. */
+suite('Undo — a commit that changes nothing kept is no step', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => s.upsertItem({ id: 'n1', title: 'kept' }));
+  s.commit(() => { s.itemById('n1').title = 'edited'; });
+  s.undo();
+  s.commit(() => { s.state.settings.lastAreaId = 'a1'; });
+  check('a commit that changed no kept key leaves the redo', s.canRedo() && s.redo() !== null && s.itemById('n1').title === 'edited');
+  s.commit(() => { s.state.settings.railHidden = true; });
+  check('...and undo goes back to the last real change', s.undo() !== null && s.itemById('n1').title === 'kept');
+
+  // with the stack full, the oldest step is not lost to one that changes nothing
+  const max = s.undoSettings.max;
+  for (let i = 0; i < max; i++) s.commit(() => { s.itemById('n1').title = `v${i}`; });
+  s.commit(() => { s.state.settings.railHidden = false; });
+  let n = 0;
+  while (s.canUndo() && n < max + 5) { s.undo(); n++; }
+  check(`still ${max} steps back`, n === max, `${n} undos`);
+  check('...the oldest of them the first edit', s.itemById('n1')?.title === 'kept', String(s.itemById('n1')?.title));
+});
+
+/* Undo closes the merge window. What has to hold: an edit made straight
+   after an undo is a step of its own, never folded into an older step it
+   has nothing to do with. */
+suite('Undo — an edit straight after an undo is its own step', async ({ check }) => {
+  const s = await storeWith(base());
+  s.undoSettings.coalesceMs = 800;
+  s.commit(() => s.upsertItem({ id: 'w1', title: 'first' }));
+  await tick(900);
+  s.commit(() => { s.itemById('w1').title = 'second'; });
+  s.undo();
+  s.commit(() => { s.itemById('w1').title = 'third'; });
+  s.undo();
+  check('the undo takes back only the edit made after the last one',
+    s.itemById('w1')?.title === 'first', String(s.itemById('w1')?.title));
 });
 </script>
 </body>

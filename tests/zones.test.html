@@ -113,6 +113,22 @@ suite('Timezones — a schedule that moved', async ({ check }) => {
   }
 
   {
+    // a Friday cancelled and a Friday moved are keyed by the day they met,
+    // and that day rolls to the Saturday with the rest
+    const slot = given([{ days: [5], start: '22:00', end: '23:30',
+      ex: { '2026-09-18': null, '2026-09-25': { start: '21:00', end: '22:00' } } }]);
+    s.shiftSchedules(PT, ET, term);
+    const ex = slot().ex || {};
+    check('a day cancelled rolls with the meeting',
+      ex['2026-09-19'] === null && !('2026-09-18' in ex), JSON.stringify(ex));
+    check('...and so does a day moved, its time shifted too',
+      ex['2026-09-26']?.start === '00:00' && !('2026-09-25' in ex), JSON.stringify(ex));
+    check('the class is not drawn the Saturday it was cancelled',
+      !s.classesOn('2026-09-19').length && s.classesOn('2026-10-03').length === 1,
+      JSON.stringify(s.classesOn('2026-09-19')));
+  }
+
+  {
     // and westward, where the day rolls back instead
     const slot = given([{ days: [0], start: '01:00', end: '02:00' }], ET);
     s.shiftSchedules(ET, PT, term);

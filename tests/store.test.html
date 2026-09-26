@@ -264,6 +264,23 @@ suite('Store — areas: selectors, order, delete', async ({ check }) => {
       s.cardById('k1') !== null && s.cardById('k1').areaId === null,
       JSON.stringify(s.cardById('k1')));
   }
+
+  {
+    // each one re-homed is an edit, or an older copy elsewhere wins the clash
+    // and points it back at the area that is gone
+    const old = '2026-01-01T00:00:00.000Z';
+    const s = await storeWith(v4({
+      areas: [{ id: 'a1', name: 'Thermo', kind: 'course' }],
+      items: [{ id: 't1', title: 'PS1', areaId: 'a1', updatedAt: old }, { id: 't2', title: 'Elsewhere', areaId: null, updatedAt: old }],
+      cards: [{ id: 'k1', text: 'a thought', areaId: 'a1', updatedAt: old }],
+      links: [{ id: 'l1', url: 'https://example.com', areaId: 'a1', updatedAt: old }]
+    }));
+    s.deleteArea('a1');
+    check('a task re-homed by the delete is stamped', s.itemById('t1').updatedAt > old, s.itemById('t1').updatedAt);
+    check('...and a card', s.cardById('k1').updatedAt > old, s.cardById('k1').updatedAt);
+    check('...and a link', s.linkById('l1')?.areaId === null && s.linkById('l1').updatedAt > old, JSON.stringify(s.linkById('l1')));
+    check('one it did not touch keeps its clock', s.itemById('t2').updatedAt === old);
+  }
 });
 
 suite('Store — carry forward: the end of one day is the start of the next', async ({ check }) => {
@@ -829,6 +846,18 @@ suite('Overdue — a block that went by is owed too', async ({ check }) => {
   check('a past occurrence of a deadline series, unticked, is late', lateIds().includes('r2@2026-09-09'), lateIds());
   s.toggleItem('r2@2026-09-09', true);
   check('...and not once ticked', !lateIds().includes('r2@2026-09-09'), lateIds());
+
+  // a stretch of days is behind only once its last day is
+  s.upsertItem({ id: 'trip', title: 'trip', plan: { date: '2026-09-08', end: '2026-09-12', start: null, mins: 0 } });
+  check('a stretch of days still going is not late', !lateIds().split(',').includes('trip'), lateIds());
+  check('...and is once its last day has gone by', s.overdue('2026-09-13').some((t) => t.id === 'trip'));
+
+  // one day of the gym owed instead of booked is a deadline, and can be late
+  s.upsertItem({ id: 'r1@2026-09-08', plan: null, due: '2026-09-08', dueTime: '17:00' });
+  check('a day of a block series switched to owed is late when it goes by',
+    lateIds().includes('r1@2026-09-08'), lateIds());
+  check('...while the rest of the series still is not',
+    !lateIds().split(',').some((id) => id.startsWith('r1@') && id !== 'r1@2026-09-08'), lateIds());
 });
 
 suite('Series — this and after, and a copy', async ({ check }) => {
@@ -865,6 +894,32 @@ suite('Series — this and after, and a copy', async ({ check }) => {
       JSON.stringify(newOcc.map((t) => [t.id, t.plan.start])));
     check('the skip that moved with it still skips', s.itemsPlannedOn('2026-10-26').length === 0);
     check('and nothing draws twice on the split day', s.itemsPlannedOn('2026-10-12').length === 1);
+
+    // the two series share no subtask: a tick on one is not a tick on both
+    const was = s.itemById('lec');
+    check('the new series has its own subtasks',
+      made.subtasks.length === 1 && made.subtasks !== was.subtasks && made.subtasks[0] !== was.subtasks[0]);
+    made.subtasks[0].done = false;
+    check('...so a change to one leaves the other', was.subtasks[0].done === true);
+  }
+
+  {
+    // a Tuesday lab moved to Wednesday from the 15th on is a Wednesday lab
+    // from then on, the week it skips moving with it
+    s.upsertItem({ id: 'tue', title: 'Tuesday lab', areaId: 'th', plan: { date: '2026-09-01', start: '14:00', mins: 60 },
+      repeat: { freq: 'weekly', every: 1, days: [2], until: null, count: null, ex: { '2026-09-22': { off: true } } } });
+    const made = s.splitSeriesAt(s.itemById('tue'), '2026-09-15', { plan: { date: '2026-09-16', start: '14:00', mins: 60 } });
+    const ids = (d) => s.itemsPlannedOn(d).filter((t) => t.title === 'Tuesday lab').map((t) => t.id).join();
+    check('the new series is on the day it was moved to', made && made.repeat.days.join() === '3' && ids('2026-09-16') === `${made.id}@2026-09-16`,
+      JSON.stringify([made?.repeat?.days, ids('2026-09-16')]));
+    check('...and not on the day it left', ids('2026-09-15') === '');
+    check('later weeks move with it', ids('2026-09-30') === `${made.id}@2026-09-30` && ids('2026-09-29') === '',
+      `${ids('2026-09-29')} / ${ids('2026-09-30')}`);
+    check('a skipped week moves with it too',
+      made.repeat.ex['2026-09-23']?.off === true && ids('2026-09-23') === '' && !('2026-09-22' in made.repeat.ex),
+      JSON.stringify(made.repeat.ex));
+    check('the old series keeps its Tuesdays before the split',
+      s.itemById('tue').repeat.days.join() === '2' && ids('2026-09-08') === 'tue@2026-09-08');
   }
 
   {
@@ -980,6 +1035,15 @@ suite('Habits — a task that counts for one', async ({ check }) => {
   check('...but not one they did not', !s.habitDone(yday, 'h1'));
   s.state.settings.stepsHabitId = null;
   delete s.state.health[yday];
+  // one of a series moved to another day ticks the day it sits on, not the rule's
+  const d3 = addDays(today(), -3);
+  s.upsertItem({ id: 'mv', title: 'Moved', areaId: 'gen', habitId: 'h1', plan: { date: d3, start: null, mins: 0 }, repeat: { freq: 'daily', every: 1, until: null, count: null, ex: {} } });
+  s.upsertItem({ id: 'mv@' + d3, plan: { date: yday } });
+  s.toggleItem('mv@' + d3, true);
+  check('one of a series moved ticks the day it was moved to', s.habitDone(yday, 'h1') && !s.habitDone(d3, 'h1'),
+    JSON.stringify(s.state.habitLog));
+  s.toggleItem('mv@' + d3, false);
+  check('...and unticks it there', !s.habitDone(yday, 'h1'));
   s.deleteHabit('h1');
   check('a habit deleted unties its tasks', !('habitId' in s.itemById('leg')) && !('habitId' in s.itemById('walk')));
   s.toggleItem('leg', true);
@@ -1014,6 +1078,77 @@ suite('Sync — an item from an older build lands in shape', async ({ check }) =
   check('a row already in shape is the same bytes after', bytes(back.data) === bytes(sent.data), bytes(back.data));
   s.applyRow({ kind: 'item', id: 'now', deleted: true });
   check('a tombstone still takes it away', s.itemById('now') === null);
+});
+
+/* A tick on a series' own row, and the sweep. What has to hold: the rule is
+   never ticked, and never swept; the tick lands on today's occurrence, else
+   the next one; a deadline's tick is kept while overdue() can still look at
+   its day, and a block's goes at the reset as before. */
+suite('Series — a tick on the row itself, and the sweep', async ({ check }) => {
+  const s = await storeWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0 }],
+    items: [], cards: [], notes: {}, settings: { sweepDone: true }
+  });
+  const { today, addDays } = await import('../js/util.js');
+  const t0 = today();
+  const daily = (id, over = {}) => s.upsertItem({ id, title: id, areaId: 'gen', plan: { date: addDays(t0, -3), start: '09:00', mins: 30 },
+    repeat: { freq: 'daily', every: 1, until: null, count: null, ex: {} }, ...over });
+
+  {
+    const d = daily('d');
+    s.toggleItem('d', true);
+    check('a tick on the series row never ticks the rule', d.done === false && !d.doneAt);
+    check('...it ticks today’s occurrence', s.itemById('d@' + t0)?.done === true);
+    check('...and no other', s.itemById('d@' + addDays(t0, 1))?.done === false && s.itemById('d@' + addDays(t0, -1))?.done === false);
+    s.toggleItem('d', false);
+    check('an untick from the row unticks it again', s.itemById('d@' + t0)?.done === false);
+  }
+
+  {
+    // skipped today: the one meant is the next still to come
+    const d = daily('skip');
+    s.deleteItem('skip@' + t0);
+    s.toggleItem('skip', true);
+    check('with today skipped, the next one is ticked', d.done === false && s.itemById('skip@' + addDays(t0, 1))?.done === true);
+
+    // a weekly one that falls later in the week
+    const w = s.upsertItem({ id: 'wk', title: 'wk', areaId: 'gen', due: addDays(t0, 2),
+      repeat: { freq: 'weekly', every: 1, days: [], until: null, count: null, ex: {} } });
+    s.toggleItem('wk', true);
+    check('with nothing today, the next one is ticked', w.done === false && s.itemById('wk@' + addDays(t0, 2))?.done === true);
+  }
+
+  {
+    // a rule ticked on its row by an older build is never swept with it
+    const d = daily('old', { done: true, doneAt: '2026-01-01T12:00:00' });
+    check('a series is never offered to the sweep', !s.doneBefore(addDays(t0, 1)).some((t) => t.id === 'old'));
+    s.sweepDone(addDays(t0, 1));
+    check('...and the sweep leaves it', s.itemById('old') === d);
+  }
+
+  {
+    // a deadline series from Sep 1: a tick answers for its day while overdue()
+    // looks back, and the reset must not take it before then
+    s.upsertItem({ id: 'vit', title: 'vitamins', areaId: 'gen', due: '2026-09-01',
+      repeat: { freq: 'daily', every: 1, until: null, count: null, ex: {} } });
+    s.upsertItem({ id: 'gym', title: 'gym', areaId: 'gen', plan: { date: '2026-09-01', start: '07:00', mins: 60 },
+      repeat: { freq: 'daily', every: 1, until: null, count: null, ex: {} } });
+    s.toggleItem('vit@2026-09-05', true);
+    s.toggleItem('gym@2026-09-05', true);
+    s.sweepDone('2026-09-10');
+    check('a deadline’s tick outlives the reset', s.itemById('vit').repeat.ex['2026-09-05']?.done === true);
+    check('...so it is not late the morning after', !s.overdue('2026-09-10').some((t) => t.id === 'vit@2026-09-05'));
+    check('a block’s tick still goes at the reset', !s.itemById('gym').repeat.ex['2026-09-05']);
+
+    // kept while overdue() can reach it (LOOKBACK, 120 days), and no longer
+    s.toggleItem('vit@2026-09-01', true);
+    s.sweepDone(addDays('2026-09-01', 120));
+    check('a deadline’s tick stays while overdue() still looks at its day', s.itemById('vit').repeat.ex['2026-09-01']?.done === true);
+    s.sweepDone(addDays('2026-09-01', 121));
+    check('...and goes once it is past that', !s.itemById('vit').repeat.ex['2026-09-01']);
+  }
 });
 </script>
 </body>

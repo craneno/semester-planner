@@ -26,6 +26,11 @@ suite('Habits — the seed', async ({ check }) => {
     check('a fresh upgrade seeds every starting habit, in the order given',
       names.join(' | ') === 'No phone — morning | No phone — eating | No phone — night | 10k steps or workout | Out of bed by 9:00 | Sunscreen',
       names.join(' | '));
+    // with no clock the next load would give each an older one than it was
+    // pushed with, and the server would refuse the row as stale
+    check('a seeded habit carries a clock from the start',
+      s.state.habits.every((x) => !!x.updatedAt && s.rowStamp('habit', x.id) === x.updatedAt),
+      JSON.stringify(s.state.habits.map((x) => x.updatedAt)));
   }
   {
     // already on 9 with the first five: only the one 10 adds should appear
@@ -127,6 +132,8 @@ suite('Habits — editing, and the rows they sync as', async ({ check }) => {
     const s = await storeWith(base());
     const made = s.addHabit('  Read 20 pages  ');
     check('a new habit is trimmed', made.name === 'Read 20 pages');
+    check('...and stamped from birth, so it syncs with a clock',
+      !!made.updatedAt && made.updatedAt === made.createdAt && s.rowStamp('habit', made.id) === made.updatedAt);
     check('...and goes last', s.addHabit('Later').order > made.order);
     s.updateHabit(made.id, { name: 'Read 30 pages' });
     check('a habit can be renamed', s.activeHabits()[0].name === 'Read 30 pages');

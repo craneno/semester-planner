@@ -3,7 +3,7 @@
 
 /** @typedef {import('./types.js').Item} Item */
 
-import { uid, today, addDays, toMin, fromMin, tz, zoneShift, zoneLabel } from './util.js';
+import { uid, today, addDays, diffDays, toMin, fromMin, tz, zoneShift, zoneLabel } from './util.js';
 import { isRepeat, repeatDates, isRepeatDate, describeRepeat } from './repeat.js';
 import { AREA_CATEGORIES, AREA_COLORS, areaCategory } from './store/constants.js';
 import { migrate, normalItem } from './store/migrate.js';
@@ -143,9 +143,11 @@ export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 
 /** Mutate + persist + notify. */
 export function commit(fn, meta = {}) {
+  let step = null;
   if (FOREIGN.has(meta.source) || meta.external) forget();
-  else if (typeof fn === 'function') remember(meta);
+  else if (typeof fn === 'function') step = remember(meta);
   if (typeof fn === 'function') fn(state);
+  if (step) settle(step);
   save();
   for (const s of subs) s(meta);
 }
@@ -170,23 +172,46 @@ const snapshot = (keys = UNDO_KEYS) => structuredClone(Object.fromEntries(keys.m
  *  A note keystroke need not copy every task; a commit that says nothing copies everything. */
 const touched = (meta) => (Array.isArray(meta.touches) ? UNDO_KEYS.filter((k) => meta.touches.includes(k)) : UNDO_KEYS);
 
+/** @returns {null|{step, redo, dropped, was}} a new step, held open until
+ *  settle() has seen whether the commit changed anything */
 function remember(meta) {
-  const at = Date.now();
-  // an edit after an undo is a new future, coalesced or not: what redo held
-  // would put back a world without this edit in it
-  redoStack.length = 0;
   const keys = touched(meta);
+  // a commit that names only keys undo does not keep — a setting, the rail —
+  // is no step: Ctrl+Z would say "Undone" and change nothing, and the redo
+  // it wiped would be gone for nothing
+  if (!keys.length) return null;
+  const at = Date.now();
   if (undoStack.length && at - lastLocalAt < undoSettings.coalesceMs) {
+    // an edit after an undo is a new future: what redo held would put back a
+    // world without this edit in it
+    redoStack.length = 0;
     lastLocalAt = at;
     // a later commit in the step may touch a key the first did not: copied
     // now, before this commit runs, it is still what the step began with
     const top = undoStack[undoStack.length - 1];
     for (const k of keys) if (!(k in top.copy)) top.copy[k] = structuredClone(state[k]);
-    return;
+    return null;
   }
+  const was = lastLocalAt;
   lastLocalAt = at;
-  undoStack.push({ label: meta.label || '', copy: snapshot(keys) });
-  if (undoStack.length > undoSettings.max) undoStack.shift();
+  const step = { label: meta.label || '', copy: snapshot(keys) };
+  undoStack.push(step);
+  const dropped = undoStack.length > undoSettings.max ? undoStack.shift() : null;
+  // held, not dropped yet: a commit that changes nothing gives it back
+  const redo = redoStack.splice(0);
+  return { step, redo, dropped, was };
+}
+
+/** After the commit ran: a new step that changed none of what it copied is
+ *  taken back, and the stack, the redo and the merge window are as they were.
+ *  Compared key by key, stopping at the first that differs. */
+function settle({ step, redo, dropped, was }) {
+  const same = Object.keys(step.copy).every((k) => JSON.stringify(step.copy[k]) === JSON.stringify(state[k]));
+  if (!same || undoStack[undoStack.length - 1] !== step) return;
+  undoStack.pop();
+  if (dropped) undoStack.unshift(dropped);
+  redoStack.push(...redo);
+  lastLocalAt = was;
 }
 
 function forget() { undoStack.length = 0; redoStack.length = 0; }
@@ -211,6 +236,9 @@ function stampRow(kind, id, now) {
 function swap(from, to, source) {
   const step = from.pop();
   if (!step) return null;
+  // the merge window closes: an edit straight after an undo is a step of its
+  // own, not folded into an older one it has nothing to do with
+  lastLocalAt = 0;
   to.push({ label: step.label, copy: snapshot(Object.keys(step.copy)) });
   const was = new Map(snapshotRows().map((r) => [r.kind + ':' + r.id, JSON.stringify(r.data)]));
   Object.assign(state, structuredClone(step.copy));
@@ -318,7 +346,11 @@ export function occurrenceOf(item, key) {
       if (ov && ov.start !== undefined) o.plan.start = ov.start;
       if (ov && ov.mins !== undefined) o.plan.mins = ov.mins;
     }
-    if (item.due) o.due = on;
+    if (item.due) {
+      o.due = on;
+      // one week owed at another time is that week's, like its day
+      if (ov && ov.dueTime !== undefined) o.dueTime = ov.dueTime;
+    }
   }
   return o;
 }
@@ -462,10 +494,13 @@ const LOOKBACK = 120;
  */
 export function overdue(ref = today()) {
   const when = (t) => t.due || t.plan?.date || '';
+  // a block series is asked too when one of its days was switched to owed
+  const owes = (t) => !!t.due || Object.values(t.repeat.ex || {}).some((ov) => ov?.mode === 'due');
   return [
     ...state.items.filter((t) => !repeats(t) && !t.done && t.due && t.due < ref),
-    ...state.items.filter((t) => !repeats(t) && !t.done && !t.due && t.plan?.date && t.plan.date < ref),
-    ...occurrencesBetween(addDays(ref, -LOOKBACK), addDays(ref, -1), (t) => !!t.due)
+    // a stretch of days is behind only once its last day is
+    ...state.items.filter((t) => !repeats(t) && !t.done && !t.due && t.plan?.date && (t.plan.end || t.plan.date) < ref),
+    ...occurrencesBetween(addDays(ref, -LOOKBACK), addDays(ref, -1), owes)
       .filter((o) => !o.done && o.due && o.due < ref)
   ].sort((a, b) => (when(a) < when(b) ? -1 : when(a) > when(b) ? 1 : 0));
 }
@@ -581,6 +616,11 @@ function shiftSlot(m, mins) {
     const xd = Number.isFinite(xe) ? (xe - xs + 1440) % 1440 : null;
     x.start = fromMin((((xs + mins) % 1440) + 1440) % 1440);
     if (xd !== null) x.end = fromMin((toMin(x.start) + xd) % 1440);
+  }
+  // a day cancelled or moved is keyed by the day it met, and that day rolled
+  // with the rest: left behind, the key names a day the class no longer meets
+  if (roll && m.ex) {
+    m.ex = Object.fromEntries(Object.entries(m.ex).map(([day, x]) => [addDays(day, roll), x]));
   }
 }
 
@@ -734,6 +774,10 @@ function patchOccurrence(parent, key, patch) {
   const ov = overrideFor(parent, key);
   const rest = {};
   const { plan, due, dueTime, ...other } = patch;
+  // the time one day of a deadline series is owed is that day's own: written
+  // to the series, "This one" moved every week. The series' own time is no
+  // exception at all.
+  const ownTime = (v) => { if (v === parent.dueTime) delete ov.dueTime; else ov.dueTime = v; };
   /* The when is read as one thing. Folded a key at a time, the editor's
      `{ plan, due: null, dueTime: null }` set the date and then wiped it, and
      the `dueTime: null` landed on the series — every Tuesday lost its 5pm. */
@@ -745,17 +789,21 @@ function patchOccurrence(parent, key, patch) {
     if (parent.plan) delete ov.mode; else ov.mode = 'plan';
   } else if (plan === null && due) {
     ov.date = due;
-    if (parent.plan) { ov.mode = 'due'; ov.dueTime = dueTime ?? null; } else delete ov.mode;
+    if (parent.plan) { ov.mode = 'due'; ov.dueTime = dueTime ?? null; }
+    else { delete ov.mode; if (dueTime !== undefined) ownTime(dueTime); }
   } else if (due !== undefined) {
     ov.date = due;
   }
   if (dueTime !== undefined && plan === undefined) {
-    if (ov.mode === 'due') ov.dueTime = dueTime; else rest.dueTime = dueTime;
+    if (ov.mode === 'due') ov.dueTime = dueTime;
+    else if (!parent.plan && ov.mode !== 'plan') ownTime(dueTime);
+    else rest.dueTime = dueTime;
   }
   for (const [k, v] of Object.entries(other)) {
     if (k === 'id') continue;
     if (OCCURRENCE_OWNS.has(k)) ov[k] = v; else rest[k] = v;
   }
+  if (!Object.keys(ov).length) delete parent.repeat.ex[key];
   if (Object.keys(rest).length) Object.assign(parent, rest);
   parent.updatedAt = new Date().toISOString();
   return occurrenceOf(parent, key);
@@ -894,13 +942,26 @@ export function splitSeriesAt(series, key, patch = {}) {
   const rep = series.repeat;
   const anchor = repeatAnchor(series);
   const before = rep.count ? repeatDates(rep, anchor, anchor, addDays(key, -1)).length : 0;
+  // a move of the day moves every day after it by as much: a Tuesday series
+  // moved to Wednesday from here is a Wednesday series, its skips and ticks
+  // with it. Only where a step of days is a step of the rule — daily, weekly.
+  const to = (patch.plan && patch.plan.date) || patch.due || key;
+  const shift = rep.freq === 'daily' || rep.freq === 'weekly' ? diffDays(key, to) : 0;
+  const turn = ((shift % 7) + 7) % 7;
+  let days = Array.isArray(rep.days) ? [...rep.days] : rep.days;
+  if (rep.freq === 'weekly' && turn && Array.isArray(days) && days.length) {
+    days = days.map((d) => (Number(d) + turn) % 7);
+  }
   const ex = {};
-  for (const [k, v] of Object.entries(rep.ex || {})) if (k >= key) ex[k] = v;
+  for (const [k, v] of Object.entries(rep.ex || {})) if (k >= key) ex[shift ? addDays(k, shift) : k] = v;
   const { id, gcalId, gcalIds, createdAt, updatedAt, ...rest } = series;
   const when = series.plan ? { plan: { ...series.plan, date: key } } : { due: key };
   const next = upsertItem({
     ...rest, ...when, ...patch,
-    repeat: { ...rep, ex, count: rep.count ? Math.max(1, rep.count - before) : null },
+    // its own copies: shared with the old series, a subtask ticked on one
+    // was ticked on both
+    subtasks: (patch.subtasks || rest.subtasks || []).map((x) => ({ ...x })),
+    repeat: { ...rep, days, ex, count: rep.count ? Math.max(1, rep.count - before) : null },
     done: false, doneAt: null
   });
   endSeriesBefore(series, key);
@@ -934,6 +995,8 @@ export function duplicateItem(id) {
 /** Whether a task is old enough to sweep — its own `doneAt` decides. */
 const sweepable = (t, day) => {
   if (!t.done) return false;
+  // a series is never swept: a tick on its own row is not the whole run done
+  if (repeats(t)) return false;
   // no stamp at all: it was ticked long before doneAt existed, so it is older
   // than any day this could be asked about
   if (!t.doneAt) return true;
@@ -978,11 +1041,16 @@ export function sweepDone(day = today(), spare = null) {
  */
 function sweepTicks(day) {
   if (state.settings.sweepDone === false) return;
+  // a deadline's tick is what keeps overdue() from calling it late, and
+  // overdue() looks back LOOKBACK days: that tick stays as long. (A day of
+  // a block series switched to owed holds a `mode`, so it is never swept.)
+  const past = addDays(day, -LOOKBACK);
   for (const item of state.items) {
     const ex = item.repeat && item.repeat.ex;
     if (!ex) continue;
     for (const [key, ov] of Object.entries(ex)) {
       if (!ov || !ov.done || key >= day) continue;
+      if (item.due && key >= past) continue;
       if (Object.keys(ov).some((k) => k !== 'done' && k !== 'doneAt')) continue;
       delete ex[key];
     }
@@ -996,6 +1064,8 @@ export function toggleItem(id, force) {
     if (!parent || !repeats(parent)) return;
     if (!isRepeatDate(parent.repeat, repeatAnchor(parent), cut.on)) return;
     const ov = overrideFor(parent, cut.on);
+    // the day it sits on, which a move may have made another than the rule's
+    const day = ov.date || cut.on;
     const on = force ?? !ov.done;
     if (on) { ov.done = true; ov.doneAt = new Date().toISOString(); }
     else {
@@ -1004,11 +1074,20 @@ export function toggleItem(id, force) {
       if (!Object.keys(ov).length) delete parent.repeat.ex[cut.on];
     }
     parent.updatedAt = new Date().toISOString();
-    tickHabitFor(parent, cut.on, on);
+    tickHabitFor(parent, day, on);
     return;
   }
   const t = itemById(id);
   if (!t) return;
+  if (repeats(t)) {
+    // the series' own row: a tick on the rule would read as the whole run
+    // done, and the sweep would take it. The one meant is today's, else the
+    // next one still to come.
+    const from = today();
+    const key = repeatDates(t.repeat, repeatAnchor(t), from, addDays(from, 400)).find((k) => occurrenceOf(t, k));
+    if (key) toggleItem(occurrenceId(t.id, key), force);
+    return;
+  }
   t.done = force ?? !t.done;
   t.doneAt = t.done ? new Date().toISOString() : null;
   t.updatedAt = new Date().toISOString();
@@ -1066,10 +1145,14 @@ export function reorderAreas(categoryId, orderedIds) {
 export function deleteArea(id) {
   const i = state.areas.findIndex((a) => a.id === id);
   if (i >= 0) state.areas.splice(i, 1);
-  for (const t of state.items) if (t.areaId === id) t.areaId = null;
-  for (const l of state.links) if (l.areaId === id) l.areaId = null;
+  // each one re-homed is stamped, or an older copy elsewhere wins the clash
+  // and points it back at an area that is gone
+  const now = new Date().toISOString();
+  const unfile = (x) => { if (x.areaId === id) { x.areaId = null; x.updatedAt = now; } };
+  state.items.forEach(unfile);
+  state.links.forEach(unfile);
   // unfiled again, so they show on Overview: a card is on its area's page or nowhere
-  for (const c of state.cards) if (c.areaId === id) c.areaId = null;
+  state.cards.forEach(unfile);
   // a band is drawn in its area's lane and nowhere else, so an orphan is not
   // an orphan — it is a thing with no way back onto the screen
   state.sprints = state.sprints.filter((p) => p.areaId !== id);

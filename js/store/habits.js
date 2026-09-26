@@ -48,9 +48,12 @@ export function habitStreak(s, id, ref = today()) {
 
 /** @param {State} s */
 export function addHabit(s, name) {
+  // stamped from birth: with no clock the next load gives it createdAt, an
+  // older one than was pushed, and the server refuses the row as stale
+  const now = new Date().toISOString();
   const habit = {
     id: uid('h'), name: name.trim() || 'Untitled habit',
-    order: s.habits.length, archived: false, createdAt: new Date().toISOString()
+    order: s.habits.length, archived: false, createdAt: now, updatedAt: now
   };
   s.habits.push(habit);
   return habit;

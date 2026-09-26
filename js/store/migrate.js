@@ -245,9 +245,11 @@ export function migrate(raw) {
   const addHabits = (names) => {
     for (const name of names) {
       if (s.habits.some((x) => x.name === name)) continue;
+      // stamped like addHabit(), so the next load has no older clock to give it
+      const now = new Date().toISOString();
       s.habits.push({
         id: uid('h'), name, order: s.habits.length,
-        archived: false, createdAt: new Date().toISOString()
+        archived: false, createdAt: now, updatedAt: now
       });
     }
   };

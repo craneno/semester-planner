@@ -10,7 +10,10 @@ import { ITEM_TYPES } from './constants.js';
 
 const DOW_WORDS = { sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2, wed: 3, weds: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6 };
 const MONTH_WORDS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const MONTH_WORD = '(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?';
+/** A month's name or its short form, and only that: "mar" and "march" but
+ *  not "mark", "dec" but not "decide", "may" but not "maybe". */
+const MONTHS = 'jan(?:uary)?|feb(?:ruary|r)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
+const MONTH_WORD = `(?:${MONTHS})\\.?`;
 
 function nextDow(dow, from = today()) {
   const d = new Date(from + 'T00:00:00');
@@ -98,7 +101,7 @@ export function parseWhen(text, now = today()) {
   }
   if (!date) {
     // "sep 12", "Sept. 12th", "sep 12, 2026" — but not "Sep 3-5", a span of days
-    m = text.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4})\b)?(?!\s*[-–/]\s*\d)/i);
+    m = text.match(new RegExp(`\\b(${MONTHS})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(\\d{4})\\b)?(?!\\s*[-–/]\\s*\\d)`, 'i'));
     if (m) {
       const mi = MONTH_WORDS.indexOf(m[1].toLowerCase().slice(0, 3)) + 1;
       const d = m[3] ? realDate(+m[3], mi, +m[2]) : yearFor(mi, +m[2], now);
@@ -324,14 +327,25 @@ export function parseQuickAdd(s, input, now = today()) {
 
   // planned date: "plan <when>" / "work on <when>"; due date: "due <when>",
   // or "by <when>" — "by" alone is a word, and only counts with a when right
-  // after it, so "essay by kant fri" is still due Friday and still by Kant
-  const planKey = text.match(/\b(plan|work on|work|start)\b/i);
+  // after it, so "essay by kant fri" is still due Friday and still by Kant.
+  // "plan", "work" and "start" are words too: "Lesson plan due fri" keeps
+  // its plan, and "Plan party" its Plan.
+  const whenAfter = (m, ranged = false) => {
+    const at = m.index + m[0].length;
+    // for a plan, a time range taken out already counts, if nothing sits between
+    if (ranged && range && range.at >= at && !text.slice(at, range.at).trim()) return true;
+    const seg = text.slice(at);
+    const w = parseWhen(seg);
+    return !!w && w.spans.some(([a]) => !seg.slice(0, a).trim());
+  };
+  let planKey = null;
+  for (const m of text.matchAll(/\b(plan|work on|work|start)\b/gi)) {
+    if (whenAfter(m, true)) { planKey = m; break; }
+  }
   let dueKey = text.match(/\bdue\b/i);
   if (!dueKey) {
     for (const m of text.matchAll(/\bby\b/gi)) {
-      const seg = text.slice(m.index + m[0].length);
-      const w = parseWhen(seg);
-      if (w && w.spans.some(([a]) => !seg.slice(0, a).trim())) { dueKey = m; break; }
+      if (whenAfter(m)) { dueKey = m; break; }
     }
   }
   const planIdx = planKey ? planKey.index : -1;
