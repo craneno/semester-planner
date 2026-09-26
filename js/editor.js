@@ -1,8 +1,8 @@
 // editor.js — the task page. Notion-style properties + notes + subtasks.
 
-import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW } from './util.js';
+import { h, uid, fmtDate, fmtDuration, debounce, today, toMin, fromMin, DOW, addDays, diffDays } from './util.js';
 import {
-  state, commit, itemById, upsertItem, deleteItem, progress,
+  state, commit, itemById, seriesById, splitOccurrence, repeatAnchor, upsertItem, deleteItem, progress,
   repeatLabel, endSeriesBefore, splitSeriesAt, duplicateItem, occurrenceId, canvasUnmoved, areaColor, AREA_COLORS, activeHabits
 } from './store.js';
 import { peek, closePeek, confirmDialog, modal, closeModal, toast, timeInput } from './ui.js';
@@ -11,70 +11,111 @@ import { tickItem, pushForward, pushLabel, canPush } from './actions.js';
 
 const syncOut = debounce((id) => pushItem(id).catch(() => {}), 700);
 
-let currentId = null;
-/* Which of the two an edit means, when the thing open is one occurrence of a
-   series. Kept out here because `rerender()` builds the panel again from
-   scratch and the answer must survive that. Defaults to the safe one: you
-   cannot change a term of Tuesdays by mistake. */
-let scope = 'one';
+/* The panel open: which thing (`id`), and which of the two an edit means
+   when it is one occurrence of a series (`scope`: one, after, all). One
+   object per panel, kept out here because `rerender()` builds the panel
+   again from scratch and both must survive that; a split ("this and after")
+   moves `id` on to the new series. A write still waiting in a debounce when
+   the panel moved on to another task writes to the panel it came from.
+   Scope defaults to the safe one: you cannot change a term of Tuesdays by
+   mistake. */
+let panel = null;
 
 export function openItem(id) {
   const item = itemById(id);
   if (!item) return;
-  currentId = id;
-  scope = 'one';
-  peek(render(item), { onClose: () => { currentId = null; } });
+  panel = { id, scope: 'one' };
+  show(item, panel);
+}
+
+function show(item, p) {
+  peek(render(item, p), { onClose: () => { if (panel === p) panel = null; } });
 }
 
 /** Re-render the panel in place (after a structural change). */
 function rerender() {
-  if (!currentId) return;
-  const item = itemById(currentId);
+  if (!panel) return;
+  const item = itemById(panel.id);
   if (!item) { closePeek(); return; }
-  peek(render(item), { onClose: () => { currentId = null; } });
+  show(item, panel);
 }
 
-function render(item) {
+/* "All of them", from one occurrence: a when built from the day on screen
+   would put the series' own day there, and every occurrence before it would
+   go. The series keeps its day, moved by as many days as the edit moved this
+   one — none, for a change of time, length or kind. */
+function onSeries(patch, series, shown) {
+  const anchor = series && repeatAnchor(series);
+  if (!anchor || !shown) return patch;
+  const move = (d) => (d ? addDays(anchor, diffDays(shown, d)) : d);
+  const out = { ...patch };
+  if (out.plan) out.plan = { ...out.plan, date: move(out.plan.date), ...(out.plan.end ? { end: move(out.plan.end) } : {}) };
+  if (out.due) out.due = move(out.due);
+  return out;
+}
+
+function render(item, p) {
   /* The row in `state.items` behind whatever is open — the item itself, or the
-     series an occurrence came from. An occurrence is a copy made on demand, so
-     anything written to it directly would be thrown away with it. */
-  const live = item.seriesId
-    ? (state.items.find((t) => t.id === item.seriesId) || item)
-    : item;
+     series an occurrence came from — as it was when this was drawn, for
+     reading. An occurrence is a copy made on demand, so anything written to
+     it directly would be thrown away with it. */
+  const live = seriesById(item.id) || item;
   const isOccurrence = !!item.seriesId;
-  const toSeries = isOccurrence && scope === 'all';
-  const targetId = toSeries ? live.id : item.id;
+  const toSeries = isOccurrence && p.scope === 'all';
+  // the day this one shows on: what a when built from it is measured against
+  const shown = (item.plan && item.plan.date) || item.due || null;
+
+  /* Every write finds its row by id, at the time of writing. An undo, a save
+     in another tab or a pull puts a new object where the old one was, and a
+     write to the one this drawing began with would go nowhere. */
+  const row = () => seriesById(p.id);
+  // gone from under the panel — a pull or another tab deleted it. Writing
+  // by its id would make it again, as a ghost with default fields.
+  const gone = () => { toast('That task was deleted elsewhere.'); if (panel === p) closePeek(); };
 
   const set = (patch, { resync = false } = {}) => {
+    const cut = splitOccurrence(p.id);
     /* This and after: the occurrence shown and every one past it become a
        series of their own, carrying the edit, and the old series ends the day
        before. From then on the panel is on the new series, editing all of it
        — which is what "and after" meant. A title being typed is not redrawn
-       under the caret. */
-    if (isOccurrence && scope === 'after') {
+       under the caret; the next keystroke finds the new series through `p`. */
+    if (cut && p.scope === 'after') {
+      const series = row();
+      if (!series) { gone(); return; }
       let made = null;
-      commit(() => { made = splitSeriesAt(live, item.occurrence, patch); }, { source: 'editor' });
+      commit(() => { made = splitSeriesAt(series, cut.on, patch); }, { source: 'editor' });
       if (!made) return;
-      pushItem(live.id).catch(() => {});
+      pushItem(series.id).catch(() => {});
       pushItem(made.id).catch(() => {});
-      currentId = occurrenceId(made.id, patch.plan?.date || patch.due || item.occurrence);
-      scope = 'all';
+      p.id = occurrenceId(made.id, patch.plan?.date || patch.due || cut.on);
+      p.scope = 'all';
       const onlyTitle = Object.keys(patch).every((k) => k === 'title');
       if (!onlyTitle) rerender();
       return;
     }
-    // gone from under the panel — a pull or another tab deleted it. Writing
-    // by its id would make it again, as a ghost with default fields.
-    if (!itemById(targetId)) { toast('That task was deleted elsewhere.'); closePeek(); return; }
+    const id = cut && p.scope === 'all' ? cut.id : p.id;
+    if (!itemById(id)) { gone(); return; }
+    let next = null;
     // tagged: the panel floats over a view that lists this item, and that
     // view repaints only for a source it knows
     commit(() => {
-      const next = upsertItem({ id: targetId, ...patch });
-      // keep the copy this render is holding in step with what was stored
-      if (next && targetId === item.id) Object.assign(item, next);
+      next = upsertItem({ id, ...(id === p.id ? patch : onSeries(patch, seriesById(id), shown)) });
     }, { source: 'editor', touches: ['items'] });
-    if (resync) syncOut(live.id);
+    // keep the copy this render is holding in step with what was stored
+    if (next && id === item.id) Object.assign(item, next);
+    if (resync) syncOut(id);
   };
+
+  /* A write to what belongs to the series — subtasks, notes — on the row as
+     it is now, stamped, and tagged so the view under the panel repaints. */
+  const editRow = (fn) => {
+    const r = row();
+    if (!r) { gone(); return; }
+    commit(() => { fn(r); r.updatedAt = new Date().toISOString(); }, { source: 'editor', touches: ['items'] });
+  };
+  // a subtask by its id on that row, or by its place for one older than ids
+  const subOf = (r, s, i) => r.subtasks.find((x, j) => (s.id ? x.id === s.id : j === i)) || null;
 
   const root = h('div', { style: { display: 'contents' } });
 
@@ -83,7 +124,8 @@ function render(item) {
     h('input', {
       type: 'checkbox', class: 'check', checked: item.done,
       'aria-label': 'Mark complete',
-      onchange: (e) => tickItem(item.id, e.target.checked, { after: rerender })
+      // p.id, not item.id: after a split the panel is on the new series
+      onchange: (e) => tickItem(p.id, e.target.checked, { after: rerender })
     }),
     item.done ? h('span', { class: 'eyebrow' }, 'Done') : null,
     h('div', { style: { flex: 1 } }),
@@ -91,19 +133,23 @@ function render(item) {
     live.canvasId && h('span', { class: 'eyebrow', title: 'From your Canvas feed' + (live.canvasCourse ? ' · ' + live.canvasCourse : '') }, 'CANVAS'),
     canPush(item) && h('button', {
       class: 'btn ghost sm', title: pushLabel(item),
-      onclick: () => pushForward(item.id, { after: rerender })
+      onclick: () => pushForward(p.id, { after: rerender })
     }, '→'),
     h('button', {
       class: 'btn ghost sm', title: isOccurrence ? 'Duplicate the series' : 'Duplicate',
       onclick: () => {
         let made = null;
-        commit(() => { made = duplicateItem(item.id); }, { source: 'editor' });
+        commit(() => { made = duplicateItem(p.id); }, { source: 'editor' });
         if (made) { toast('Copied'); openItem(made.id); }
       }
     }, '⧉'),
     h('button', {
       class: 'btn ghost sm', title: 'Delete task',
-      onclick: () => (isOccurrence ? removeOccurrence(item, live) : removePlain(item))
+      onclick: () => {
+        const now = itemById(p.id);
+        if (!now) { gone(); return; }
+        if (now.seriesId) removeOccurrence(now); else removePlain(now);
+      }
     }, '🗑'),
     h('button', { class: 'btn ghost sm', onclick: closePeek, 'aria-label': 'Close' }, '✕'));
 
@@ -123,27 +169,27 @@ function render(item) {
       h('div', {},
         h('div', { class: 'mode-toggle' },
           h('button', {
-            class: 'mode' + (scope === 'one' ? ' on' : ''), type: 'button',
-            'aria-pressed': String(scope === 'one'),
-            onclick: () => { scope = 'one'; rerender(); }
+            class: 'mode' + (p.scope === 'one' ? ' on' : ''), type: 'button',
+            'aria-pressed': String(p.scope === 'one'),
+            onclick: () => { p.scope = 'one'; rerender(); }
           }, 'This one'),
           h('button', {
-            class: 'mode' + (scope === 'after' ? ' on' : ''), type: 'button',
-            'aria-pressed': String(scope === 'after'),
+            class: 'mode' + (p.scope === 'after' ? ' on' : ''), type: 'button',
+            'aria-pressed': String(p.scope === 'after'),
             title: 'This one and every one after it',
-            onclick: () => { scope = 'after'; rerender(); }
+            onclick: () => { p.scope = 'after'; rerender(); }
           }, 'This and after'),
           h('button', {
-            class: 'mode' + (scope === 'all' ? ' on' : ''), type: 'button',
-            'aria-pressed': String(scope === 'all'),
-            onclick: () => { scope = 'all'; rerender(); }
+            class: 'mode' + (p.scope === 'all' ? ' on' : ''), type: 'button',
+            'aria-pressed': String(p.scope === 'all'),
+            onclick: () => { p.scope = 'all'; rerender(); }
           }, 'All of them')),
         h('div', { class: 'eyebrow', style: { marginTop: '5px', color: 'var(--ink-3)' } },
           repeatLabel(live)),
-        scope === 'one'
+        p.scope === 'one'
           ? h('div', { class: 'eyebrow', style: { marginTop: '3px', color: 'var(--ink-3)' } },
             'Area, kind, notes and subtasks belong to the series')
-          : scope === 'after'
+          : p.scope === 'after'
             ? h('div', { class: 'eyebrow', style: { marginTop: '3px', color: 'var(--ink-3)' } },
               'The next edit splits the series here')
             : null)));
@@ -154,10 +200,12 @@ function render(item) {
       onchange: (e) => {
         // moving a Canvas assignment out of where the import put it takes
         // the rest of its course along (followCourse in the store); say so
-        const course = live.canvasCourse, teaches = canvasUnmoved(live);
+        const lead = row() || live;
+        const course = lead.canvasCourse, teaches = canvasUnmoved(lead);
         set({ areaId: e.target.value || null }, { resync: true });
-        if (teaches) {
-          const n = state.items.filter((t) => t !== live && t.canvasCourse === course && t.areaId === live.areaId).length;
+        const now = row();
+        if (teaches && now) {
+          const n = state.items.filter((t) => t !== now && t.canvasCourse === course && t.areaId === now.areaId).length;
           if (n) toast(`${n} more from ${course} went along`);
         }
         rerender();
@@ -222,7 +270,7 @@ function render(item) {
       })));
   } else if (scheduled) {
     // wrapped: a block that runs past midnight ends the next morning
-    const endOf = (p) => fromMin((toMin(p.start || '09:00') + (p.mins || 60)) % (24 * 60));
+    const endOf = (b) => fromMin((toMin(b.start || '09:00') + (b.mins || 60)) % (24 * 60));
     props.append(prop('Date',
       h('input', {
         type: 'date', value: plan.date || '',
@@ -270,7 +318,7 @@ function render(item) {
 
   props.append(prop('Priority',
     h('select', { onchange: (e) => set({ priority: e.target.value }) },
-      ...['low', 'normal', 'high'].map((p) => h('option', { value: p, selected: p === item.priority }, p[0].toUpperCase() + p.slice(1))))));
+      ...['low', 'normal', 'high'].map((v) => h('option', { value: v, selected: v === item.priority }, v[0].toUpperCase() + v.slice(1))))));
 
   // the area's colour unless one is picked for this alone
   const own = item.color || null;
@@ -312,26 +360,30 @@ function render(item) {
     subs.append(h('div', { class: 'subtask' + (s.done ? ' done' : '') },
       h('input', {
         type: 'checkbox', class: 'check sm', checked: s.done,
-        onchange: (e) => { commit(() => { s.done = e.target.checked; }); rerender(); }
+        onchange: (e) => { editRow((r) => { const st = subOf(r, s, i); if (st) st.done = e.target.checked; }); rerender(); }
       }),
       h('input', {
         type: 'text', value: s.title,
-        oninput: debounce((e) => commit(() => { s.title = e.target.value; }), 400),
+        oninput: debounce((e) => editRow((r) => { const st = subOf(r, s, i); if (st) st.title = e.target.value; }), 400),
         onkeydown: (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); addSub(i + 1); }
+          if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); addSub(i + 1); }
           if (e.key === 'Backspace' && !e.target.value) {
             e.preventDefault();
-            commit(() => live.subtasks.splice(i, 1));
-            rerender();
+            removeSub(s, i);
           }
         }
       }),
-      h('button', { class: 'btn ghost sm', onclick: () => { commit(() => live.subtasks.splice(i, 1)); rerender(); }, 'aria-label': 'Remove subtask' }, '✕')));
+      h('button', { class: 'btn ghost sm', onclick: () => removeSub(s, i), 'aria-label': 'Remove subtask' }, '✕')));
   });
   body.append(subs);
 
-  function addSub(at = live.subtasks.length) {
-    commit(() => live.subtasks.splice(at, 0, { id: uid('st'), title: '', done: false }));
+  function removeSub(s, i) {
+    editRow((r) => { const j = r.subtasks.indexOf(subOf(r, s, i)); if (j >= 0) r.subtasks.splice(j, 1); });
+    rerender();
+  }
+
+  function addSub(at = item.subtasks.length) {
+    editRow((r) => r.subtasks.splice(Math.min(at, r.subtasks.length), 0, { id: uid('st'), title: '', done: false }));
     rerender();
     setTimeout(() => {
       const inputs = document.querySelectorAll('#peek .subtask input[type="text"]');
@@ -345,7 +397,7 @@ function render(item) {
   body.append(h('textarea', {
     placeholder: 'Anything worth remembering — where you left off, page numbers, links.',
     style: { minHeight: '130px' },
-    oninput: debounce((e) => commit(() => { live.notes = e.target.value; }), 400)
+    oninput: debounce((e) => editRow((r) => { r.notes = e.target.value; }), 400)
   }, live.notes || ''));
 
   body.append(h('div', { class: 'eyebrow', style: { marginTop: '20px' } },
@@ -375,7 +427,10 @@ function repeatRows(props, live, rerender) {
 
   const rep = live.repeat;
   const write = (next) => {
-    commit(() => upsertItem({ id: live.id, repeat: next }));
+    // by id, and only while it is there: upsertItem would make a ghost of one deleted elsewhere
+    if (!itemById(live.id)) { toast('That task was deleted elsewhere.'); closePeek(); return; }
+    // tagged, or the view under the panel never repaints
+    commit(() => upsertItem({ id: live.id, repeat: next }), { source: 'editor', touches: ['items'] });
     pushItem(live.id).catch(() => {});
     rerender();
   };
@@ -465,26 +520,37 @@ function addMonths(date, n) {
 
 async function removePlain(item) {
   if (!await confirmDialog('Delete this task?', item.title, 'Delete')) return;
-  const snapshot = JSON.parse(JSON.stringify(item));
+  // the row as it is now: the dialog waited, and a pull or an undo may have
+  // put a new one in its place
+  const row = itemById(item.id);
+  if (!row) { closePeek(); return; }
+  const snapshot = JSON.parse(JSON.stringify(row));
   // its Google event goes with it — queued before the row is gone, since the
   // queue needs the event ids the row holds
-  forgetItem(item);
+  forgetItem(row);
   // tagged so the view underneath repaints — the peek floats over whichever
   // view is showing, and it still lists this item
-  commit(() => deleteItem(item.id), { source: 'editor' });
+  commit(() => deleteItem(row.id), { source: 'editor' });
   closePeek();
   toast('Task deleted', {
     action: 'Undo',
-    // stamped now, like the store's own undo: put back with its old clock the
-    // server keeps the tombstone, and the next full sync deletes it here too
-    onAction: () => commit(() => {
-      snapshot.updatedAt = new Date().toISOString();
-      state.items.push(snapshot);
-    }, { source: 'editor' })
+    onAction: () => {
+      // Ctrl+Z may have put it back already: a second row with the one id
+      // would draw twice and sync as one
+      if (itemById(snapshot.id)) return;
+      // stamped now, like the store's own undo: put back with its old clock the
+      // server keeps the tombstone, and the next full sync deletes it here too
+      commit(() => {
+        snapshot.updatedAt = new Date().toISOString();
+        state.items.push(snapshot);
+      }, { source: 'editor' });
+    }
   });
 }
 
-function removeOccurrence(item, live) {
+function removeOccurrence(item) {
+  const live = seriesById(item.id);
+  if (!live) { closePeek(); return; }
   const on = fmtDate(item.occurrence, { weekday: true });
   const undo = JSON.parse(JSON.stringify(live));
   const done = (msg) => {
@@ -510,14 +576,19 @@ function removeOccurrence(item, live) {
       h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
       h('button', {
         class: 'btn', onclick: () => {
-          commit(() => endSeriesBefore(live, item.occurrence), { source: 'editor' });
-          done(`Series ended before ${on}`);
+          const series = seriesById(item.id) || live;   // as it is now, not when the dialog opened
+          commit(() => endSeriesBefore(series, item.occurrence), { source: 'editor' });
+          // from its first one, "this and after" is the whole series, deleted:
+          // its events go too, as for "All of them" (the row still holds their ids)
+          if (itemById(series.id)) done(`Series ended before ${on}`);
+          else { forgetItem(series); done('Series deleted'); }
         }
       }, 'This and after'),
       h('button', {
         class: 'btn', onclick: () => {
-          forgetItem(live);          // every occurrence's event, before the row goes
-          commit(() => deleteItem(live.id), { source: 'editor' });
+          const series = seriesById(item.id) || live;
+          forgetItem(series);        // every occurrence's event, before the row goes
+          commit(() => deleteItem(series.id), { source: 'editor' });
           done('Series deleted');
         }
       }, 'All of them'),

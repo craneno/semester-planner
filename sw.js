@@ -80,7 +80,11 @@ self.addEventListener('install', (e) => {
       // cache: 'reload' fetches past the HTTP cache. Without it a plain c.add()
       // is served by it, and since Pages sends max-age=600 a freshly bumped
       // VERSION can be filled with the files it was bumped to replace.
-      .then((c) => Promise.allSettled(
+      // All or nothing: one file that did not come makes the install fail, and
+      // the old worker goes on serving the whole of the old deploy. Taking
+      // what arrived left a cache short a module — two versions at once
+      // online, a boot that broke offline. The next visit tries again.
+      .then((c) => Promise.all(
         SHELL.map((u) => c.add(new Request(u, { cache: 'reload' })))))
       .then(() => self.skipWaiting())
   );

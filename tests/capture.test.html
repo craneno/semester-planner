@@ -7,7 +7,7 @@
 </head>
 <body>
 <script type="module">
-import { suite, storeWith } from './harness.js';
+import { suite, storeWith, sharedStoreWith, renderInto } from './harness.js';
 import { SCHEMA_VERSION } from '../js/store/constants.js';
 
 const base = (over = {}) => ({
@@ -173,6 +173,36 @@ suite('Capture — notecards and filing', async ({ check }) => {
     const s = await storeWith({ version: SCHEMA_VERSION, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [] });
     check('nothing is seeded once already current', s.state.areas.length === 1,
       s.state.areas.map((a) => a.name).join());
+  }
+});
+
+suite('Capture — an Enter that ends an IME word is not a save', async ({ check }) => {
+  /* Japanese, Chinese and Korean are typed through a composer, and the Enter
+     that picks the word is a keydown like any other. Taken, it saved the
+     half-typed text as a note. The box is drawn on the store the app uses,
+     which nothing in this file has loaded before. */
+  const { state } = await sharedStoreWith({ version: SCHEMA_VERSION, areas: [{ id: 'a1', name: 'Thermo', category: 'course' }], items: [], cards: [] });
+  const { captureStrip } = await import('../js/capture.js');
+  const ui = renderInto(() => {});
+  const wrap = captureStrip(() => {});
+  ui.stage.append(wrap);
+  const enter = (init = {}) => new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
+  try {
+    const box = wrap.querySelector('textarea');
+    const before = state.cards.length;
+    box.value = 'nihongo';
+    box.dispatchEvent(enter({ isComposing: true }));
+    check('an Enter while composing saves nothing', state.cards.length === before && box.value === 'nihongo');
+    // Safari ends a composition with a keydown of its own, keyCode 229
+    const safari = enter();
+    Object.defineProperty(safari, 'keyCode', { get: () => 229 });
+    box.dispatchEvent(safari);
+    check('...nor one sent as keyCode 229', state.cards.length === before);
+    box.dispatchEvent(enter());
+    check('the Enter after it saves the note', state.cards.length === before + 1 && state.cards[0].text === 'nihongo',
+      JSON.stringify(state.cards[0]));
+  } finally {
+    ui.done();
   }
 });
 </script>

@@ -629,6 +629,68 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     check('...nor tombstoned on the next push', !!row && row.deleted === false && row.data.title === 'new kind', JSON.stringify(row));
   }
 
+  /* A reset while a sync is out. Restore from file resets the sync state and
+     puts the file's rows in; the sync already in flight finished after, and
+     wrote back the baseline, the schema and the cursor the reset had just
+     cleared — so the next sync read every row missing from the restored
+     copy as deleted here and tombstoned it on every device. */
+  async function tResetMidSync() {
+    const fake = fresh([remote('mid', 1, 'on the server')]);
+    const BASE = 'semesterPlanner.cloudBase.' + USER, SCHEMA = 'semesterPlanner.cloudSchema.' + USER;
+    localStorage.removeItem(SCHEMA);
+    let fired = false;
+    const origFrom = fake.from.bind(fake);
+    fake.from = () => {
+      const q = origFrom();
+      const origThen = q.then.bind(q);
+      q.then = (res) => {
+        // the reset lands while the pull's page is on its way
+        if (!q._up && !fired) { fired = true; C.resetLocalSyncState(); }
+        origThen(res);
+      };
+      return q;
+    };
+    await C.sync();
+    fake.from = origFrom;
+    check('a sync the reset overtook writes no baseline', localStorage.getItem(BASE) === null);
+    check('...no schema marker', localStorage.getItem(SCHEMA) === null, String(localStorage.getItem(SCHEMA)));
+    check('...and no cursor', state.settings.cloud.cursor === '', state.settings.cloud.cursor);
+    check('...takes nothing it was carrying', !itemById('mid'));
+    check('...and is not an error', C.cloud.status === 'ready', `${C.cloud.status}: ${C.cloud.message}`);
+
+    C._setClient(fake, { userId: USER, email: 't@e.st' });   // the reset let the client go
+    await C.sync();
+    check('the sync after it starts clean, and runs', !!itemById('mid') && localStorage.getItem(BASE) !== null && C.cloud.status === 'ready',
+      `${C.cloud.status}; mid ${!!itemById('mid')}`);
+  }
+
+  /* synced_at is when the writing transaction began, so a slow commit on
+     the phone can land behind a cursor that has already moved past it. Each
+     pull starts a little behind the cursor; what comes twice is not news. */
+  async function tPullOverlap() {
+    const fake = fresh([remote('far', 500)]);
+    await C.sync();
+    check('the cursor is where the pull got to', state.settings.cloud.cursor === at(500), state.settings.cloud.cursor);
+    fake.table.push(remote('slow', 490, 'a slow commit'));   // ten seconds behind it
+    let writes = fake.writes;
+    await C.sync();
+    check('a row that landed just behind the cursor still comes down', !!itemById('slow'), '(never arrived)');
+    check('...counted once, and the one pulled again not at all', C.cloud.log[0].down === 1, JSON.stringify(C.cloud.log[0]));
+    check('...and nothing goes back up for either', fake.writes === writes, `(wrote ${fake.writes - writes})`);
+    check('...and the cursor does not go back', state.settings.cloud.cursor === at(500), state.settings.cloud.cursor);
+
+    // both again, a row to a page: news to no one, and the pages still move on
+    writes = fake.writes;
+    const reads = fake.reads;
+    let repaints = 0;
+    const off = subscribe((meta) => { if (meta?.source === 'cloud') repaints++; });
+    C.pullSettings.page = 1;
+    try { await C.sync(); } finally { C.pullSettings.page = 500; off(); }
+    check('rows pulled again are not news', C.cloud.log[0].down === 0 && repaints === 0 && fake.writes === writes,
+      `${JSON.stringify(C.cloud.log[0])}, ${repaints} repaints`);
+    check('...paged one by one to the end', fake.reads - reads >= 3, `(${fake.reads - reads} reads)`);
+  }
+
   /* Offline is a status, not an error, and not a round trip either. */
   async function tOffline() {
     const fake = fresh();
@@ -685,6 +747,8 @@ suite('Cloud sync — delete durability', async ({ check }) => {
     ['who wins a row', tConflicts],
     ['the schema guard', tSchemaGuard],
     ['a kind this build does not know', tUnknownKind],
+    ['a reset while a sync is out', tResetMidSync],
+    ['each pull starts a little behind', tPullOverlap],
     ['offline', tOffline],
     ['an external save schedules no push', tExternalSaveSchedulesNoPush]
   ]) {

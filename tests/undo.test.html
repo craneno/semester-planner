@@ -211,6 +211,24 @@ suite('Undo — an edit straight after an undo is its own step', async ({ check 
   check('the undo takes back only the edit made after the last one',
     s.itemById('w1')?.title === 'first', String(s.itemById('w1')?.title));
 });
+
+/* The day's sweep has an Undo of its own, in its toast. As an undo step too,
+   Ctrl+Z put the swept tasks back, the redraw that followed swept them again
+   at once, and the edit before the sweep could never be reached. So app.js
+   sweeps outside commit() and commits with no fn, which is no step. */
+suite('Undo — the day’s sweep is not a step', async ({ check }) => {
+  const s = await storeWith({ ...base(), items: [{ id: 'sw', title: 'finished', done: true, doneAt: '2026-01-05T12:00:00.000Z' }] });
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => s.upsertItem({ id: 'ed', title: 'an edit' }), { label: 'add a task' });
+  const gone = s.sweepDone();          // as app.js's sweep() does it
+  s.commit(null, { source: 'sweep' });
+  check('the sweep took the finished task', gone.length === 1 && !s.itemById('sw'));
+  check('Ctrl+Z after it undoes the edit before it', s.undo() === 'add a task' && !s.itemById('ed'));
+
+  const app = await fetch('../js/app.js', { cache: 'no-store' }).then((r) => r.text());
+  check('...and app.js sweeps that way', /sweepDone\(today\(\), spared\);\s*commit\(null, \{ source: 'sweep' \}\)/.test(app),
+    'the sweep in app.js commits with a fn again, which makes it a step');
+});
 </script>
 </body>
 </html>

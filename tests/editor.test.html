@@ -18,7 +18,16 @@ const s = await sharedStoreWith({
   version: 20,
   semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
   areas: [{ id: 'gen', name: 'General', category: 'personal', order: 0, color: '#3C6E8F' }],
-  items: [{ id: 'a', title: 'Late show', areaId: 'gen', plan: { date: '2026-09-11', start: '22:00', mins: 60 }, due: null }],
+  items: [
+    { id: 'a', title: 'Late show', areaId: 'gen', plan: { date: '2026-09-11', start: '22:00', mins: 60 }, due: null },
+    // Tuesdays and Wednesdays from the first week of term, for the series suites
+    { id: 'w', title: 'Lab', areaId: 'gen', plan: { date: '2026-09-01', start: '10:00', mins: 60 }, due: null,
+      repeat: { freq: 'weekly', every: 1, days: [], until: null, count: null, ex: {} } },
+    { id: 'w2', title: 'Seminar', areaId: 'gen', plan: { date: '2026-09-02', start: '14:00', mins: 60 }, due: null,
+      repeat: { freq: 'weekly', every: 1, days: [], until: null, count: null, ex: {} } },
+    { id: 'n', title: 'Read', areaId: 'gen', due: '2026-09-20', subtasks: [{ id: 'st1', title: 'first', done: false }] },
+    { id: 'del', title: 'Doomed', areaId: 'gen', due: '2026-09-21' }
+  ],
   cards: [], notes: {},
   habits: [{ id: 'h1', name: 'Workout', order: 0, archived: false }], habitLog: {}, habitLogAt: {}
 });
@@ -69,6 +78,106 @@ suite('Editor — the panel on a task', async ({ check }) => {
 
     U.closePeek();
     check('it closes', !document.getElementById('peek').classList.contains('open'));
+  } finally {
+    U.closePeek();
+  }
+});
+
+const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+const type = (el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); };
+const scopeBtn = (label) => $$('.mode-toggle .mode').find((b) => b.textContent === label);
+const isOpen = () => document.getElementById('peek').classList.contains('open');
+
+suite('Editor — one of a series', async ({ check }) => {
+  const E = await import('../js/editor.js');
+  const U = await import('../js/ui.js');
+  renderInto(() => {}).done();
+  try {
+    /* All of them, from the third Tuesday. The new time was sent with the
+       third Tuesday's date, the series' own day moved there, and the two
+       before it were gone. */
+    E.openItem('w@2026-09-15');
+    scopeBtn('All of them').click();
+    change($$('.timebox')[0], '11:00');
+    const w = s.itemById('w');
+    check('All of them: a new time reaches the series', w.plan.start === '11:00', JSON.stringify(w.plan));
+    check('...and the series keeps its own first day', w.plan.date === '2026-09-01', w.plan.date);
+    check('...so the ones before this are still there, at the new time',
+      s.itemById('w@2026-09-08')?.plan.start === '11:00', JSON.stringify(s.itemById('w@2026-09-08')?.plan));
+    change($$('.timebox')[1], '12:30');
+    check('a new end is a new length, the day still kept',
+      s.itemById('w').plan.mins === 90 && s.itemById('w').plan.date === '2026-09-01', JSON.stringify(s.itemById('w').plan));
+    U.closePeek();
+
+    /* This and after, by a name typed in two goes: the first splits the
+       series, and the second has to find the new one. It went to the day
+       the split had just ended, found it gone, and shut the panel. */
+    E.openItem('w2@2026-09-16');
+    scopeBtn('This and after').click();
+    type($('.peek-title'), 'Seminar, room 2');
+    await tick(450);
+    const made = s.state.items.find((t) => t.id !== 'w2' && t.title === 'Seminar, room 2');
+    check('the first word splits the series', !!made && s.itemById('w2').repeat.until === '2026-09-15',
+      JSON.stringify(s.itemById('w2').repeat));
+    type($('.peek-title'), 'Seminar, room 204');
+    await tick(450);
+    check('the next word goes to the new series', !!made && s.itemById(made.id)?.title === 'Seminar, room 204',
+      String(made && s.itemById(made.id)?.title));
+    check('...not to the old one', s.itemById('w2').title === 'Seminar');
+    check('...and the panel stays open', isOpen());
+  } finally {
+    U.closePeek();
+  }
+});
+
+suite('Editor — a write finds the row as it is now', async ({ check }) => {
+  const E = await import('../js/editor.js');
+  const U = await import('../js/ui.js');
+  renderInto(() => {}).done();
+  // what a pull does (applyRow: arr[i] = obj), and an undo or another tab's save alike
+  const replace = () => { const i = s.state.items.findIndex((t) => t.id === 'n'); s.state.items[i] = structuredClone(s.state.items[i]); };
+  const seen = [];
+  const off = s.subscribe((meta) => seen.push(meta?.source));
+  try {
+    E.openItem('n');
+    replace();
+    type($('textarea'), 'page 42');
+    await tick(450);
+    check('notes typed after the row was replaced land on the row', s.itemById('n').notes === 'page 42', String(s.itemById('n').notes));
+    replace();
+    type($('.subtask input[type=text]'), 'first, and done');
+    await tick(450);
+    check('a subtask renamed after it was replaced lands on the row', s.itemById('n').subtasks[0].title === 'first, and done',
+      JSON.stringify(s.itemById('n').subtasks));
+    replace();
+    $('.subtask input[type=checkbox]').click();
+    check('...ticked, too', s.itemById('n').subtasks[0].done === true);
+    replace();
+    $$('button').find((b) => b.textContent === '+ Add subtask').click();
+    check('...and one added', s.itemById('n').subtasks.length === 2);
+    check('each told the view under the panel, as the editor', seen.length >= 4 && seen.every((x) => x === 'editor'), seen.join());
+  } finally {
+    off();
+    U.closePeek();
+  }
+});
+
+suite('Editor — deleted, then put back twice', async ({ check }) => {
+  const E = await import('../js/editor.js');
+  const U = await import('../js/ui.js');
+  renderInto(() => {}).done();
+  try {
+    E.openItem('del');
+    $$('.peek-h button').find((b) => b.title === 'Delete task').click();
+    document.querySelector('.modal .btn.primary').click();
+    await tick(0);
+    check('it is deleted', s.itemById('del') === null);
+    s.undo();                                   // Ctrl+Z
+    check('Ctrl+Z puts it back', !!s.itemById('del'));
+    const toast = [...document.querySelectorAll('#toasts .toast')].find((t) => t.dataset.msg === 'Task deleted');
+    toast?.querySelector('button')?.click();    // ...and then the toast's Undo
+    check('the toast’s Undo after it adds no second row', s.state.items.filter((t) => t.id === 'del').length === 1,
+      String(s.state.items.filter((t) => t.id === 'del').length));
   } finally {
     U.closePeek();
   }
