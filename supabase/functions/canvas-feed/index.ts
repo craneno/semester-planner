@@ -23,15 +23,42 @@ const CORS = {
 const reply = (status: number, body: string, type = 'text/plain') =>
   new Response(body, { status, headers: { ...CORS, 'Content-Type': type + '; charset=utf-8' } });
 
+/** Anything on instructure.com, or a school's own Canvas: a `canvas` label
+ *  under a domain ending .edu (canvas.school.edu, x.canvas.school.edu). The
+ *  same test as isCanvasHost() in js/canvas.js. */
+function canvasHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (host.endsWith('.instructure.com')) return true;
+  const labels = host.split('.');
+  const at = labels.indexOf('canvas');
+  return at >= 0 && labels[labels.length - 1] === 'edu' && labels.length - at >= 3;
+}
+
 /** Only a Canvas host, only over https: this function fetches on your behalf,
  *  and a URL that could point anywhere would fetch anything. */
-function allowed(raw: string): URL | null {
+function allowed(raw: string, base?: URL): URL | null {
   let u: URL;
-  try { u = new URL(raw); } catch { return null; }
+  try { u = new URL(raw, base); } catch { return null; }
   if (u.protocol !== 'https:') return null;
-  const host = u.hostname.toLowerCase();
-  if (host.endsWith('.instructure.com') || host.startsWith('canvas.') || host.includes('.canvas.')) return u;
-  return null;
+  return canvasHost(u.hostname) ? u : null;
+}
+
+/** Redirects are followed by hand, each one checked like the first link:
+ *  fetch left to itself would follow one anywhere. */
+const MAX_HOPS = 4;
+async function fetchCanvas(first: URL, signal: AbortSignal): Promise<Response> {
+  let url = first;
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(url, { signal, redirect: 'manual', headers: { Accept: 'text/calendar' } });
+    if (res.status < 300 || res.status >= 400) return res;
+    const to = res.headers.get('Location');
+    await res.body?.cancel();
+    if (!to) throw new Error(`Canvas answered ${res.status} with nowhere to go`);
+    if (hop >= MAX_HOPS) throw new Error('Canvas sent us round too many redirects');
+    const next = allowed(to, url);
+    if (!next) throw new Error('Canvas redirected off Canvas');
+    url = next;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -64,7 +91,7 @@ Deno.serve(async (req) => {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 20_000);
   try {
-    const res = await fetch(url, { signal: ctl.signal, headers: { Accept: 'text/calendar' } });
+    const res = await fetchCanvas(url, ctl.signal);
     if (!res.ok) return reply(502, `Canvas answered ${res.status}`);
     const text = await res.text();
     if (!/BEGIN:VCALENDAR/i.test(text)) return reply(502, 'Canvas did not send a calendar');

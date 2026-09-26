@@ -53,11 +53,11 @@ const env = (k: string) => Deno.env.get(k) || '';
 
 const tokens: Record<string, { value: string; until: number }> = {};
 
-async function token(carrier: string, url: string, body: URLSearchParams, headers: Record<string, string> = {}) {
+async function token(carrier: string, url: string, body: URLSearchParams, headers: Record<string, string>, signal: AbortSignal) {
   const have = tokens[carrier];
   if (have && have.until > Date.now() + 60_000) return have.value;
   const res = await fetch(url, {
-    method: 'POST',
+    method: 'POST', signal,
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
     body
   });
@@ -87,14 +87,14 @@ const title = (s: unknown) => String(s || '').trim().replace(/\s+/g, ' ');
 
 /* ---------------- FedEx ---------------- */
 
-async function fedex(number: string): Promise<Answer | null> {
+async function fedex(number: string, signal: AbortSignal): Promise<Answer | null> {
   const id = env('FEDEX_CLIENT_ID'), secret = env('FEDEX_CLIENT_SECRET');
   if (!id || !secret) return null;
   const api = env('FEDEX_API') || 'https://apis.fedex.com';
   const t = await token('fedex', `${api}/oauth/token`,
-    new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }));
+    new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }), {}, signal);
   const res = await fetch(`${api}/track/v1/trackingnumbers`, {
-    method: 'POST',
+    method: 'POST', signal,
     headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json', 'X-locale': 'en_US' },
     body: JSON.stringify({ includeDetailedScans: true, trackingInfo: [{ trackingNumberInfo: { trackingNumber: number } }] })
   });
@@ -131,14 +131,15 @@ async function fedex(number: string): Promise<Answer | null> {
 
 /* ---------------- UPS ---------------- */
 
-async function ups(number: string): Promise<Answer | null> {
+async function ups(number: string, signal: AbortSignal): Promise<Answer | null> {
   const id = env('UPS_CLIENT_ID'), secret = env('UPS_CLIENT_SECRET');
   if (!id || !secret) return null;
   const api = env('UPS_API') || 'https://onlinetools.ups.com';
   const t = await token('ups', `${api}/security/v1/oauth/token`,
     new URLSearchParams({ grant_type: 'client_credentials' }),
-    { Authorization: 'Basic ' + btoa(`${id}:${secret}`) });
+    { Authorization: 'Basic ' + btoa(`${id}:${secret}`) }, signal);
   const res = await fetch(`${api}/api/track/v1/details/${encodeURIComponent(number)}?locale=en_US&returnSignature=false`, {
+    signal,
     headers: { Authorization: `Bearer ${t}`, transId: crypto.randomUUID(), transactionSrc: 'semester-planner' }
   });
   if (!res.ok) throw new Error(`UPS answered ${res.status}`);
@@ -175,14 +176,14 @@ async function ups(number: string): Promise<Answer | null> {
 // Tracking 3.2: one POST with a list of numbers, a list back, one entry
 // each. A number it cannot find comes back as its own entry with an `error`
 // (a 207 when the list is mixed), not as a failed request.
-async function usps(number: string): Promise<Answer | null> {
+async function usps(number: string, signal: AbortSignal): Promise<Answer | null> {
   const id = env('USPS_CLIENT_ID'), secret = env('USPS_CLIENT_SECRET');
   if (!id || !secret) return null;
   const api = env('USPS_API') || 'https://apis.usps.com';
   const t = await token('usps', `${api}/oauth2/v3/token`,
-    new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }));
+    new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }), {}, signal);
   const res = await fetch(`${api}/tracking/v3r2/tracking`, {
-    method: 'POST',
+    method: 'POST', signal,
     headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify([{ trackingNumber: number }])
   });
@@ -213,7 +214,7 @@ async function usps(number: string): Promise<Answer | null> {
   };
 }
 
-const ASK: Record<string, (n: string) => Promise<Answer | null>> = { fedex, ups, usps };
+const ASK: Record<string, (n: string, signal: AbortSignal) => Promise<Answer | null>> = { fedex, ups, usps };
 
 /* ---------------- the function ---------------- */
 
@@ -241,7 +242,8 @@ Deno.serve(async (req) => {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 20_000);
   try {
-    const answer = await ASK[carrier](number);
+    // the one clock for every call to the carrier, the token's included
+    const answer = await ASK[carrier](number, ctl.signal);
     if (!answer) return reply(501, `${carrier.toUpperCase()} tracking is not set up on the server: set ${carrier.toUpperCase()}_CLIENT_ID and ${carrier.toUpperCase()}_CLIENT_SECRET (README → Parcel tracking)`);
     return reply(200, answer);
   } catch (e) {

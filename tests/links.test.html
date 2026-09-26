@@ -7,7 +7,7 @@
 </head>
 <body>
 <script type="module">
-import { suite, storeWith } from './harness.js';
+import { suite, storeWith, sharedStoreWith, renderInto } from './harness.js';
 
 /* The areas a real install has after schema 12, so the hints under test are
    the ones actually typed: "ner", "rocket", "thermo", "personal". */
@@ -244,6 +244,92 @@ suite('Links — parsing, filing and titles', async ({ check }) => {
     check('a General area already there stops the rename',
       s.areaById('x1').name === 'Personal',
       'two areas called General would be indistinguishable in the sidebar');
+  }
+});
+
+/* The area's own page, drawn. What has to hold: a series is a row for the
+   occurrence a tick takes — today's, else the next — and the tick lands
+   there; "Earlier entries" stays open through a redraw; the editor saves only
+   what it shows, onto the area as it is at save time, so a freewrite typed
+   and a class cancelled while it was open survive; and Archive stamps the
+   area, or the next sync puts the old copy back. The shared store is seeded
+   here, last: nothing above imports it. */
+suite('Area page — series rows, the journal and the editor', async ({ check }) => {
+  const s = await sharedStoreWith({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'c1', name: 'Thermodynamics', category: 'course', order: 0 }],
+    items: [], cards: [], links: [], habits: [], habitLog: {}, notes: {}
+  });
+  const A = await import('../js/views/areas.js');
+  const { today, addDays, tz } = await import('../js/util.js');
+  const day = today();
+
+  const ps = s.upsertItem({ title: 'Problem set', areaId: 'c1', due: addDays(day, -14), repeat: { freq: 'weekly', every: 1 } });
+  const plain = s.upsertItem({ title: 'Read ch. 4', areaId: 'c1', due: addDays(day, 2) });
+  check('a plain item is its own row', A.rowItem(plain) === plain);
+  check('a series is today’s occurrence', A.rowItem(ps).id === `${ps.id}@${day}`, A.rowItem(ps).id);
+  s.deleteItem(`${ps.id}@${day}`);
+  check('...else the next one', A.rowItem(ps).id === `${ps.id}@${addDays(day, 7)}`, A.rowItem(ps).id);
+
+  const v = renderInto((root, ctx) => A.renderArea(root, ctx, 'c1'));
+  try {
+    const row = [...v.stage.querySelectorAll('.row')].find((r) => r.querySelector('.title')?.textContent.startsWith('Problem set'));
+    const box = row?.querySelector('input.check');
+    check('the series has one row', [...v.stage.querySelectorAll('.row')].filter((r) => r.textContent.includes('Problem set')).length === 1);
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    check('its tick lands on that occurrence', s.itemById(`${ps.id}@${addDays(day, 7)}`)?.done === true);
+    check('...never on the rule', ps.done === false);
+
+    s.commit(() => {
+      s.upsertArea({ id: 'c1', journal: true });
+      s.setJournalEntry('c1', addDays(day, -2), 'an older entry');
+    });
+    v.ctx.navigate();
+    const history = () => v.stage.querySelector('details.journal-history');
+    check('earlier entries sit behind a dropdown, shut', !!history() && !history().open);
+    history().open = true;
+    history().dispatchEvent(new Event('toggle'));
+    v.ctx.navigate();
+    check('opened, it stays open through a redraw', history()?.open === true);
+    history().open = false;
+    history().dispatchEvent(new Event('toggle'));
+    v.ctx.navigate();
+    check('...and shut, shut', history()?.open === false);
+  } finally {
+    v.done();
+  }
+
+  {
+    s.commit(() => s.upsertArea({
+      id: 'c1', freewrite: 'first thoughts',
+      schedule: [{ days: [1, 3], start: '10:00', end: '11:00', location: 'Snell 108', tz: tz() }]
+    }));
+    A.openAreaEditor('c1', () => {});
+    const dlg = document.querySelector('.modal');
+    // while it is open: a freewrite typed, a class cancelled
+    s.commit(() => s.upsertArea({ id: 'c1', freewrite: 'typed since' }));
+    s.commit(() => s.setClassDay('c1', 0, '2026-09-16', null));
+    const name = dlg.querySelector('input[placeholder="Thermodynamics II"]');
+    name.value = 'Thermo II';
+    name.dispatchEvent(new Event('input'));
+    [...dlg.querySelectorAll('.modal-f button')].find((b) => b.textContent === 'Save changes').click();
+    const a = s.areaById('c1');
+    check('the editor saves what it shows', a.name === 'Thermo II');
+    check('...and leaves the freewrite typed while it was open', a.freewrite === 'typed since', a.freewrite);
+    check('...and the class cancelled while it was open', a.schedule[0].ex && a.schedule[0].ex['2026-09-16'] === null,
+      JSON.stringify(a.schedule[0]));
+    check('...the meeting itself as it was', a.schedule[0].start === '10:00' && a.schedule[0].days.join() === '1,3');
+
+    s.commit(() => { a.updatedAt = '2020-01-01T00:00:00.000Z'; });
+    A.openAreaEditor('c1', () => {});
+    [...document.querySelectorAll('.modal .modal-f button')].find((b) => b.textContent === 'Archive').click();
+    check('Archive archives', s.areaById('c1').archived === true);
+    check('...and stamps the area, so a sync cannot undo it', s.areaById('c1').updatedAt > '2020-01-01T00:00:00.000Z', s.areaById('c1').updatedAt);
+    A.openAreaEditor('c1', () => {});
+    [...document.querySelectorAll('.modal .modal-f button')].find((b) => b.textContent === 'Restore').click();
+    check('Restore brings it back', s.areaById('c1').archived === false);
   }
 });
 </script>

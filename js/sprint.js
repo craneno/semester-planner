@@ -92,10 +92,11 @@ export function openSprint(subject, { onDone } = {}) {
     }
   });
 
+  // no "No area": a band is drawn in its area's lane, and one with none is
+  // never drawn and can never be opened again
   const areaIn = h('select', {
-    'aria-label': 'Area', onchange: (e) => write({ areaId: e.target.value || null })
+    'aria-label': 'Area', onchange: (e) => { if (e.target.value) write({ areaId: e.target.value }); }
   },
-  h('option', { value: '', selected: !draft.areaId }, 'No area'),
   ...AREA_CATEGORIES.map((c) => {
     const mine = areasInCategory(c.id);
     return mine.length
@@ -110,8 +111,10 @@ export function openSprint(subject, { onDone } = {}) {
   const kindIn = h('div', { class: 'mode-toggle' }, ...SPRINT_KINDS.map((k) => h('button', {
     class: 'mode' + (draft.kind === k ? ' on' : ''), 'aria-pressed': String(draft.kind === k),
     onclick: () => {
-      draft.kind = k;
+      // written inside the commit, never before it, or undo's copy already
+      // holds the new kind and cannot switch it back
       write({ kind: k });
+      draft.kind = k;
       for (const b of kindIn.children) {
         const on = b.textContent === KIND_LABEL[k];
         b.classList.toggle('on', on);
@@ -179,6 +182,9 @@ export function openSprint(subject, { onDone } = {}) {
   function save() {
     const title = titleIn.value.trim();
     if (!title) { toast('Give it a name first.'); return; }
+    // a draft with no area takes the one the select shows
+    if (!draft.areaId) draft.areaId = areaIn.value || null;
+    if (!draft.areaId) { toast('Pick an area for it first.'); return; }
     let made;
     commit(() => { made = upsertSprint({ ...draft, title }); });
     closeModal();

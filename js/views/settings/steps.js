@@ -13,6 +13,24 @@ import { section, field } from './bits.js';
 /** What a day of 0 nearly always means. The post got through, so it is the Shortcut. */
 export const ZERO_HELP = 'The phone posted 0. That is the Shortcut summing nothing: in the Health app (your picture → Apps → Shortcuts) let it read Steps, and in the request body send the Sum from “Calculate Statistics” as a Number — not the samples, not text. Run the Shortcut by hand: the function now refuses anything it cannot read as a number and says what it got.';
 
+/** The lowest goal taken: under it, any day the phone moved at all would tick the habit. */
+export const MIN_GOAL = 100;
+
+/**
+ * The goal a box's text names, or null for none. "8,000" is eight thousand;
+ * a blank or a word is no goal at all, never a goal of 1 — that ticked the
+ * steps habit on every day with a step in it. A small one is raised to MIN_GOAL.
+ */
+export function goalFrom(raw) {
+  const text = String(raw ?? '').replace(/[,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(text)) return null;
+  const n = Math.round(Number(text));
+  return n > 0 ? Math.max(MIN_GOAL, n) : null;
+}
+
+/** Open state of the Shortcut's steps, off the DOM: the hourly read redraws the card. */
+let howOpen = false;
+
 export function renderSteps() {
   const s = state.settings;
   const stepsBox = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } });
@@ -20,9 +38,16 @@ export function renderSteps() {
     clear(stepsBox);
     const habits = activeHabits();
     stepsBox.append(
+      // text, not number: a number box hands back '' for "8,000"
       field('Steps a day', h('input', {
-        type: 'number', min: 1000, step: 500, value: HL.stepsGoal(), style: { width: '110px' }, 'aria-label': 'Steps a day',
-        onchange: (e) => { const n = Math.max(1, Math.round(+e.target.value || 0)); commit(() => { s.stepsGoal = n; }); toast(`${n.toLocaleString()} steps a day.`); }
+        type: 'text', inputmode: 'numeric', value: HL.stepsGoal(), style: { width: '110px' }, 'aria-label': 'Steps a day',
+        onchange: (e) => {
+          const n = goalFrom(e.target.value);
+          if (n === null) { e.target.value = String(HL.stepsGoal()); toast('That is not a number of steps.'); return; }
+          e.target.value = String(n);
+          commit(() => { s.stepsGoal = n; });
+          toast(`${n.toLocaleString()} steps a day.`);
+        }
       })),
       field('Ticks the habit', h('select', {
         'aria-label': 'Habit the steps tick',
@@ -62,7 +87,7 @@ export function renderSteps() {
         h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
           h('code', { style: { fontSize: '11px', wordBreak: 'break-all' } }, url),
           h('button', { class: 'btn sm', onclick: copy(url, 'URL copied.') }, 'Copy'))),
-      h('details', { class: 'history' },
+      h('details', { class: 'history', open: howOpen ? true : null, ontoggle: (e) => { howOpen = e.target.open; } },
         h('summary', {}, 'The Shortcut, step by step'),
         h('ol', { style: { fontSize: '12.5px', color: 'var(--ink-2)', margin: '8px 0 0', paddingLeft: '18px', lineHeight: 1.5 } },
           h('li', {}, 'Shortcuts \u2192 Automation \u2192 + \u2192 Time of Day, every day, late (11:45 PM), Run Immediately.'),

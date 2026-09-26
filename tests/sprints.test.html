@@ -12,7 +12,7 @@
    lives in chart.test.html — but that a band survives a reload and that the
    deliverables it carries cannot rot into half-objects. What reaches another
    device is checked with every other row kind, in safety.test.html. */
-import { suite, storeWith } from './harness.js';
+import { suite, storeWith, sharedStoreWith } from './harness.js';
 
 const base = (over = {}) => ({
   version: 18,
@@ -155,6 +155,43 @@ suite('Focuses and sprints — bands on the chart', async ({ check }) => {
     check('deleting an area takes its bands with it',
       s.state.sprints.map((p) => p.id).join() === 's3',
       'a band is drawn in its area lane and nowhere else — an orphan is unreachable');
+  }
+});
+
+/* The band's editor. What has to hold: it offers no "No area" — a band with
+   none is never drawn and can never be opened again — and a new band with no
+   area named takes the one the select shows; and switching Focus to Sprint
+   is written inside the commit, so undo can switch it back. The shared store
+   is seeded here, last: nothing above imports it. */
+suite('Focuses and sprints — the editor', async ({ check }) => {
+  const s = await sharedStoreWith(base({ version: 20, sprints: [band()] }));
+  const { openSprint } = await import('../js/sprint.js');
+  const { closeModal } = await import('../js/ui.js');
+
+  openSprint('s1');
+  try {
+    const dlg = document.querySelector('.modal');
+    const opts = [...dlg.querySelectorAll('select[aria-label="Area"] option')];
+    check('every choice is an area', opts.length === 2 && opts.every((o) => o.value), opts.map((o) => o.textContent).join());
+    [...dlg.querySelectorAll('.mode')].find((b) => b.textContent === 'Sprint').click();
+    check('the kind switches', s.sprintById('s1').kind === 'sprint');
+    s.undo();
+    check('...and undo switches it back', s.sprintById('s1').kind === 'focus', s.sprintById('s1').kind);
+  } finally {
+    closeModal();
+  }
+
+  openSprint({ areaId: null, start: '2026-10-05', end: '2026-10-18' });
+  try {
+    const dlg = document.querySelector('.modal');
+    const title = dlg.querySelector('input[aria-label="Name"]');
+    title.value = 'Midterms';
+    [...dlg.querySelectorAll('.modal-f button')].find((b) => b.textContent === 'Create').click();
+    const made = s.state.sprints.find((p) => p.title === 'Midterms');
+    check('a new band with no area named takes the one shown', !!made && made.areaId === dlg.querySelector('select[aria-label="Area"]').value,
+      JSON.stringify(made));
+  } finally {
+    closeModal();
   }
 });
 </script>

@@ -59,6 +59,17 @@ suite('Calendar export — the format\u2019s small rules', async ({ check }) => 
   check('a long line folds at 75', f.split('\r\n')[0].length === 75 && f.split('\r\n')[1].startsWith(' '));
   check('...and reads back whole', f.replace(/\r\n /g, '') === long);
   check('a short line is left alone', X.fold('BEGIN:VEVENT') === 'BEGIN:VEVENT');
+
+  // 75 octets, not 75 characters: an é is two, an emoji four and two halves
+  const octets = (s) => new TextEncoder().encode(s).length;
+  const wide = 'SUMMARY:' + 'é'.repeat(60) + '🚀'.repeat(20) + ' done';
+  const parts = X.fold(wide).split('\r\n');
+  check('every folded line is 75 octets or fewer, its space counted', parts.every((l) => octets(l) <= 75),
+    parts.map(octets).join());
+  check('...lines after the first begin with a space', parts.length > 2 && parts.slice(1).every((l) => l.startsWith(' ')));
+  check('...no emoji is cut in half', parts.every((l) => !/[\uD800-\uDBFF]$/.test(l) && !/^ ?[\uDC00-\uDFFF]/.test(l)));
+  check('...and it reads back whole', X.fold(wide).replace(/\r\n /g, '') === wide);
+  check('a line of 75 plain octets is left alone', X.fold('x'.repeat(75)) === 'x'.repeat(75));
   check('minutes past midnight run into the next day', X.utcStamp('2026-09-14', 25 * 60) === X.utcStamp('2026-09-15', 60));
 });
 </script>

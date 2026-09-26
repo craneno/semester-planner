@@ -67,10 +67,10 @@ export function parseWishAdd(input) {
   }
 
   // two prices — "$5 $10", a sale — the last one stands, and none stays in
-  // the name
-  const priceRe = /\s\$\s?(\d+(?:\.\d{1,2})?)\b/g;
+  // the name. "$1,299" is one price: thousands in threes after a comma
+  const priceRe = /\s\$\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\b/g;
   const prices = [...text.matchAll(priceRe)];
-  if (prices.length) { price = Number(prices[prices.length - 1][1]); text = text.replace(priceRe, ' '); }
+  if (prices.length) { price = Number(prices[prices.length - 1][1].replace(/,/g, '')); text = text.replace(priceRe, ' '); }
 
   // a tracking number is a parcel already on its way: it names the carrier,
   // and the carrier's page is its link unless one was given

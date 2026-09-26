@@ -49,6 +49,12 @@ suite('Wishlist — wanting, ordering, waiting', async ({ check }) => {
       String(p('3.5in case fan').url));
     check('no price means no price', p('Nozzle heater').price === null);
     check('an empty line still names something', p('   ').title === 'Untitled');
+
+    // "$1,299" once read as $1 and left ",299" in the name
+    const laptop = p('Laptop $1,299');
+    check('a price with a thousands comma is the whole price', laptop.price === 1299, String(laptop.price));
+    check('...and none of it stays in the name', laptop.title === 'Laptop', laptop.title);
+    check('...cents and all', p('Bike $12,450.99').price === 12450.99, String(p('Bike $12,450.99').price));
   }
 
   /* ---- adding ---- */

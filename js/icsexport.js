@@ -12,12 +12,24 @@ import { addDays, parseYmd, toMin, pad } from './util.js';
 
 const esc = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 
-/** A line folded at 75 octets, the rest on lines that begin with a space. */
+/** Octets a code point takes in UTF-8. */
+const utf8Len = (cp) => (cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4);
+
+/**
+ * A line folded at 75 octets, the rest on lines that begin with a space —
+ * the space counted in its line's 75. Octets, not characters: an é is two
+ * and an emoji four, and a fold never cuts one in half.
+ */
 export function fold(line) {
   const out = [];
-  let s = line;
-  while (s.length > 75) { out.push(s.slice(0, 75)); s = ' ' + s.slice(75); }
-  out.push(s);
+  let cur = '', bytes = 0;
+  for (const ch of line) {          // by code point: an emoji's two halves stay together
+    const n = utf8Len(ch.codePointAt(0) || 0);
+    if (bytes + n > 75) { out.push(cur); cur = ' '; bytes = 1; }
+    cur += ch;
+    bytes += n;
+  }
+  out.push(cur);
   return out.join('\r\n');
 }
 
