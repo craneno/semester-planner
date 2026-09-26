@@ -10,7 +10,7 @@
 // one row on the server and the canvas-feed Edge Function reads Canvas for
 // us, once a day per device (refreshIfDue) and whenever asked (refreshFeed).
 
-import { state, commit, upsertItem, areaById, canvasUnmoved } from './store.js';
+import { state, commit, upsertItem, areaById, canvasUnmoved, canvasCleared } from './store.js';
 import { addDays } from './util.js';
 import * as C from './cloud.js';
 import { warn } from './problems.js';
@@ -167,7 +167,7 @@ export function importCanvas(text, meta) {
 /** The import itself, inside whatever commit the caller is in. */
 function applyFeed(text) {
   const events = parseIcs(text);
-  const res = { added: 0, updated: 0, unfiled: [], skipped: 0 };
+  const res = { added: 0, updated: 0, unfiled: [], skipped: 0, cleared: 0 };
   const seen = new Set();
 
   {
@@ -204,6 +204,8 @@ function applyFeed(text) {
         if (Object.keys(patch).length) { upsertItem({ id: existing.id, ...patch }); res.updated++; }
         continue;
       }
+      // ticked and swept, or deleted: done with here, however long Canvas lists it
+      if (canvasCleared(ev.uid)) { res.cleared++; continue; }
 
       const areaId = homeFor(course);
       const notes = [ev.description?.trim(), ev.url].filter(Boolean).join('\n\n');

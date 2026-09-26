@@ -2,7 +2,7 @@
 
 A local-first semester planner: static PWA, plain ES modules, no deps, kept in
 `localStorage`, with optional Google Calendar and Supabase sync.
-Schema **20**, service worker **planner-v82**.
+Schema **20**, service worker **planner-v83**.
 
 ## Working with me
 
@@ -208,7 +208,11 @@ and the link carries a token, so the link lives in `planner_feeds` on the
 server, **never in state**, and the `canvas-feed` Edge Function
 (`supabase/functions/`) fetches it. `refreshIfDue()` runs after any sync that
 ends `ready`, once a day per device (`canvasFeedAt`, off `SYNCED_SETTINGS`),
-in one commit tagged `canvas` — redrawn, `FOREIGN` to undo.
+in one commit tagged `canvas` — redrawn, `FOREIGN` to undo. **A cleared
+assignment stays cleared**: the sweep and `deleteItem` put its id in
+`settings.canvasCleared` (synced, merged as a union in `applyRow`, a month
+before the term dropped), and the import passes it by — or ticked work came
+back unticked the morning after it was swept.
 
 **A repeat is a rule, never copies.** `repeat` sits on the item (`js/repeat.js`
 is the plain date maths); the screens draw **occurrences**, made on the spot and
@@ -336,7 +340,7 @@ sprint is a stretch of weeks in one area's lane**, dragged out like a block;
 
 ## Tests
 
-Serve the repo, open `/tests/`: no runner in the page, no deps, 1638 checks,
+Serve the repo, open `/tests/`: no runner in the page, no deps, 1648 checks,
 left out of the deploy; CI opens the same page in Chromium and WebKit. A file reports to
 `tests/index.html` **once its last suite has finished**, and its suites **run
 one at a time** (`queue` in `suite()`), or their `storeWith` seeds clobber.

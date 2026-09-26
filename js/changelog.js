@@ -9,6 +9,13 @@
 
 export const CHANGELOG = [
   {
+    version: 'v83', date: '2026-09-26',
+    title: 'Cleared stays cleared',
+    notes: [
+      'A Canvas assignment you ticked no longer comes back unticked the morning after: the day reset cleared it, and the next Canvas refresh made it again. A cleared one, or one you delete, is remembered on every device and the import passes it by.'
+    ]
+  },
+  {
     version: 'v82', date: '2026-09-17',
     title: 'The one picked',
     notes: [

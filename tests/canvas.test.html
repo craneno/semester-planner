@@ -217,7 +217,7 @@ suite('Canvas — the import', async ({ check }) => {
   }
 
   {
-    check('an empty feed does nothing', JSON.stringify(importCanvas('')) === '{"added":0,"updated":0,"unfiled":[],"skipped":0}');
+    check('an empty feed does nothing', JSON.stringify(importCanvas('')) === '{"added":0,"updated":0,"unfiled":[],"skipped":0,"cleared":0}');
     check('a feed with the same uid twice is one assignment',
       importCanvas(FEED + '\r\n' + FEED).added === 0 && s.state.items.filter((t) => t.canvasId).length === 2);
   }
@@ -249,6 +249,60 @@ suite('Canvas — the import', async ({ check }) => {
    moving one again is that one alone; the next feed files new ones from the
    course where the moved ones sit; an older import that never kept the
    course is filed on the next feed; a copy is not from Canvas. */
+/* Ticked, swept at the day reset, and the feed still lists it: the next
+   import made it again, unticked, every morning. What has to hold: a swept
+   assignment and one deleted by hand stay gone; one still here is still
+   brought up to date; a new one still comes in; the list arriving from
+   another device is merged with this one, not put in its place; and a day
+   long before the term drops off the list. */
+suite('Canvas — cleared stays cleared', async ({ check }) => {
+  const { importCanvas } = await import('../js/canvas.js');
+  const { addDays, today } = await import('../js/util.js');
+  const had = { items: s.state.items, cleared: s.state.settings.canvasCleared, sem: { ...s.state.semester } };
+  try {
+    s.state.items = [];
+    delete s.state.settings.canvasCleared;
+    importCanvas(FEED);
+    const ps = s.state.items.find((t) => t.canvasId === 'event-assignment-123456');
+    const lab = s.state.items.find((t) => t.canvasId === 'event-assignment-789');
+    s.toggleItem(ps.id, true);
+    const gone = s.sweepDone(addDays(today(), 1));
+    check('the ticked one is swept', gone.length === 1 && !s.itemById(ps.id));
+    check('...and its id kept, with its due day', s.state.settings.canvasCleared?.['event-assignment-123456'] === '2026-09-15', JSON.stringify(s.state.settings.canvasCleared));
+    check('...in a setting that syncs', s.SYNCED_SETTINGS.includes('canvasCleared'));
+
+    let res = importCanvas(FEED.replace('SUMMARY:Lab report 1', 'SUMMARY:Lab report 1, v2'));
+    check('the next import does not make it again', !s.state.items.some((t) => t.canvasId === 'event-assignment-123456') && res.added === 0 && res.cleared === 1, JSON.stringify(res));
+    check('...and still brings the one still here up to date', s.itemById(lab.id).title === 'Lab report 1, v2' && res.updated === 1);
+
+    s.deleteItem(lab.id);
+    res = importCanvas(FEED);
+    check('one deleted by hand stays deleted too', !s.state.items.some((t) => t.canvasId) && res.cleared === 2, JSON.stringify(res));
+
+    const fresh = FEED.replace('UID:event-assignment-789', 'UID:event-assignment-999');
+    res = importCanvas(fresh);
+    check('a new assignment still comes in', res.added === 1 && s.state.items.some((t) => t.canvasId === 'event-assignment-999'), JSON.stringify(res));
+
+    // another device cleared one this device never had
+    s.applyRow({ kind: 'meta', id: 'meta', data: { settings: { canvasCleared: { 'event-assignment-555': '2026-10-01' } } } });
+    const list = s.state.settings.canvasCleared || {};
+    check('a list from another device is merged, not put in place of this one',
+      !!list['event-assignment-555'] && !!list['event-assignment-123456'] && !!list['event-assignment-789'], JSON.stringify(list));
+
+    s.applyRow({ kind: 'meta', id: 'meta', data: { settings: { canvasCleared: { 'event-assignment-old': '2025-01-10' } } } });
+    check('a day long before the term drops off', !('event-assignment-old' in s.state.settings.canvasCleared), JSON.stringify(s.state.settings.canvasCleared));
+
+    const plain = s.upsertItem({ title: 'Not from Canvas', areaId: 'gen', due: '2026-09-15' });
+    const before = JSON.stringify(s.state.settings.canvasCleared);
+    s.deleteItem(plain.id);
+    check('a task of your own adds nothing to the list', JSON.stringify(s.state.settings.canvasCleared) === before);
+  } finally {
+    s.state.items = had.items;
+    if (had.cleared === undefined) delete s.state.settings.canvasCleared; else s.state.settings.canvasCleared = had.cleared;
+    Object.assign(s.state.semester, had.sem);
+  }
+});
+
 suite('Canvas — move one, the rest follow', async ({ check }) => {
   const { importCanvas, homeFor } = await import('../js/canvas.js');
   const COURSE = 'ME 4500 Capstone Design';
@@ -303,6 +357,9 @@ suite('Canvas — by itself, once a day', async ({ check }) => {
   check('the day stamp stays on the device', !s.SYNCED_SETTINGS.includes('canvasFeedAt'), 'each device fetches for itself');
 
   for (const t of s.state.items.filter((t) => t.canvasId)) s.deleteItem(t.id);
+  // a delete now keeps the assignment out of the next import; this suite
+  // wants a clean slate, so the list goes too
+  delete s.state.settings.canvasCleared;
   s.commit(() => { s.state.settings.canvasFeedAt = ''; });
   let calls = 0;
   const fetch = async () => { calls++; return FEED; };

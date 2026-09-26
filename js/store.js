@@ -829,8 +829,35 @@ export function deleteItem(id) {
     return;
   }
   const i = state.items.findIndex((t) => t.id === id);
-  if (i >= 0) state.items.splice(i, 1);
+  if (i >= 0) { clearCanvas(state.items[i]); state.items.splice(i, 1); }
 }
+
+/* A Canvas assignment cleared from the planner — ticked and swept at the day
+   reset, or deleted by hand — stays cleared. The feed lists it until the term
+   is over, and the next import found no task with its id and made it again,
+   unticked: ticked, swept, back the next morning. So its id is kept, with its
+   due day, in a synced setting the import passes by. A day well before the
+   term goes: the import never reaches back that far. */
+const CLEARED_KEEP_DAYS = 30;
+/** @param {Object<string, string>} kept  canvasId -> due day */
+function pruneCleared(kept) {
+  const from = state.semester?.start ? addDays(state.semester.start, -CLEARED_KEEP_DAYS) : '';
+  const out = {};
+  for (const [uid, day] of Object.entries(kept || {})) if (!from || !day || day >= from) out[uid] = day;
+  return out;
+}
+/** The two lists as one, for the meta row coming down. */
+function mergeCleared(mine, theirs) {
+  return pruneCleared({ ...(mine || {}), ...(theirs || {}) });
+}
+/** Keep an imported assignment out of the next import. Nothing for any other task.
+ *  @param {Item} t */
+export function clearCanvas(t) {
+  if (!t?.canvasId) return;
+  state.settings.canvasCleared = pruneCleared({ ...(state.settings.canvasCleared || {}), [t.canvasId]: t.due || t.plan?.date || today() });
+}
+/** Whether this Canvas assignment was cleared here or on another device. */
+export const canvasCleared = (uid) => !!state.settings.canvasCleared?.[uid];
 
 /** The first day a series falls on at or before `key`, or null if none. */
 const firstBefore = (item, key) => {
@@ -933,6 +960,7 @@ export function sweepDone(day = today(), spare = null) {
   const gone = doneBefore(day, spare);
   if (!gone.length) return gone;
   const ids = new Set(gone.map((t) => t.id));
+  for (const t of gone) clearCanvas(t);
   state.items = state.items.filter((t) => !ids.has(t.id));
   for (const n of Object.values(state.notes)) {
     if ((n.top3 || []).some((id) => ids.has(id))) n.top3 = n.top3.filter((id) => !ids.has(id));
@@ -1169,7 +1197,7 @@ export function carryForward(day = today()) {
    Device-specific settings — Google tokens, Supabase credentials, sync
    cursors — are deliberately NOT synced: they belong to the device. */
 
-export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'sweepDone', 'weekStart', 'dayStart', 'dayEnd', 'stepsGoal', 'stepsHabitId'];
+export const SYNCED_SETTINGS = ['theme', 'colors', 'fonts', 'scale', 'hour12', 'sweepDone', 'weekStart', 'dayStart', 'dayEnd', 'stepsGoal', 'stepsHabitId', 'canvasCleared'];
 /** The device's own: credentials, cursors, what this screen has open. Every
  *  settings key the code writes is in one list or the other — version.test
  *  reads the sources and says which is missing. */
@@ -1247,7 +1275,10 @@ export function applyRow({ kind, id, data, deleted }) {
       if (data.semester) Object.assign(state.semester, data.semester);
       if (data.calendar?.start) Object.assign(state.calendar, data.calendar);
       if (data.settings) for (const k of SYNCED_SETTINGS) {
-        if (data.settings[k] !== undefined) state.settings[k] = data.settings[k];
+        if (data.settings[k] === undefined) continue;
+        // two devices each clearing a different assignment keep both: last
+        // writer wins would bring the other one back on the next import
+        state.settings[k] = k === 'canvasCleared' ? mergeCleared(state.settings[k], data.settings[k]) : data.settings[k];
       }
       // A device still on schema 19 sends habits, links, the wishlist and the
       // sprints in here. They are rows of their own now and are not read from
