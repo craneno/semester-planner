@@ -181,6 +181,8 @@ suite('Focuses and sprints — the editor', async ({ check }) => {
     closeModal();
   }
 
+  // Create says so in a toast, and the toast needs the host the app has
+  if (!document.getElementById('toasts')) document.body.append(Object.assign(document.createElement('div'), { id: 'toasts' }));
   openSprint({ areaId: null, start: '2026-10-05', end: '2026-10-18' });
   try {
     const dlg = document.querySelector('.modal');
