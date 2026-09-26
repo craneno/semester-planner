@@ -6,6 +6,9 @@ import { CHANGELOG, APP_VERSION } from '../../changelog.js';
 import { problems, clearProblems } from '../../problems.js';
 import { section } from './bits.js';
 
+/** "Earlier versions" open or shut, off the DOM: a sync redraws Settings. */
+let olderOpen = false;
+
 export function renderVersion() {
   const [current, ...older] = CHANGELOG;
   return [
@@ -15,7 +18,7 @@ export function renderVersion() {
         'This is the version this browser has actually loaded — the offline shell is '
         + 'cached whole, one deploy at a time. A new one takes over on the next reload.'),
       older.length
-        ? h('details', { class: 'history' },
+        ? h('details', { class: 'history', open: olderOpen ? true : null, ontoggle: (e) => { olderOpen = e.target.open; } },
           h('summary', {}, `Earlier versions (${older.length})`),
           ...older.map(release))
         : null

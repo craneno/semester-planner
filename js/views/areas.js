@@ -3,12 +3,12 @@
 // and the drill-down into one area's full list. Both shapes live here because
 // they render the same rows from the same data; only the scope differs.
 
-import { h, clear, fmtTime, fmtDate, today, debounce, DOW, tz } from '../util.js';
+import { h, clear, fmtTime, fmtDate, today, addDays, debounce, DOW, tz } from '../util.js';
 import {
   state, commit, toggleItem, upsertArea, deleteArea, areasInCategory, itemsForArea,
   nextForArea, categoryById, areaById, reorderAreas, AREA_CATEGORIES, AREA_COLORS, progress,
   linksForArea, updateLink, deleteLink, addLink, cardsForArea,
-  journalEntry, setJournalEntry, journalDates, termOf
+  journalEntry, setJournalEntry, journalDates, termOf, repeats, occurrencesBetween
 } from '../store.js';
 import { modal, closeModal, confirmDialog, toast, dueChip, priorityTag, meta, reorderable, timeInput } from '../ui.js';
 import { openItem } from '../editor.js';
@@ -18,6 +18,26 @@ import { noteCard } from '../capture.js';
 import { tickItem, pushForward, pushLabel, canPush } from '../actions.js';
 
 const PREVIEW = 3;   // deadlines shown under each area before "see all"
+
+/** Which areas have "Earlier entries" open — kept off the DOM, or a sync's
+ *  redraw would shut it mid-sentence. */
+const historyOpen = new Set();
+
+/**
+ * The row a list draws for an item. A series is its rule, and a tick on the
+ * rule would tick nothing anyone can see, so its row is the occurrence a tick
+ * takes: today's, else the next one. Title, box and date are that one's.
+ * @param {any} t
+ */
+export function rowItem(t) {
+  if (!repeats(t)) return t;
+  const day = today();
+  const pick = (x) => x === t;
+  // a month first: a daily series would build a year of copies for one row
+  return occurrencesBetween(day, addDays(day, 31), pick)[0]
+    || occurrencesBetween(day, addDays(day, 400), pick)[0]
+    || t;
+}
 
 /* ---------------- category page ---------------- */
 
@@ -90,7 +110,7 @@ function areaGroup(a, { navigate, go }) {
     body.append(h('div', { class: 'area-none' },
       mine.length ? 'Everything here is done.' : 'Nothing scheduled yet.'));
   }
-  for (const t of next) body.append(taskRow(t, navigate));
+  for (const t of next) body.append(taskRow(rowItem(t), navigate));
 
   if (openCount > next.length) {
     body.append(h('button', {
@@ -139,8 +159,9 @@ export function renderArea(root, { navigate, go }, areaId) {
   const cat = categoryById(a.category);
   const pad = h('div', { class: 'pad' });
   const mine = itemsForArea(a.id);
-  const open = mine.filter((t) => !t.done);
-  const done = mine.filter((t) => t.done);
+  const rows = mine.map(rowItem);
+  const open = rows.filter((t) => !t.done);
+  const done = rows.filter((t) => t.done);
   const links = linksForArea(a.id);
   const cards = cardsForArea(a.id);
 
@@ -258,9 +279,12 @@ function journalSection(area) {
       ...past.map((d) => h('div', { class: 'journal-day' },
         h('div', { class: 'eyebrow' }, fmtDate(d, { weekday: true })),
         box(d))));
-    card.append(h('details', { class: 'history journal-history' },
-      h('summary', {}, `Earlier entries (${past.length})`),
-      list));
+    card.append(h('details', {
+      class: 'history journal-history', open: historyOpen.has(area.id) ? true : null,
+      ontoggle: (e) => { if (e.target.open) historyOpen.add(area.id); else historyOpen.delete(area.id); }
+    },
+    h('summary', {}, `Earlier entries (${past.length})`),
+    list));
   }
   return card;
 }
@@ -415,7 +439,7 @@ function fullRow(t, rerender) {
     h('input', {
       type: 'checkbox', class: 'check', checked: t.done, 'aria-label': `Mark ${t.title} complete`,
       onclick: (e) => e.stopPropagation(),
-      onchange: (e) => { commit(() => toggleItem(t.id, e.target.checked)); pushItem(t.id).catch(() => {}); rerender(); }
+      onchange: (e) => { commit(() => toggleItem(t.id, e.target.checked)); pushItem(t.seriesId || t.id).catch(() => {}); rerender(); }
     }),
     h('span', { class: 'title' },
       t.title,
@@ -443,8 +467,23 @@ export function openAreaEditor(areaId, navigate, { focus } = {}) {
  * @param {{ focus?: string }} [opts]
  */
 function editArea(area, categoryId, navigate, { focus } = {}) {
+  // each meeting in the draft remembers the live one it was copied from, so a
+  // save can keep what the editor does not show — a cancelled or moved day
+  /** @type {Map<any, { slot: any, at: number, of: number }>} */
+  const origin = new Map();
+  /** @type {any} */
   const draft = area
-    ? JSON.parse(JSON.stringify(area))
+    ? {
+      name: area.name, category: area.category, location: area.location || '',
+      color: area.color, onChart: area.onChart, journal: area.journal,
+      from: area.from || null, until: area.until || null,
+      schedule: (area.schedule || []).map((m, at) => {
+        const { ex, ...rest } = m;
+        const copy = { ...rest, days: [...(m.days || [])] };
+        origin.set(copy, { slot: m, at, of: area.schedule.length });
+        return copy;
+      })
+    }
     : {
       name: '', category: categoryId || 'course', location: '',
       color: AREA_COLORS[state.areas.length % AREA_COLORS.length], schedule: [], grading: []
@@ -576,7 +615,9 @@ function editArea(area, categoryId, navigate, { focus } = {}) {
       }, 'Delete'),
       area && h('button', {
         class: 'btn', onclick: () => {
-          commit(() => { area.archived = !area.archived; });
+          // through upsertArea, which stamps it: an unstamped flip loses to the
+          // older copy on the server and the next sync undoes it
+          commit(() => upsertArea({ id: area.id, archived: !areaById(area.id)?.archived }));
           closeModal();
           navigate();
         }
@@ -586,7 +627,7 @@ function editArea(area, categoryId, navigate, { focus } = {}) {
         class: 'btn primary', onclick: () => {
           if (!draft.name.trim()) { toast('Give the area a name first.'); return; }
           if (draft.from && draft.until && draft.until < draft.from) { toast('The last day has to come after the first.'); return; }
-          commit(() => upsertArea(area ? { ...draft, id: area.id } : draft));
+          commit(() => upsertArea(area ? editedArea(area.id, draft, origin) : draft));
           closeModal();
           navigate();
         }
@@ -599,6 +640,39 @@ function editArea(area, categoryId, navigate, { focus } = {}) {
     (meetingsHost.querySelector('input[type=time]') || meetingsHost.querySelector('input, button') || el.querySelector('.modal-b input'))?.focus();
     meetingsHost.scrollIntoView?.({ block: 'nearest' });
   }, 40);
+}
+
+/** The fields the area editor shows. */
+const EDITED = ['name', 'category', 'location', 'color', 'onChart', 'journal', 'from', 'until'];
+
+/**
+ * What Save writes: only what the editor shows, laid on the area as it is at
+ * save time. A copy of the whole area taken when the editor opened would put
+ * back an old freewrite, an old order and every class day cancelled or moved
+ * since — stamped now, so it would win the sync too. Each meeting keeps the
+ * `ex` of the live one it was copied from, while that one is still there.
+ * @param {string} id
+ * @param {any} draft
+ * @param {Map<any, { slot: any, at: number, of: number }>} origin
+ */
+function editedArea(id, draft, origin) {
+  const now = areaById(id)?.schedule || [];
+  const schedule = draft.schedule.map((m) => {
+    const from = origin.get(m);
+    // the same object, or — when a sync has put new ones in — the same place
+    // in a list still the same length
+    const live = !from ? null
+      : now.includes(from.slot) ? from.slot
+        : now.length === from.of ? now[from.at] : null;
+    const { ex, ...rest } = m;
+    const out = { ...rest, days: [...(m.days || [])] };
+    if (live?.ex) out.ex = live.ex;
+    return out;
+  });
+  /** @type {any} */
+  const patch = { id, schedule };
+  for (const k of EDITED) if (draft[k] !== undefined) patch[k] = draft[k];
+  return patch;
 }
 
 

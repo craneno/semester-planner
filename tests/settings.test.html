@@ -94,6 +94,48 @@ suite('Settings — the Google card says whether the sign-in keeps', async ({ ch
     G.gcal.token = had.token; G.gcal.status = had.status; s.state.settings.gcal.clientId = had.clientId;
   }
 });
+
+/* The steps goal box, and what a redraw leaves open. What has to hold: "8,000"
+   is eight thousand; a cleared box or a word is no goal, the old one put back
+   — once it was a goal of 1, ticking the steps habit on any day with a step;
+   a tiny one is raised to the floor; and "Earlier versions", opened, stays
+   open when Settings is drawn again. */
+suite('Settings — the steps goal, and what stays open', async ({ check }) => {
+  const { renderSettings } = await import('../js/views/settings.js');
+  const { goalFrom, MIN_GOAL } = await import('../js/views/settings/steps.js');
+  check('a goal with a comma is the number', goalFrom('8,000') === 8000);
+  check('a blank is no goal', goalFrom('') === null && goalFrom('   ') === null);
+  check('a word is no goal', goalFrom('lots') === null && goalFrom('0') === null && goalFrom('-5') === null);
+  check('a tiny goal is raised to the floor', goalFrom('5') === MIN_GOAL && MIN_GOAL >= 100);
+
+  const had = s.state.settings.stepsGoal;
+  const v = renderInto(renderSettings);
+  try {
+    const box = () => v.stage.querySelector('input[aria-label="Steps a day"]');
+    const set = (text) => { box().value = text; box().dispatchEvent(new Event('change')); };
+    set('8,000');
+    check('typed with a comma, the goal is taken', s.state.settings.stepsGoal === 8000, String(s.state.settings.stepsGoal));
+    set('');
+    check('cleared, the goal stays what it was', s.state.settings.stepsGoal === 8000 && box().value === '8000', `${s.state.settings.stepsGoal} ${box().value}`);
+    set('nope');
+    check('...and so for a word', s.state.settings.stepsGoal === 8000);
+
+    const older = () => [...v.stage.querySelectorAll('details')].find((d) => d.querySelector('summary')?.textContent.startsWith('Earlier versions'));
+    if (older()) {
+      older().open = true;
+      older().dispatchEvent(new Event('toggle'));
+      v.ctx.navigate();
+      check('Earlier versions, opened, stays open through a redraw', older()?.open === true);
+      older().open = false;
+      older().dispatchEvent(new Event('toggle'));
+      v.ctx.navigate();
+      check('...and shut, shut', older()?.open === false);
+    }
+  } finally {
+    v.done();
+    s.commit(() => { if (had === undefined) delete s.state.settings.stepsGoal; else s.state.settings.stepsGoal = had; });
+  }
+});
 </script>
 </body>
 </html>

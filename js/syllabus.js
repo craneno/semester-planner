@@ -59,6 +59,16 @@ async function extractText(file) {
   return lines.join('\n');
 }
 
+/** 'YYYY-MM-DD' if that day is on the calendar, else null: "Feb 30" is not,
+ *  and neither is a month 15. The Date rolls a bad day over, so the parts
+ *  have to come back as they went in. */
+export function realDate(y, m, d) {
+  if (!(y >= 1000 && y <= 9999 && m >= 1 && m <= 12 && d >= 1 && d <= 31)) return null;
+  const at = new Date(y, m - 1, d);
+  if (at.getFullYear() !== y || at.getMonth() !== m - 1 || at.getDate() !== d) return null;
+  return `${y}-${pad(m)}-${pad(d)}`;
+}
+
 /** Heuristic pass: any line with a date and something that reads like work. */
 export function detect(text, { yearHint } = {}) {
   const year = yearHint || new Date(state.semester.start).getFullYear();
@@ -73,16 +83,20 @@ export function detect(text, { yearHint } = {}) {
     let m = line.match(new RegExp(`\\b${MONTH_RE}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`, 'i'));
     if (m) {
       const mi = ABBR.indexOf(m[1].slice(0, 3).toLowerCase());
-      date = `${year}-${pad(mi + 1)}-${pad(+m[2])}`;
+      date = realDate(year, mi + 1, +m[2]);
       dateText = m[0];
     } else {
       m = line.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
       if (m) {
         const y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : year;
-        date = `${y}-${pad(+m[1])}-${pad(+m[2])}`;
+        // month first, as a US syllabus writes it — unless the first number
+        // cannot be a month, and then it is the day ("15/10")
+        const [a, b] = [+m[1], +m[2]];
+        date = a > 12 && b <= 12 ? realDate(y, b, a) : realDate(y, a, b);
         dateText = m[0];
       }
     }
+    // no date, or one that is not on the calendar: not a row to offer
     if (!date) continue;
 
     // keep it inside a sane window around the semester

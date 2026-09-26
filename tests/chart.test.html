@@ -10,7 +10,7 @@
 /* The chart's geometry is kept in whole days and turned into pixels only at
    the last moment, which is what makes it testable at all — everything below
    is arithmetic, and none of it needs a layout. */
-import { suite, sharedStoreWith, storeWith } from './harness.js';
+import { suite, sharedStoreWith, storeWith, renderInto } from './harness.js';
 
 const base = (over = {}) => ({
   // the current schema, so no version's seeds land in a fixture that is
@@ -336,6 +336,66 @@ suite('Semester chart — which areas are on it', async ({ check }) => {
     check('the flag travels with the area row', row.data.onChart === false);
     r.applyRow({ kind: 'area', id: 'a2', data: { ...r.areaById('a2'), onChart: false } });
     check('and an inbound row can turn one off', r.areaById('a2').onChart === false);
+  }
+});
+
+/* The list behind the switch. What has to hold: a series is one row, and
+   that row is the occurrence a tick takes — today's, else the next — with
+   its box and its name; the tick lands on that one, never the rule; and an
+   area filter whose area is archived or deleted lets go, rather than keep a
+   list cut to an area the select no longer shows. Drawn on the shared store,
+   which the first suite seeded. */
+suite('Semester list — a series row, and a filter that lets go', async ({ check }) => {
+  const s = await import('../js/store.js');
+  const { renderSemester } = await import('../js/views/semester.js');
+  const { today, addDays } = await import('../js/util.js');
+  const day = today();
+  const had = s.state.items;
+  s.state.items = [];
+  const v = renderInto(renderSemester);
+  const modeTo = (label) => [...v.stage.querySelectorAll('.mode')].find((b) => b.textContent === label)?.click();
+  const rows = () => [...v.stage.querySelectorAll('.row')];
+  const rowOf = (text) => rows().find((r) => r.querySelector('.title')?.textContent.startsWith(text));
+  try {
+    const gym = s.upsertItem({
+      title: 'Gym', areaId: 'x1', plan: { date: addDays(day, -7), start: '07:00', mins: 60 },
+      repeat: { freq: 'daily', every: 1, ex: { [day]: { title: 'Gym (legs)' } } }
+    });
+    const run = s.upsertItem({
+      title: 'Run', areaId: 'x1', plan: { date: addDays(day, 1), start: '07:00', mins: 30 }, repeat: { freq: 'weekly', every: 1 }
+    });
+    modeTo('List');
+    check('a series is one row each', rows().length === 2, String(rows().length));
+    check('...named as today’s occurrence', !!rowOf('Gym (legs)'), rows().map((r) => r.textContent).join(' | '));
+    const box = rowOf('Gym (legs)').querySelector('input.check');
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    check('a tick lands on today’s occurrence', s.itemById(`${gym.id}@${day}`)?.done === true);
+    check('...never on the rule', gym.done === false && !gym.repeat.ex?.[addDays(day, -7)]?.done);
+
+    const runBox = rowOf('Run')?.querySelector('input.check');
+    check('one that has not started is its next occurrence', !!runBox && runBox.checked === false);
+    runBox.checked = true;
+    runBox.dispatchEvent(new Event('change'));
+    check('...and a tick takes that one', s.itemById(`${run.id}@${addDays(day, 1)}`)?.done === true && run.done === false);
+
+    // filter to an area, then archive it
+    s.upsertItem({ title: 'Essay', areaId: 'c1', due: addDays(day, 3) });
+    s.upsertItem({ title: 'Receipts', areaId: 'x1', due: addDays(day, 3) });
+    const pick = v.stage.querySelectorAll('select')[1];
+    pick.value = 'x1';
+    pick.dispatchEvent(new Event('change'));
+    check('the filter cuts the list to its area', !rowOf('Essay') && !!rowOf('Receipts'));
+    s.commit(() => s.upsertArea({ id: 'x1', archived: true }));
+    v.ctx.navigate();
+    check('its area archived, the filter lets go', !!rowOf('Essay') && !!rowOf('Receipts'),
+      rows().map((r) => r.textContent).join(' | '));
+    check('...and the select says so', v.stage.querySelectorAll('select')[1].value === '');
+    s.commit(() => s.upsertArea({ id: 'x1', archived: false }));
+  } finally {
+    modeTo('Chart');
+    v.done();
+    s.state.items = had;
   }
 });
 </script>

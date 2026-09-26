@@ -354,6 +354,10 @@ suite('Canvas — by itself, once a day', async ({ check }) => {
     && isFeedUrl('https://x.canvas.school.edu/feeds/x.ics'));
   check('...and nothing else', !isFeedUrl('http://northeastern.instructure.com/x.ics') && !isFeedUrl('https://evil.com/?instructure.com')
     && !isFeedUrl('https://instructure.com.evil.com/x') && !isFeedUrl('javascript:alert(1)') && !isFeedUrl(''));
+  // `canvas.` in front of any name once let any site in
+  check('a canvas label outside a school domain is not Canvas',
+    !isFeedUrl('https://canvas.evil.com/feeds/x.ics') && !isFeedUrl('https://x.canvas.evil.com/x.ics')
+    && !isFeedUrl('https://canvas.edu/x.ics') && !isFeedUrl('https://canvas.school.edu.evil.com/x.ics'));
   check('the day stamp stays on the device', !s.SYNCED_SETTINGS.includes('canvasFeedAt'), 'each device fetches for itself');
 
   for (const t of s.state.items.filter((t) => t.canvasId)) s.deleteItem(t.id);
@@ -427,7 +431,15 @@ suite('Calendar file — .ics to blocks', async ({ check }) => {
   check('...with its room', lab.location === 'Snell 108');
   check('a whole-day event is an all-day plan', club.plan.date === '2026-09-18' && !club.plan.start, JSON.stringify(club.plan));
   check('a weekly rule is a weekly repeat on its days', stand.repeat?.freq === 'weekly' && stand.repeat.days.join() === '1,3', JSON.stringify(stand.repeat));
-  check('...until its last day', stand.repeat.until === '2026-12-11');
+  {
+    // UNTIL=20261211T000000Z is an instant, some hour of the 10th or the 11th
+    // here; the 09:00 standup on that day is in only if it starts by then
+    const { ymd, addDays } = await import('../js/util.js');
+    const u = new Date(Date.UTC(2026, 11, 11, 0, 0, 0));
+    const uTime = `${String(u.getHours()).padStart(2, '0')}:${String(u.getMinutes()).padStart(2, '0')}`;
+    const want = '09:00' > uTime ? addDays(ymd(u), -1) : ymd(u);
+    check('...until the last day here its UNTIL reaches', stand.repeat.until === want, `${stand.repeat.until} vs ${want}`);
+  }
   check('a rule this planner cannot say is no rule', I.repeatFromRrule('FREQ=HOURLY') === null);
   check('COUNT is kept when there is no UNTIL', I.repeatFromRrule('FREQ=DAILY;COUNT=5').count === 5);
 
@@ -448,6 +460,140 @@ suite('Calendar file — .ics to blocks', async ({ check }) => {
     s.commit(() => { for (const t of s.state.items.filter((t) => t.icsUid)) s.deleteItem(t.id); });
     check('put back', s.state.items.length === before);
   }
+});
+
+/* The harder shapes of a calendar file. What has to hold: a colon inside a
+   quoted parameter is not where the value starts; a rule's weekdays and its
+   UNTIL move with a UTC start the way the start does; a day of a series with
+   its own RECURRENCE-ID is an exception on the series, never the series; an
+   EXDATE is a day skipped; a moved day whose series came in earlier joins
+   it; and a tick made here outlives the file coming in again. */
+suite('Calendar file — zones, moved days and skipped ones', async ({ check }) => {
+  const I = await import('../js/icsimport.js');
+  const { parseIcs, splitLine } = await import('../js/canvas.js');
+  const { isRepeatDate } = await import('../js/repeat.js');
+  const { ymd, addDays } = await import('../js/util.js');
+  const hm = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+  {
+    // the Week asks on every draw, into the same #view: one drop was one
+    // dialog per draw
+    const host = document.createElement('div');
+    let wired = 0;
+    const add = host.addEventListener.bind(host);
+    host.addEventListener = (...a) => { wired++; add(...a); };
+    for (let i = 0; i < 5; i++) I.acceptIcsDrop(host, { navigate: () => {} });
+    check('a drop target is wired once, however often it is asked', wired === 2, String(wired));
+  }
+
+  {
+    const cut = splitLine('DTSTART;TZID="(UTC-05:00) Eastern Time (US & Canada)":20260915T140000');
+    check('a colon inside a quoted parameter is not the value', cut?.value === '20260915T140000', JSON.stringify(cut));
+    check('...and the parameter comes back without its quotes', cut?.params.TZID === '(UTC-05:00) Eastern Time (US & Canada)');
+    const evs = parseIcs(['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:q@x', 'SUMMARY:Seminar',
+      'DTSTART;TZID="(UTC-05:00) Eastern Time (US & Canada)":20260915T140000',
+      'DTEND;TZID="(UTC-05:00) Eastern Time (US & Canada)":20260915T150000', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'));
+    check('...so an Outlook event with one is read, not dropped',
+      evs.length === 1 && evs[0].start?.date === '2026-09-15' && evs[0].start?.time === '14:00' && evs[0].end?.time === '15:00',
+      JSON.stringify(evs[0]));
+  }
+
+  {
+    // a Monday 21:30 class in New York, written as Tuesday 01:30Z
+    const inst = new Date(Date.UTC(2026, 8, 15, 1, 30));
+    const [row] = I.planIcs(parseIcs(['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:ny@x', 'SUMMARY:Night class',
+      'DTSTART:20260915T013000Z', 'DTEND:20260915T024500Z', 'RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20261212T045959Z',
+      'END:VEVENT', 'END:VCALENDAR'].join('\r\n')));
+    check('the rule’s weekday moves with the start', row.repeat.days.join() === String(inst.getDay()),
+      `${row.repeat.days} vs ${inst.getDay()}`);
+    check('...so the first day is one the rule gives', isRepeatDate(row.repeat, row.plan.date, row.plan.date));
+    const u = new Date(Date.UTC(2026, 11, 12, 4, 59, 59));
+    const want = hm(inst) > hm(u) ? addDays(ymd(u), -1) : ymd(u);
+    check('a UTC UNTIL is the last day here it reaches', row.repeat.until === want, `${row.repeat.until} vs ${want}`);
+  }
+
+  const LECTURE = [
+    'BEGIN:VCALENDAR',
+    'BEGIN:VEVENT', 'UID:lec@x', 'SUMMARY:Lecture',
+    'DTSTART;TZID=America/New_York:20260914T100000', 'DTEND;TZID=America/New_York:20260914T110000',
+    'RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10',
+    'EXDATE;TZID=America/New_York:20260921T100000,20260928T100000', 'END:VEVENT',
+    // moved a day and a room, after the series in the file
+    'BEGIN:VEVENT', 'UID:lec@x', 'RECURRENCE-ID;TZID=America/New_York:20261005T100000', 'SUMMARY:Lecture (room change)',
+    'DTSTART;TZID=America/New_York:20261006T140000', 'DTEND;TZID=America/New_York:20261006T153000', 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:lec@x', 'RECURRENCE-ID;TZID=America/New_York:20261012T100000', 'STATUS:CANCELLED',
+    'DTSTART;TZID=America/New_York:20261012T100000', 'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const rows = I.planIcs(parseIcs(LECTURE));
+  const lec = rows[0];
+  check('a series and its moved days are one row', rows.length === 1 && lec.uid === 'lec@x', JSON.stringify(rows.map((r) => r.uid)));
+  check('...the series itself, not the last moved day', lec.title === 'Lecture' && lec.plan.date === '2026-09-14' && lec.plan.start === '10:00');
+  check('EXDATE days are skipped, the way a deleted occurrence is',
+    lec.repeat.ex?.['2026-09-21']?.off === true && lec.repeat.ex?.['2026-09-28']?.off === true, JSON.stringify(lec.repeat.ex));
+  const mv = lec.repeat.ex?.['2026-10-05'];
+  check('a moved day is an exception on its own day of the rule',
+    mv?.date === '2026-10-06' && mv?.start === '14:00' && mv?.mins === 90 && mv?.title === 'Lecture (room change)', JSON.stringify(mv));
+  check('a cancelled one is off', lec.repeat.ex?.['2026-10-12']?.off === true);
+
+  const before = s.state.items.length;
+  try {
+    let res;
+    s.commit(() => { res = I.applyIcs(rows, 'gen'); });
+    const series = s.state.items.find((t) => t.icsUid === 'lec@x');
+    const on = (d) => s.itemsPlannedOn(d).filter((t) => t.seriesId === series.id);
+    check('brought in: one series', res.made === 1 && s.state.items.filter((t) => t.icsUid).length === 1, JSON.stringify(res));
+    check('...on its first Monday', on('2026-09-14').length === 1);
+    check('...not on a day skipped', on('2026-09-21').length === 0 && on('2026-09-28').length === 0);
+    check('...the moved one on the day it moved to, at its new time', on('2026-10-05').length === 0
+      && on('2026-10-06')[0]?.plan.start === '14:00' && on('2026-10-06')[0]?.title === 'Lecture (room change)');
+    check('...and the cancelled one gone', on('2026-10-12').length === 0);
+
+    // only the moved day, in a file of its own: the series here takes it
+    const alone = I.planIcs(parseIcs(['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:lec@x',
+      'RECURRENCE-ID;TZID=America/New_York:20261019T100000', 'SUMMARY:Lecture',
+      'DTSTART;TZID=America/New_York:20261020T100000', 'DTEND;TZID=America/New_York:20261020T110000',
+      'END:VEVENT', 'END:VCALENDAR'].join('\r\n')));
+    s.commit(() => { res = I.applyIcs(alone, 'gen'); });
+    check('a moved day on its own never takes the series’ place',
+      res.made === 0 && s.state.items.filter((t) => t.icsUid).length === 1 && series.repeat.freq === 'weekly'
+      && series.plan.date === '2026-09-14', JSON.stringify(res));
+    check('...it joins the series as an exception', series.repeat.ex?.['2026-10-19']?.date === '2026-10-20'
+      && on('2026-10-20').length === 1 && on('2026-10-19').length === 0, JSON.stringify(series.repeat.ex));
+
+    // ticked here, then the file again: the tick stays
+    s.commit(() => s.toggleItem(`${series.id}@2026-09-14`, true));
+    s.commit(() => { res = I.applyIcs(I.planIcs(parseIcs(LECTURE)), 'gen'); });
+    check('the file again brings the series up to date, not a copy', res.made === 0 && res.updated === 1);
+    check('...and a day ticked here stays ticked', s.itemById(`${series.id}@2026-09-14`)?.done === true);
+    check('...the skipped days still skipped', on('2026-09-21').length === 0);
+  } finally {
+    s.commit(() => { for (const t of s.state.items.filter((t) => t.icsUid)) s.deleteItem(t.id); });
+    check('put back', s.state.items.length === before);
+  }
+});
+
+/* Dates off a syllabus. What has to hold: a day not on the calendar is not
+   offered — Feb 30, a month 15 — and a first number that cannot be a month
+   is the day. */
+suite('Syllabus — only real days', async ({ check }) => {
+  const { detect, realDate } = await import('../js/syllabus.js');
+  check('a real day is itself', realDate(2026, 10, 15) === '2026-10-15');
+  check('Feb 30 is no day', realDate(2026, 2, 30) === null);
+  check('Feb 29 only in a leap year', realDate(2028, 2, 29) === '2028-02-29' && realDate(2026, 2, 29) === null);
+  check('a month 15 is no month', realDate(2026, 15, 10) === null);
+  const found = detect([
+    'HW 3 due 10/15',
+    'Essay due 15/10',
+    'Quiz Feb 30',
+    'Lab report due 13/13'
+  ].join('\n'), { yearHint: 2026 });
+  const by = (t) => found.find((f) => f.title.startsWith(t));
+  check('month first, as written', by('HW 3')?.due === '2026-10-15', JSON.stringify(found));
+  check('a first number past 12 is the day', by('Essay')?.due === '2026-10-15', JSON.stringify(found));
+  check('Feb 30 is not offered', !by('Quiz'));
+  check('nor a day with no month in it', !by('Lab report'));
 });
 </script>
 </body>

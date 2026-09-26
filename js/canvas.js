@@ -49,6 +49,30 @@ export function icsWhen(value, params = {}) {
   return { date: `${y}-${mo}-${d}`, time: `${hh}:${mm}` };
 }
 
+/**
+ * One content line as { name, params, value }, or null. The value starts at
+ * the first ':' outside double quotes — a TZID="(UTC-05:00) Eastern Time" has
+ * colons of its own — and a quoted parameter comes back without its quotes.
+ */
+export function splitLine(line) {
+  let quoted = false, at = -1;
+  for (let k = 0; k < line.length; k++) {
+    const c = line[k];
+    if (c === '"') quoted = !quoted;
+    else if (c === ':' && !quoted) { at = k; break; }
+  }
+  if (at < 0) return null;
+  const head = line.slice(0, at);
+  const bits = head.match(/(?:[^;"]|"[^"]*")+/g) || [''];
+  const params = {};
+  for (const p of bits.slice(1)) {
+    const eq = p.indexOf('=');
+    if (eq <= 0) continue;
+    params[p.slice(0, eq).toUpperCase()] = p.slice(eq + 1).replace(/^"(.*)"$/, '$1');
+  }
+  return { name: bits[0], params, value: line.slice(at + 1) };
+}
+
 /** Every VEVENT in the feed, as plain objects. Nothing is filtered here. */
 export function parseIcs(text) {
   const lines = unfold(String(text || '')).split(/\r?\n/);
@@ -61,22 +85,32 @@ export function parseIcs(text) {
     if (!cur) continue;
     if (inner) { if (line === 'END:' + inner) inner = null; continue; }
     if (line.startsWith('BEGIN:')) { inner = line.slice(6); continue; }
-    const i = line.indexOf(':');
-    if (i < 0) continue;
-    const head = line.slice(0, i), value = line.slice(i + 1);
-    const [name, ...paramBits] = head.split(';');
-    const params = {};
-    for (const p of paramBits) { const [k, v] = p.split('='); if (k) params[k.toUpperCase()] = v; }
+    const cut = splitLine(line);
+    if (!cut) continue;
+    const { name, params, value } = cut;
     switch (name.toUpperCase()) {
       case 'UID': cur.uid = value; break;
       case 'SUMMARY': cur.summary = unescapeText(value); break;
       case 'DESCRIPTION': cur.description = unescapeText(value); break;
       case 'URL': cur.url = value; break;
       case 'LOCATION': cur.location = unescapeText(value); break;
-      case 'DTSTART': cur.start = icsWhen(value, params); break;
+      case 'DTSTART':
+        cur.start = icsWhen(value, params);
+        // the day as written, before a UTC time is moved to the clock here: a
+        // rule's weekdays are written against this one (icsimport.js)
+        cur.written = /^\d{8}/.test(value) ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}` : null;
+        break;
       case 'DTEND': cur.end = icsWhen(value, params); break;
       case 'LAST-MODIFIED': cur.modified = value; break;
       case 'RRULE': cur.rrule = value; break;
+      // one day of a series, moved or renamed: named by the day the rule gave it
+      case 'RECURRENCE-ID': cur.recurrenceId = icsWhen(value, params); break;
+      // days the rule skips; a list, and the line may come more than once
+      case 'EXDATE':
+        cur.exdates = [...(cur.exdates || []),
+          ...value.split(',').map((v) => icsWhen(v.trim(), params)).filter(Boolean)];
+        break;
+      case 'STATUS': cur.status = value.toUpperCase(); break;
       default: break;
     }
   }
@@ -225,13 +259,27 @@ function applyFeed(text) {
 
 export const FEED_EVERY = 24 * 60 * 60 * 1000;
 
+/**
+ * A Canvas host: anything on instructure.com, or a school's own Canvas — a
+ * `canvas` label under a domain ending .edu (canvas.school.edu,
+ * x.canvas.school.edu). A bare `canvas.` in front of any domain let any
+ * site in. The Edge Function checks the same, redirects included.
+ */
+export function isCanvasHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  if (host.endsWith('.instructure.com')) return true;
+  const labels = host.split('.');
+  const at = labels.indexOf('canvas');
+  // at least one label after `canvas` and before `edu`: canvas.edu is not a school
+  return at >= 0 && labels[labels.length - 1] === 'edu' && labels.length - at >= 3;
+}
+
 /** Only a Canvas feed link is worth saving: https, on a Canvas host. The function checks the same. */
 export function isFeedUrl(raw) {
   let u;
   try { u = new URL(String(raw || '').trim()); } catch { return false; }
   if (u.protocol !== 'https:') return false;
-  const host = u.hostname.toLowerCase();
-  return host.endsWith('.instructure.com') || host.startsWith('canvas.') || host.includes('.canvas.');
+  return isCanvasHost(u.hostname);
 }
 
 /** A day since this device last brought the feed in, or never. */

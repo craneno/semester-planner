@@ -26,6 +26,7 @@ import { isRepeat, repeatDates } from '../repeat.js';
 import { areaTag, dueChip, priorityTag, meta } from '../ui.js';
 import { openItem } from '../editor.js';
 import { openSprint } from '../sprint.js';
+import { rowItem } from './areas.js';
 import { pushItem } from '../gcal.js';
 
 const filters = { area: '', status: 'open', q: '' };
@@ -555,6 +556,9 @@ function describeSpan(t, s) {
 /* ================= the list ================= */
 
 function renderList(pad, { navigate }) {
+  // an area deleted or archived since it was picked is not in the select, which
+  // would read "All areas" over a list still cut to it
+  if (filters.area && !state.areas.some((a) => a.id === filters.area && !a.archived)) filters.area = '';
   pad.append(h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '4px' } },
     select(filters.status, [['open', 'Open'], ['all', 'All'], ['done', 'Done']], (v) => { filters.status = v; navigate(); }),
     select(filters.area, [['', 'All areas'], ...state.areas.filter((a) => !a.archived).map((a) => [a.id, a.name])], (v) => { filters.area = v; navigate(); }),
@@ -570,7 +574,8 @@ function renderList(pad, { navigate }) {
 
   function draw() {
     clear(listHost);
-    let items = state.items.slice();
+    // a series is a row for the occurrence a tick would take, not the rule
+    let items = state.items.map(rowItem);
     if (filters.status === 'open') items = items.filter((t) => !t.done);
     if (filters.status === 'done') items = items.filter((t) => t.done);
     if (filters.area) items = items.filter((t) => t.areaId === filters.area);
@@ -622,7 +627,7 @@ function itemRow(t, rerender) {
   h('input', {
     type: 'checkbox', class: 'check', checked: t.done, 'aria-label': `Mark ${t.title} complete`,
     onclick: (e) => e.stopPropagation(),
-    onchange: (e) => { commit(() => toggleItem(t.id, e.target.checked)); pushItem(t.id).catch(() => {}); rerender(); }
+    onchange: (e) => { commit(() => toggleItem(t.id, e.target.checked)); pushItem(t.seriesId || t.id).catch(() => {}); rerender(); }
   }),
   h('span', { class: 'title' },
     t.title,
