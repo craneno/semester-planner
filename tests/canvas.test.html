@@ -384,7 +384,9 @@ suite('Canvas — by itself, once a day', async ({ check }) => {
   check('no link saved is nothing to bring in, but the day is stamped',
     (await refreshIfDue({ fetch: none, now: t0 })) === null && s.state.settings.canvasFeedAt !== '');
 
-  s.commit(() => { s.state.settings.canvasFeedAt = ''; });
+  // a settings-only commit is no undo step any more, so the step this check
+  // needs comes from a note; the feed stamp is reset in the same commit
+  s.commit(() => { s.state.settings.canvasFeedAt = ''; s.state.notes['2026-01-05'] = { focus: 'undo me' }; });
   const hadUndo = s.canUndo();   // the commit above is a step of its own
   let src = null;
   const off = s.subscribe((m) => { src = m?.source; });
