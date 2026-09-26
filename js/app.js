@@ -294,9 +294,13 @@ function sweep() {
   if (!due.length) return;
   // their Google events go too; queued now, while the rows still hold the ids
   for (const t of due) G.forgetItem(t);
-  let gone = [];
-  // not a source app.js re-renders for — navigate() is already on its way
-  commit(() => { gone = sweepDone(today(), spared); }, { source: 'sweep' });
+  // Done outside commit(), and committed with no fn, so it is no undo step:
+  // it has its own Undo in the toast. As a step, Ctrl+Z put the tasks back
+  // and the redraw that followed swept them again at once — and the edit
+  // before the sweep could not be reached. Not a source app.js re-renders
+  // for either: navigate() is already on its way.
+  const gone = sweepDone(today(), spared);
+  commit(null, { source: 'sweep' });
   toast(`Cleared ${gone.length} finished ${gone.length === 1 ? 'task' : 'tasks'}`, {
     action: 'Undo',
     onAction: () => commit(() => {
@@ -392,7 +396,8 @@ C.onCloud(() => { try { paintSync(); } catch { /* pre-boot */ } });
 function wireQuickAdd() {
   const input = $('#quickadd-input');
   input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || !input.value.trim()) return;
+    // an Enter that ends an IME word is the keyboard's, not a save of half a word
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229 || !input.value.trim()) return;
 
     // A line that starts with a URL is a bookmark, not something to do.
     const link = parseLinkAdd(input.value);

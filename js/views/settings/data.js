@@ -1,7 +1,7 @@
 // views/settings/data.js — export, restore, erase, and the copies kept here.
 
 import { h, saveFile } from '../../util.js';
-import { state, exportJson, importJson, listBackups, readBackup } from '../../store.js';
+import { state, exportJson, importJson, haltSaves, listBackups, readBackup } from '../../store.js';
 import { toast, confirmDialog } from '../../ui.js';
 import * as C from '../../cloud.js';
 import { section } from './bits.js';
@@ -18,7 +18,9 @@ export function renderData({ navigate }) {
           'Merge keeps what is already here and adds anything new. Replace overwrites this device — and, with cloud sync on, the cloud takes this copy as the truth.', 'Merge');
         // a replaced copy has rows the sync baseline still lists; kept, the
         // next push would read every one of them as deleted here and
-        // tombstone them on every device
+        // tombstone them on every device. importJson stamps what it brings
+        // in now, so it wins over the cloud's copies, and keeps this
+        // device's own settings — its Supabase and Google keys among them
         if (!merge) C.resetLocalSyncState();
         importJson(text, { merge });
         if (!merge) C.start().catch(() => {});
@@ -46,6 +48,9 @@ export function renderData({ navigate }) {
             // the sync baseline and cursor go too, or a later sign-in reads
             // the empty copy as "everything deleted here" and says so to the cloud
             C.resetLocalSyncState();
+            // that reset saves, 120ms on: if the reload is slower, the save
+            // writes back everything just erased
+            haltSaves();
             for (const k of Object.keys(localStorage)) {
               if (k.startsWith('semesterPlanner.')) localStorage.removeItem(k);
             }

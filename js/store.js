@@ -125,9 +125,11 @@ export function backupIfNewDay(day = today()) {
 export const state = migrate(raw);
 
 let saveTimer = null;
+let savesHalted = false;   // haltSaves(): the page is on its way out
 const subs = new Set();
 
 export function save() {
+  if (savesHalted) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
@@ -1310,30 +1312,77 @@ export function exportJson() {
   return JSON.stringify({ ...state, exportedAt: new Date().toISOString(), app: 'semester-planner' }, null, 2);
 }
 
+/* A restore says "this copy is the truth". Its rows carry the clocks they
+   had when the copy was taken, so the first sync after a Replace handed every
+   changed row back to the cloud's newer copy, and a task merged back in lost
+   to the tombstone its delete had left. So every row a restore brings in is
+   stamped now — each kind by the clock rowStamp() reads. */
+const PILES = ['items', 'areas', 'cards', 'links', 'wishlist', 'sprints', 'habits'];
+/** @param {any} s  a whole state, or the part of one being taken */
+function stampRestored(s, now) {
+  for (const key of PILES) for (const r of s[key] || []) r.updatedAt = now;
+  for (const n of Object.values(s.notes || {})) if (n) n.updatedAt = now;
+  s.habitLogAt = s.habitLogAt || {};
+  for (const [d, ids] of Object.entries(s.habitLog || {})) if (ids?.length) s.habitLogAt[d] = now;
+}
+
+/**
+ * Put a saved copy back. Replace takes it whole, save what is this device's
+ * own — its DEVICE_SETTINGS (the Google and Supabase keys, the cursors), the
+ * Google mirror and the writes queued for it, the phone's steps — which a
+ * file from another day or another device has no business replacing. Merge
+ * adds what is not here. A change from outside, so undo starts over.
+ */
 export function importJson(text, { merge = false } = {}) {
   const raw = JSON.parse(text);
   const next = migrate(raw);
+  const now = new Date().toISOString();
   if (!merge) {
+    stampRestored(next, now);
+    for (const k of DEVICE_SETTINGS) {
+      if (state.settings[k] !== undefined) next.settings[k] = state.settings[k];
+      else delete next.settings[k];
+    }
+    next.events = state.events; next.outbox = state.outbox; next.health = state.health;
     Object.assign(state, next);
   } else {
     // every list by id, what is here first; a day's note field by field
-    for (const key of ['items', 'areas', 'cards', 'links', 'wishlist', 'sprints', 'habits']) {
+    for (const key of PILES) {
       const seen = new Set(state[key].map((x) => x.id));
-      state[key].push(...(next[key] || []).filter((x) => !seen.has(x.id)));
+      const adding = (next[key] || []).filter((x) => !seen.has(x.id));
+      for (const x of adding) x.updatedAt = now;
+      state[key].push(...adding);
     }
     for (const [d, list] of Object.entries(next.habitLog)) {
-      state.habitLog[d] = [...new Set([...(state.habitLog[d] || []), ...list])];
-      const at = next.habitLogAt?.[d];
-      if (at && (!state.habitLogAt[d] || at > state.habitLogAt[d])) state.habitLogAt[d] = at;
+      const had = state.habitLog[d] || [];
+      const both = [...new Set([...had, ...list])];
+      if (!both.length) continue;
+      state.habitLog[d] = both;
+      if (both.length > had.length) state.habitLogAt[d] = now;
     }
     for (const [d, theirs] of Object.entries(next.notes)) {
       if (!theirs) continue;
       const mine = state.notes[d];
-      if (!mine) { state.notes[d] = theirs; continue; }
-      for (const k of ['focus', 'text', 'tomorrow']) if (!mine[k] && theirs[k]) mine[k] = theirs[k];
-      if (!(mine.top3 || []).length && (theirs.top3 || []).length) mine.top3 = theirs.top3;
-      mine.journal = { ...(theirs.journal || {}), ...(mine.journal || {}) };
+      if (!mine) { state.notes[d] = { ...theirs, updatedAt: now }; continue; }
+      let took = false;
+      for (const k of ['focus', 'text', 'tomorrow']) if (!mine[k] && theirs[k]) { mine[k] = theirs[k]; took = true; }
+      if (!(mine.top3 || []).length && (theirs.top3 || []).length) { mine.top3 = theirs.top3; took = true; }
+      const journal = { ...(theirs.journal || {}), ...(mine.journal || {}) };
+      if (Object.keys(journal).length > Object.keys(mine.journal || {}).length) took = true;
+      mine.journal = journal;
+      // a day it added to is an edit, stamped like one
+      if (took) mine.updatedAt = now;
     }
   }
-  save();
+  // tagged `restore`: clears undo (history from before it is no history of
+  // this), redraws, and tells sync there is something to send
+  commit(null, { source: 'restore' });
+}
+
+/** Erase is about to reload: a save still waiting would write the erased
+ *  state back, so the waiting one is dropped and no other is taken. */
+export function haltSaves() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  savesHalted = true;
 }

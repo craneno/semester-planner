@@ -28,8 +28,9 @@ const TABLE = 'planner_rows';
 const BASE_KEY = (uid) => `semesterPlanner.cloudBase.${uid}`;
 const SCHEMA_KEY = (uid) => `semesterPlanner.cloudSchema.${uid}`;
 const EPOCH = '1970-01-01T00:00:00Z';
-/** Rows per page of a pull. A seam: the tests page with three. */
-export const pullSettings = { page: 500 };
+/** Rows per page of a pull, and how far behind the cursor each pull starts.
+ *  A seam: the tests page with three. */
+export const pullSettings = { page: 500, overlapMs: 30000 };
 
 export const cloud = {
   status: 'off',      // off | signed-out | connecting | ready | syncing | error | offline
@@ -297,6 +298,15 @@ function currentHashes() {
 let syncing = false;
 let pending = false;
 let authRetried = false;
+
+/* Which reset we are on. resetLocalSyncState() moves it on, and a sync
+   begun under an older one stops at its next await without writing the
+   baseline, the schema or the cursor: finished after a restore, it wrote
+   back what the reset had cleared, and the next sync read every row missing
+   from the restored copy as deleted here and tombstoned it everywhere. */
+let generation = 0;
+class Stale extends Error {}
+const alive = (gen) => { if (gen !== generation) throw new Stale('sync state was reset'); };
 const isAuthError = (e) => e?.code === 'PGRST301' || e?.status === 401
   || /jwt.*expired|expired.*jwt|invalid.*jwt|not authenticated/i.test(e?.message || '');
 
@@ -331,22 +341,26 @@ export async function sync({ full = false, manual = false } = {}) {
   if (manual) { cloud.halted = false; quietPushes = 0; }
   const edits = editsSinceSync;
   editsSinceSync = 0;
+  const gen = generation;
+  let stale = false;
   const t0 = Date.now();
   const entry = { at: new Date().toISOString(), ms: 0, up: 0, down: 0, adopted: 0, full: !!full, error: null };
   setStatus('syncing');
   try {
     const c = await client();
+    alive(gen);
     // an upgrade since the last sync counts as a full one: adopt, then send
     const upgraded = baselineSchema() !== AGREED;
     if (full || upgraded) { cfg().cursor = ''; storeBaseline(null); entry.full = true; }
 
-    const pulled = await pull(c);
+    const pulled = await pull(c, gen);
     // What came down is what the server holds: push must judge against
     // that, or every row another device sent goes straight back up — a
     // wasted write, and an echo down the channel for it.
     const base = { ...(loadBaseline() || {}) };
     for (const [k, v] of Object.entries(pulled.took)) { if (v === null) delete base[k]; else base[k] = v; }
-    const pushed = await push(c, base);
+    const pushed = await push(c, base, gen);
+    alive(gen);
     entry.down = pulled.applied; entry.up = pushed.sent; entry.adopted = pushed.adopted || 0;
 
     // The cursor is what pull saw, never what push wrote. A row another
@@ -374,9 +388,13 @@ export async function sync({ full = false, manual = false } = {}) {
       setStatus('ready');
     }
   } catch (err) {
-    // A token that expired while the app slept: refresh it and go once more.
-    // Once — a refresh that does not help is an error like any other.
-    if (isAuthError(err) && !authRetried) {
+    if (err instanceof Stale) {
+      // not an error, and not a sync worth logging: the one after the reset is
+      stale = true;
+      if (cloud.status === 'syncing') setStatus('ready');
+    } else if (isAuthError(err) && !authRetried) {
+      // A token that expired while the app slept: refresh it and go once more.
+      // Once — a refresh that does not help is an error like any other.
       authRetried = true;
       try { await (await client()).auth?.refreshSession?.(); } catch { /* the retry will say */ }
       entry.error = 'token expired — refreshed, trying again';
@@ -392,7 +410,7 @@ export async function sync({ full = false, manual = false } = {}) {
     }
   } finally {
     entry.ms = Date.now() - t0;
-    logSync(entry);
+    if (!stale) logSync(entry);
     syncing = false;
     if (pending) { pending = false; setTimeout(() => sync(), 250); }
   }
@@ -401,6 +419,23 @@ export async function sync({ full = false, manual = false } = {}) {
 /* A PostgREST filter value, quoted: an id or a timestamp holds dots, colons
    and commas, which are the filter grammar's own. */
 const quoted = (v) => '"' + String(v).replace(/[\\"]/g, '\\$&') + '"';
+
+/* Where a pull starts: the cursor, pullSettings.overlapMs earlier.
+   synced_at is when the writing transaction *began* (planner_touch), so a
+   slow commit on another device can land behind a cursor that has already
+   moved past it, and no pull would ever ask for it. Read by hand rather than
+   by Date.parse, which not every engine trusts with Postgres's six digits of
+   a second; those are dropped, which only starts it a little earlier still. */
+function pullFrom(cursor) {
+  if (!cursor) return EPOCH;
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}(?::?\d{2})?)?$/.exec(cursor);
+  if (!m) return cursor;
+  const zone = !m[3] || m[3] === 'Z' ? 'Z'
+    : m[3].length === 3 ? m[3] + ':00'
+      : m[3].length === 5 ? m[3].slice(0, 3) + ':' + m[3].slice(3) : m[3];
+  const t = Date.parse(`${m[1]}T${m[2]}${zone}`);
+  return Number.isNaN(t) ? cursor : new Date(t - pullSettings.overlapMs).toISOString();
+}
 
 /**
  * Bring down everything the server has seen since our cursor.
@@ -411,11 +446,15 @@ const quoted = (v) => '"' + String(v).replace(/[\\"]/g, '\\$&') + '"';
  * stamp alone, skip the rest of the batch: the next page asked for what came
  * after that stamp. Keyed on all three, the next page starts at the row after
  * the last one seen, and a page of identical stamps still moves on.
+ *
+ * It starts a little behind the cursor (pullFrom): what comes down twice
+ * hashes to what we hold and is dropped below, so it is never news, never
+ * taken, and never pushed back up.
  */
-async function pull(c) {
+async function pull(c, gen = generation) {
   const baseline = loadBaseline();
   let hashes;
-  const cursor = cfg().cursor || EPOCH;
+  const cursor = pullFrom(cfg().cursor);
   let last = null;   // the last row of the page before: where the next one starts
   let maxSynced = '';
   let changed = false;
@@ -434,6 +473,7 @@ async function pull(c) {
       .order('kind', { ascending: true })
       .order('id', { ascending: true })
       .limit(pullSettings.page);
+    alive(gen);
     if (error) throw error;
     if (!data || !data.length) break;
 
@@ -508,7 +548,7 @@ function winner(row, baseline, hashes) {
  * Returns the hashes it actually sent — those hashes, not the state at the end
  * of the sync, are what the next baseline must record.
  */
-async function push(c, baseline = loadBaseline()) {
+async function push(c, baseline = loadBaseline(), gen = generation) {
   const rows = snapshotRows();
   const hashes = {};
   const now = new Date().toISOString();
@@ -549,6 +589,7 @@ async function push(c, baseline = loadBaseline()) {
       .from(TABLE)
       .upsert(out.slice(i, i + 200), { onConflict: 'user_id,kind,id' })
       .select('kind,id,data,deleted,synced_at');
+    alive(gen);
     if (error) throw error;
     for (const row of data || []) {
       const k = key(row.kind, row.id);
@@ -604,9 +645,12 @@ export async function start() {
   if (!isConfigured()) { setStatus('off'); return; }
   if (!cfg().enabled) { setStatus('signed-out'); return; }
   setStatus('connecting');
+  const gen = generation;
   try {
     const c = await client();
     const { data } = await c.auth.getSession();
+    // a reset meanwhile threw this client away; the start after it stands up its own
+    if (gen !== generation) return;
     if (!data.session) { setStatus('signed-out', 'Sign in to sync.'); return; }
     await adoptSession(data.session);
     if (authSub) { try { authSub.unsubscribe(); } catch { /* ignore */ } }
@@ -615,6 +659,7 @@ export async function start() {
       else { cloud.userId = null; setStatus('signed-out'); }
     })?.data?.subscription || null;
     await sync();
+    if (gen !== generation) return;
     await subscribeLive(c);
     schedule();
   } catch (err) {
@@ -798,6 +843,7 @@ export async function googleToken(body) {
 
 /** Forget this device's sync bookkeeping without touching the data itself. */
 export function resetLocalSyncState() {
+  generation++;   // a sync in flight now writes nothing back (see `alive`)
   if (cloud.userId) { try { localStorage.removeItem(BASE_KEY(cloud.userId)); } catch { /* ignore */ } }
   mem = { uid: null, has: false, base: null, schema: null };
   cloud.halted = false; quietPushes = 0; editsSinceSync = 0;

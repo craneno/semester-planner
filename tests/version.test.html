@@ -113,6 +113,13 @@ suite('Version — the changelog and the shell', async ({ check }) => {
       if (!r.ok) gone.push(`${path} → ${r.status}`);
     }
     check('every path in the shell is really there', gone.length === 0, gone.join(', '));
+
+    // all or nothing: an install that caches what arrived and skips the rest
+    // leaves a cache short a module, and activate throws the whole old one away
+    const install = sw.slice(sw.indexOf("addEventListener('install'"), sw.indexOf("addEventListener('activate'"));
+    check('install fails whole when one shell file does', /Promise\.all\(/.test(install) && !/allSettled/.test(install),
+      'Promise.allSettled caches what came and installs anyway');
+    check('...and still fetches past the HTTP cache', /cache: 'reload'/.test(install));
   }
 
 });

@@ -355,6 +355,97 @@ suite('Safety — a row that lands comes back out the same', async ({ check }) =
   check('one moved by hand keeps its null', 'canvasArea' in i3 && i3.canvasArea === null, JSON.stringify(i3.canvasArea));
   check('one still where the import put it keeps the area', i4.canvasArea === 'c1', JSON.stringify(i4.canvasArea));
 });
+
+suite('Safety — a restore is the truth, and the device keeps its own', async ({ check }) => {
+  /* Restore from file. Its rows carried the clocks they had when the copy
+     was taken, so after the reset the cloud's newer copy won every row the
+     file was meant to put back, and a task merged back in lost to the
+     tombstone its delete had left. And Replace took the file's settings
+     whole — this device's Supabase and Google keys swapped for the file's. */
+  const OLD = '2026-01-01T00:00:00.000Z';
+  const s = await storeWith(base({
+    items: [{ id: 'here', title: 'mine', updatedAt: OLD }],
+    settings: {
+      weekStart: 0, lastAreaId: 'x',
+      gcal: { clientId: 'cid-here', calendarId: 'primary', enabled: true, pushPlans: true, syncToken: 'tok-here', window: null, lastSync: null },
+      cloud: { url: 'https://here.supabase.co', anonKey: 'anon-here', enabled: true, cursor: '', lastSync: null }
+    },
+    outbox: [{ kind: 'upsert', itemId: 'here' }]
+  }));
+  const file = JSON.stringify({
+    version: 20,
+    semester: { name: 'Fall 2026', start: '2026-09-02', end: '2026-12-12' },
+    areas: [{ id: 'ar', name: 'Statics', category: 'course', order: 0, schedule: [], updatedAt: OLD }],
+    items: [{ id: 'old', title: 'from the file', areaId: 'ar', updatedAt: OLD }],
+    cards: [{ id: 'k', text: 'a card', updatedAt: OLD }],
+    links: [{ id: 'l', url: 'https://a.example', title: 'a', updatedAt: OLD }],
+    wishlist: [{ id: 'w', title: 'boots', updatedAt: OLD }],
+    sprints: [{ id: 'p', title: 'push', start: '2026-09-07', end: '2026-09-20', updatedAt: OLD }],
+    habits: [{ id: 'h', name: 'Walk', updatedAt: OLD }],
+    habitLog: { '2026-01-01': ['h'] }, habitLogAt: { '2026-01-01': OLD },
+    notes: { '2026-01-01': { focus: 'f', text: '', tomorrow: '', top3: [], journal: {}, updatedAt: OLD } },
+    settings: {
+      weekStart: 1, lastAreaId: 'y', railHidden: true,
+      gcal: { clientId: 'cid-file', syncToken: 'tok-file', enabled: false },
+      cloud: { url: 'https://file.supabase.co', anonKey: 'anon-file', enabled: false, cursor: 'cursor-file' }
+    },
+    outbox: [{ kind: 'delete', itemId: 'gone', ids: ['e1'] }]
+  });
+
+  s.undoSettings.coalesceMs = 0;
+  s.commit(() => s.upsertItem({ id: 'here', title: 'mine, edited' }));
+  const before = new Date().toISOString();
+  s.importJson(file);
+  const rows = s.snapshotRows().filter((r) => r.kind !== 'meta');
+  const stale = rows.filter((r) => !(s.rowStamp(r.kind, r.id) >= before));
+  check('Replace: every row it brings is stamped now, of every kind', rows.length === 9 && stale.length === 0,
+    `${rows.length} rows; old clocks on ${stale.map((r) => r.kind + ':' + r.id).join() || 'none'}`);
+  check('...the file’s rows in place of these', !s.itemById('here') && s.itemById('old')?.title === 'from the file');
+  check('...a synced setting from the file', s.state.settings.weekStart === 1);
+  check('...but this device’s Supabase keys and cursor', s.state.settings.cloud.url === 'https://here.supabase.co'
+    && s.state.settings.cloud.anonKey === 'anon-here' && s.state.settings.cloud.cursor === '', JSON.stringify(s.state.settings.cloud));
+  check('...its Google keys', s.state.settings.gcal.clientId === 'cid-here' && s.state.settings.gcal.syncToken === 'tok-here');
+  check('...its other settings of its own', s.state.settings.lastAreaId === 'x' && !('railHidden' in s.state.settings),
+    JSON.stringify([s.state.settings.lastAreaId, s.state.settings.railHidden]));
+  check('...and the Google writes still waiting to go', s.state.outbox.length === 1 && s.state.outbox[0].itemId === 'here',
+    JSON.stringify(s.state.outbox));
+  check('undo starts over: nothing from before the restore to replay over it', !s.canUndo());
+
+  const m = await storeWith(base({
+    items: [{ id: 'kept', title: 'kept', updatedAt: OLD }],
+    habitLog: { '2026-01-02': ['h'] }, habitLogAt: { '2026-01-02': OLD }
+  }));
+  const at = new Date().toISOString();
+  m.importJson(JSON.stringify({
+    version: 20,
+    items: [{ id: 'kept', title: 'an older copy', updatedAt: OLD }, { id: 'back', title: 'deleted since', updatedAt: OLD }],
+    habitLog: { '2026-01-02': ['h'], '2026-01-03': ['h'] },
+    notes: { '2026-01-03': { focus: 'from the file', text: '', tomorrow: '', top3: [], journal: {}, updatedAt: OLD } }
+  }), { merge: true });
+  check('Merge: a task brought back is stamped now, so the tombstone its delete left does not win',
+    m.itemById('back')?.updatedAt >= at, String(m.itemById('back')?.updatedAt));
+  check('...one already here keeps its copy and its clock', m.itemById('kept').title === 'kept' && m.itemById('kept').updatedAt === OLD);
+  check('...a note brought in is stamped', m.state.notes['2026-01-03']?.updatedAt >= at);
+  check('...a day of ticks brought in too', m.state.habitLogAt['2026-01-03'] >= at);
+  check('...but a day it adds nothing to keeps its clock', m.state.habitLogAt['2026-01-02'] === OLD, m.state.habitLogAt['2026-01-02']);
+});
+
+suite('Safety — what is erased stays erased', async ({ check }) => {
+  /* Erase resets the sync state, which saves 120ms later; a reload slower
+     than that wrote the whole state back over the erased keys. */
+  const KEY = 'semesterPlanner.v1';
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const s = await storeWith(base({ items: [{ id: 'e1', title: 'about to go' }] }));
+  s.commit(() => s.upsertItem({ id: 'e2', title: 'a save waiting' }));
+  s.haltSaves();
+  localStorage.removeItem(KEY);
+  await wait(300);
+  check('a save that was waiting does not write the erased state back', localStorage.getItem(KEY) === null);
+  s.commit(() => s.upsertItem({ id: 'e3', title: 'later' }));
+  s.save();
+  await wait(300);
+  check('...nor does any save after it', localStorage.getItem(KEY) === null);
+});
 </script>
 </body>
 </html>

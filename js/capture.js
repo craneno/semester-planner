@@ -126,7 +126,7 @@ export function captureStrip(onChange) {
       if (e.key === 'Escape') { e.stopPropagation(); closeAreaMenu(); anchor.focus(); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); (items[at + 1] || items[0])?.focus(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); (items[at - 1] || filter).focus(); }
-      else if (e.key === 'Enter' && document.activeElement === filter) {
+      else if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && document.activeElement === filter) {
         e.preventDefault();
         items[0]?.click();
       }
@@ -156,6 +156,9 @@ export function captureStrip(onChange) {
   });
 
   box.addEventListener('keydown', (e) => {
+    // an Enter that ends an IME word (Japanese, Chinese, Korean) is the
+    // keyboard's, not ours: taken, it saved the half-typed text
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();          // Shift+Enter still makes a newline
       fileUnfiled();
